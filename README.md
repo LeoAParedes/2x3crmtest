@@ -1,70 +1,62 @@
-# 2x3crmtest - ERP Supermercado (Nueva Era)
+# 2x3crmtest
 
-Este repositorio define el sucesor de `C:\xampp2\htdocsuscores` como una implementacion nueva orientada a ERP de supermercado:
+## Requisitos
 
-- Punto de venta (POS)
-- Inventarios
-- Finanzas
-- Agente AI unificado para Web Chat y WhatsApp (Mastra)
+- Docker Desktop en ejecución
+- Un proyecto de Supabase con Auth habilitado
+- Node.js 20+ y npm (solo para migrar la base de datos y crear los usuarios iniciales)
 
-## Repositorio GitHub
+## Configuración
 
-- [https://github.com/LeoAParedes/2x3crmtest](https://github.com/LeoAParedes/2x3crmtest)
+1. Copia el archivo de ejemplo:
 
-## Objetivo de esta base
+   ```powershell
+   Copy-Item .env.example .env
+   ```
 
-Crear una especificacion integral y una base tecnica inicial para una migracion total (greenfield), manteniendo el sistema actual solo como referencia historica/funcional.
+2. Completa en `.env` los valores de Supabase:
 
-## Documentacion principal
+   ```dotenv
+   NEXT_PUBLIC_SUPABASE_URL=https://TU_PROYECTO.supabase.co
+   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu_publishable_key
+   SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key
+   DATABASE_URL=tu_connection_string_de_supabase
+   BOOTSTRAP_ADMIN_PASSWORD=tu_password_admin
+   BOOTSTRAP_CASHIER_PASSWORD=tu_password_cajero
+   ```
 
-- `docs/arquitectura/2x3crmtest-master-spec.md`
-- `docs/arquitectura/analisis-heredado-uscores.md`
-- `docs/arquitectura/devsecops-5-fases.md`
-- `docs/arquitectura/mastra-whatsapp-webchat.md`
-- `docs/manual-usuario/manual-usuario-erp-supermercado.md`
-- `docs/manual-tecnico/manual-tecnico-erp-supermercado.md`
-- `docs/video/estructura-video-avances-5-10min.md`
-- `docs/integraciones/meta-whatsapp-cloud-setup.md`
-- `docs/operaciones/release-runbook-vercel.md`
+3. En Supabase, configura `http://localhost:3000` como **Site URL** y como URL de redirección permitida.
 
-## Rutas principales implementadas
+## Preparar la base de datos
 
-- `GET /api/health`
-- `POST /api/agent/chat`
-- `GET /api/whatsapp/webhook`
-- `POST /api/whatsapp/webhook`
-- `POST /api/whatsapp/send` (interno)
-- `GET /api/crm/dashboard`
-- `GET /api/crm/approvals`
-- `POST /api/crm/approvals`
-- `GET /api/crm/mastra/settings`
-- `POST /api/crm/mastra/settings`
-- `GET /api/crm/audit`
-- `GET /api/observability/metrics`
-- UI chat web: `/crm`
-- UI dashboard ops: `/admin`
+Instala las dependencias, aplica las migraciones y crea los usuarios iniciales:
 
-## Contenedorizacion (Docker Compose)
+```powershell
+npm install
+npm run prisma:deploy
+npm run bootstrap:users
+```
 
-El proyecto usa Docker Compose y define el contenedor principal con nombre exacto:
+Ejecuta `npm run bootstrap:users` una sola vez por entorno, o de nuevo únicamente si necesitas sincronizar esas cuentas.
 
-- `container_name: 2x3crmtest`
+## Ejecutar con Docker
 
-Ver `docker-compose.yml` y `Dockerfile`.
+Construye e inicia la aplicación:
 
-## Notas de estado
+```powershell
+docker compose up --build -d
+```
 
-Esta entrega es la redefinicion arquitectonica y documental completa del sistema para iniciar implementacion en fases con enfoque DevSecOps y cumplimiento de calidad (ISO/IEC 25000, ISO/IEC 15504).
+Abre [http://localhost:3000](http://localhost:3000).
 
-## Autenticación y autorización
+Para consultar el estado del contenedor:
 
-La aplicación usa sesiones SSR de Supabase. Las rutas protegidas resuelven la
-identidad desde cookies verificadas y el rol desde `UserProfile`; no aceptan
-roles ni tokens de autorización enviados mediante headers del navegador.
+```powershell
+docker compose ps
+```
 
-- Roles disponibles: `admin` y `cashier`
-- `admin` accede a administración y POS
-- `cashier` accede al POS y a lecturas de inventario
-- Configura las variables de `.env.example` sin versionar secretos
-- Después de configurar Supabase y PostgreSQL, ejecuta `npm run bootstrap:users`
-  una sola vez para crear o sincronizar `admin` y `cajero`
+Para detenerlo:
+
+```powershell
+docker compose down
+```
