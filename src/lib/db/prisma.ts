@@ -8,9 +8,10 @@ export const getPrisma = async () => {
     return globalForPrisma.prisma
   }
 
-  const connectionString = process.env.DATABASE_URL?.trim()
+  const connectionString =
+    process.env.DATABASE_URL?.trim() || process.env.POSTGRES_PRISMA_URL?.trim() || process.env.POSTGRES_URL?.trim()
   if (!connectionString) {
-    throw new Error('DATABASE_URL is required')
+    throw new Error('DATABASE_URL is required (or POSTGRES_PRISMA_URL / POSTGRES_URL)')
   }
 
   const prisma = new PrismaClient({
