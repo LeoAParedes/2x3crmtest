@@ -307,8 +307,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
   const [loading, setLoading] = useState(false)
   const [refreshSeed, setRefreshSeed] = useState(0)
+  const [showArchivedCodes, setShowArchivedCodes] = useState(false)
+  const [isInventorySettingsOpen, setIsInventorySettingsOpen] = useState(false)
   const [activePanel, setActivePanel] = useState<'inventory' | 'logbook' | 'adjustments'>(
     shouldOpenAdjustmentsByShortcut ? 'adjustments' : shouldOpenLogbookByShortcut ? 'logbook' : 'inventory'
   )
@@ -425,7 +428,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
           sortBy,
           sortDirection,
           page: String(page),
-          pageSize: '30'
+          pageSize: '30',
+          includeArchived: String(showArchivedCodes)
         })
         const response = await fetch(`/api/pos/inventory?${params.toString()}`)
         const payload = (await response.json()) as InventoryResponse
@@ -443,6 +447,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         })
         if (cancelled) return
         setItems(payload.items)
+        setTotalItems(payload.pagination.total)
         setTotalPages(payload.pagination.totalPages)
         if (page > payload.pagination.totalPages) {
           setPage(payload.pagination.totalPages)
@@ -463,11 +468,15 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     return () => {
       cancelled = true
     }
-  }, [query, sortBy, sortDirection, page, refreshSeed])
+  }, [query, sortBy, sortDirection, page, refreshSeed, showArchivedCodes])
 
   useEffect(() => {
     setPage(1)
   }, [query, sortBy, sortDirection])
+
+  useEffect(() => {
+    setIsInventorySettingsOpen(false)
+  }, [activePanel])
 
   useEffect(() => {
     if (activePanel !== 'logbook') return
@@ -822,6 +831,16 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       return
     }
     setSelectedItemIds(adjustmentFilteredItems.map(item => item.id))
+  }
+
+  const handleInventoryHeaderSort = (field: 'sku' | 'productName') => {
+    setPage(1)
+    if (sortBy === field) {
+      setSortDirection(current => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setSortBy(field)
+    setSortDirection('asc')
   }
 
   const updateRowDraft = (itemId: string, patch: Partial<RowAdjustmentDraft>) => {
@@ -1200,21 +1219,49 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
               Ajustes
             </button>
           </div>
-          {activePanel === 'inventory' && role === 'admin' ? (
-            <button
-              type='button'
-              onClick={handleOpenImportModal}
-              aria-label='Abrir importación de productos'
-              className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700'
-            >
-              Importación de productos
-            </button>
-          ) : null}
+          <div className='flex items-center gap-2'>
+            <div className='relative'>
+              <button
+                type='button'
+                onClick={() => setIsInventorySettingsOpen(current => !current)}
+                aria-label='Abrir configuración de inventario'
+                className='inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-lg text-slate-700 hover:bg-slate-100'
+              >
+                ⚙️
+              </button>
+              {isInventorySettingsOpen ? (
+                <div className='absolute right-0 top-12 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg'>
+                  <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>Visualización</p>
+                  <label className='mt-2 flex items-center gap-2 text-sm text-slate-700'>
+                    <input
+                      type='checkbox'
+                      checked={showArchivedCodes}
+                      onChange={event => {
+                        setShowArchivedCodes(event.target.checked)
+                        setPage(1)
+                      }}
+                    />
+                    Ver códigos archivados
+                  </label>
+                </div>
+              ) : null}
+            </div>
+            {activePanel === 'inventory' && role === 'admin' ? (
+              <button
+                type='button'
+                onClick={handleOpenImportModal}
+                aria-label='Abrir importación de productos'
+                className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700'
+              >
+                Importación de productos
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {activePanel === 'inventory' ? (
           <>
-            <div className='grid gap-3 md:grid-cols-4'>
+            <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
               <input
                 value={query}
                 onChange={event => {
@@ -1222,34 +1269,37 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   setQuery(event.target.value)
                 }}
                 placeholder='Buscar SKU o producto'
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm md:col-span-2'
+                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               />
-              <select
-                value={sortBy}
-                onChange={event => setSortBy(event.target.value as 'productName' | 'sku' | 'stock' | 'unitPrice')}
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
-              >
-                <option value='productName'>Nombre</option>
-                <option value='sku'>SKU</option>
-                <option value='stock'>Stock</option>
-                <option value='unitPrice'>Precio</option>
-              </select>
-              <select
-                value={sortDirection}
-                onChange={event => setSortDirection(event.target.value as 'asc' | 'desc')}
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
-              >
-                <option value='asc'>Ascendente</option>
-                <option value='desc'>Descendente</option>
-              </select>
+              <p className='self-center text-xs text-slate-600'>
+                Total: {totalItems} | Página {page}/{totalPages}
+              </p>
             </div>
 
             <div ref={inventoryTableContainerRef} className='mt-4 overflow-x-auto rounded-xl border border-slate-200'>
               <table className='min-w-full divide-y divide-slate-200'>
                 <thead className='bg-slate-50'>
                   <tr>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>SKU</th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Producto</th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                      <button
+                        type='button'
+                        onClick={() => handleInventoryHeaderSort('sku')}
+                        className='inline-flex items-center gap-1 text-left'
+                      >
+                        SKU
+                        {sortBy === 'sku' ? (sortDirection === 'asc' ? '▲' : '▼') : null}
+                      </button>
+                    </th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                      <button
+                        type='button'
+                        onClick={() => handleInventoryHeaderSort('productName')}
+                        className='inline-flex items-center gap-1 text-left'
+                      >
+                        Producto
+                        {sortBy === 'productName' ? (sortDirection === 'asc' ? '▲' : '▼') : null}
+                      </button>
+                    </th>
                     <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Stock</th>
                     <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Precio</th>
                     <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Tipo</th>
@@ -1262,6 +1312,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                       <td className='px-3 py-2 text-sm text-slate-900'>
                         <p className='font-medium'>{item.productName}</p>
                         <p className='text-xs text-slate-500'>{item.category}</p>
+                        {item.aisle === '__archived__' ? (
+                          <p className='mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800'>
+                            Archivado
+                          </p>
+                        ) : null}
                       </td>
                       <td className='px-3 py-2 text-sm text-slate-700'>
                         {item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`}
@@ -1437,38 +1492,58 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   <option value='stock_exit'>Lote: salida</option>
                   <option value='delete_product'>Lote: eliminar</option>
                 </select>
-                <input
-                  value={bulkNewUnitPrice}
-                  onChange={event => setBulkNewUnitPrice(event.target.value)}
-                  placeholder='Precio lote'
-                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
-                />
-                <input
-                  type='datetime-local'
-                  value={bulkEffectiveFrom}
-                  onChange={event => setBulkEffectiveFrom(event.target.value)}
-                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
-                />
-                <input
-                  value={bulkQuantity}
-                  onChange={event => setBulkQuantity(event.target.value)}
-                  placeholder='Cantidad lote'
-                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
-                />
-                <input
-                  value={bulkUnitCost}
-                  onChange={event => setBulkUnitCost(event.target.value)}
-                  placeholder='Costo lote'
-                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
-                />
-                <select
-                  value={bulkValuationMethod}
-                  onChange={event => setBulkValuationMethod(event.target.value as 'fifo' | 'average')}
-                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
-                >
-                  <option value='fifo'>FIFO</option>
-                  <option value='average'>Promedio</option>
-                </select>
+                {bulkOperation === 'correct_price' || bulkOperation === 'schedule_price' ? (
+                  <input
+                    value={bulkNewUnitPrice}
+                    onChange={event => setBulkNewUnitPrice(event.target.value)}
+                    placeholder='Precio lote'
+                    className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                  />
+                ) : (
+                  <div className='h-9 rounded-lg border border-dashed border-slate-200 bg-slate-100' />
+                )}
+                {bulkOperation === 'schedule_price' ? (
+                  <input
+                    type='datetime-local'
+                    value={bulkEffectiveFrom}
+                    onChange={event => setBulkEffectiveFrom(event.target.value)}
+                    className='h-9 w-40 rounded-lg border border-slate-300 px-2 text-xs'
+                  />
+                ) : (
+                  <div className='h-9 rounded-lg border border-dashed border-slate-200 bg-slate-100' />
+                )}
+                {bulkOperation === 'stock_entry' || bulkOperation === 'stock_exit' ? (
+                  <input
+                    value={bulkQuantity}
+                    onChange={event => setBulkQuantity(event.target.value)}
+                    placeholder='Cantidad lote'
+                    className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                  />
+                ) : (
+                  <div className='h-9 rounded-lg border border-dashed border-slate-200 bg-slate-100' />
+                )}
+                {bulkOperation === 'stock_entry' ? (
+                  <input
+                    value={bulkUnitCost}
+                    onChange={event => setBulkUnitCost(event.target.value)}
+                    placeholder='Costo lote'
+                    className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                  />
+                ) : (
+                  <div className='h-9 rounded-lg border border-dashed border-slate-200 bg-slate-100' />
+                )}
+                {bulkOperation === 'stock_exit' ? (
+                  <select
+                    value={bulkValuationMethod}
+                    onChange={event => setBulkValuationMethod(event.target.value as 'fifo' | 'average')}
+                    className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                  >
+                    <option value='fifo'>FIFO</option>
+                    <option value='average'>Promedio</option>
+                  </select>
+                ) : (
+                  <div className='h-9 rounded-lg border border-dashed border-slate-200 bg-slate-100' />
+                )}
               </div>
               <div className='mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]'>
                 <input
@@ -1511,7 +1586,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 <thead className='bg-slate-50'>
                   <tr>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Sel.</th>
-                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Producto</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>SKU</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Nombre</th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Stock / Precio</th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Operación</th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Nuevo precio</th>
@@ -1539,7 +1615,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                       `h-8 rounded-md border px-2 text-xs ${
                         isMissing ? 'border-amber-500 bg-amber-50' : 'border-slate-300'
                       }`
-                    const disabledInputClass = 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
                     const fieldAlertStyle = (isMissing: boolean) =>
                       showValidationHints || isMissing ? getMissingFieldAlertStyle(isMissing) : undefined
 
@@ -1554,8 +1629,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           />
                         </td>
                         <td className='px-2 py-2 text-xs text-slate-700'>
+                          <p className='font-medium text-slate-900'>{item.sku}</p>
+                        </td>
+                        <td className='px-2 py-2 text-xs text-slate-700'>
                           <p className='font-medium text-slate-900'>{item.productName}</p>
-                          <p>{item.sku}</p>
+                          <p className='text-slate-500'>{item.category}</p>
                         </td>
                         <td className='px-2 py-2 text-xs text-slate-700'>
                           <p>{item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`}</p>
@@ -1575,65 +1653,70 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           </select>
                         </td>
                         <td className='px-2 py-2'>
-                          <input
-                            value={draft.newUnitPrice}
-                            onChange={event => updateRowDraft(item.id, { newUnitPrice: event.target.value })}
-                            disabled={!requiredFlags.requiresPrice}
-                            style={fieldAlertStyle(missingPrice)}
-                            className={`${requiredInputClass(missingPrice)} w-28 ${
-                              requiredFlags.requiresPrice ? '' : disabledInputClass
-                            }`}
-                            placeholder={requiredFlags.requiresPrice ? '0.00 *' : '0.00'}
-                          />
+                          {requiredFlags.requiresPrice ? (
+                            <input
+                              value={draft.newUnitPrice}
+                              onChange={event => updateRowDraft(item.id, { newUnitPrice: event.target.value })}
+                              style={fieldAlertStyle(missingPrice)}
+                              className={`${requiredInputClass(missingPrice)} w-28`}
+                              placeholder='0.00 *'
+                            />
+                          ) : (
+                            <span className='text-xs text-slate-400'>—</span>
+                          )}
                         </td>
                         <td className='px-2 py-2'>
-                          <input
-                            type='datetime-local'
-                            value={draft.effectiveFrom}
-                            onChange={event => updateRowDraft(item.id, { effectiveFrom: event.target.value })}
-                            disabled={!requiredFlags.requiresEffectiveFrom}
-                            style={fieldAlertStyle(missingEffectiveFrom)}
-                            className={`${requiredInputClass(missingEffectiveFrom)} ${
-                              requiredFlags.requiresEffectiveFrom ? '' : disabledInputClass
-                            }`}
-                          />
+                          {requiredFlags.requiresEffectiveFrom ? (
+                            <input
+                              type='datetime-local'
+                              value={draft.effectiveFrom}
+                              onChange={event => updateRowDraft(item.id, { effectiveFrom: event.target.value })}
+                              style={fieldAlertStyle(missingEffectiveFrom)}
+                              className={`${requiredInputClass(missingEffectiveFrom)} w-40`}
+                            />
+                          ) : (
+                            <span className='text-xs text-slate-400'>—</span>
+                          )}
                         </td>
                         <td className='px-2 py-2'>
-                          <input
-                            value={draft.quantity}
-                            onChange={event => updateRowDraft(item.id, { quantity: event.target.value })}
-                            disabled={!requiredFlags.requiresQuantity}
-                            style={fieldAlertStyle(missingQuantity)}
-                            className={`${requiredInputClass(missingQuantity)} w-20 ${
-                              requiredFlags.requiresQuantity ? '' : disabledInputClass
-                            }`}
-                            placeholder={requiredFlags.requiresQuantity ? '0 *' : '0'}
-                          />
+                          {requiredFlags.requiresQuantity ? (
+                            <input
+                              value={draft.quantity}
+                              onChange={event => updateRowDraft(item.id, { quantity: event.target.value })}
+                              style={fieldAlertStyle(missingQuantity)}
+                              className={`${requiredInputClass(missingQuantity)} w-20`}
+                              placeholder='0 *'
+                            />
+                          ) : (
+                            <span className='text-xs text-slate-400'>—</span>
+                          )}
                         </td>
                         <td className='px-2 py-2'>
-                          <input
-                            value={draft.unitCost}
-                            onChange={event => updateRowDraft(item.id, { unitCost: event.target.value })}
-                            disabled={!requiredFlags.requiresUnitCost}
-                            style={fieldAlertStyle(missingUnitCost)}
-                            className={`${requiredInputClass(missingUnitCost)} w-24 ${
-                              requiredFlags.requiresUnitCost ? '' : disabledInputClass
-                            }`}
-                            placeholder={requiredFlags.requiresUnitCost ? '0.00 *' : '0.00'}
-                          />
+                          {requiredFlags.requiresUnitCost ? (
+                            <input
+                              value={draft.unitCost}
+                              onChange={event => updateRowDraft(item.id, { unitCost: event.target.value })}
+                              style={fieldAlertStyle(missingUnitCost)}
+                              className={`${requiredInputClass(missingUnitCost)} w-24`}
+                              placeholder='0.00 *'
+                            />
+                          ) : (
+                            <span className='text-xs text-slate-400'>—</span>
+                          )}
                         </td>
                         <td className='px-2 py-2'>
-                          <select
-                            value={draft.valuationMethod}
-                            onChange={event => updateRowDraft(item.id, { valuationMethod: event.target.value as 'fifo' | 'average' })}
-                            disabled={!requiredFlags.requiresValuationMethod}
-                            className={`h-8 rounded-md border px-1 text-xs ${
-                              requiredFlags.requiresValuationMethod ? 'border-slate-300' : disabledInputClass
-                            }`}
-                          >
-                            <option value='fifo'>FIFO</option>
-                            <option value='average'>Promedio</option>
-                          </select>
+                          {requiredFlags.requiresValuationMethod ? (
+                            <select
+                              value={draft.valuationMethod}
+                              onChange={event => updateRowDraft(item.id, { valuationMethod: event.target.value as 'fifo' | 'average' })}
+                              className='h-8 rounded-md border border-slate-300 px-1 text-xs'
+                            >
+                              <option value='fifo'>FIFO</option>
+                              <option value='average'>Promedio</option>
+                            </select>
+                          ) : (
+                            <span className='text-xs text-slate-400'>—</span>
+                          )}
                         </td>
                         <td className='px-2 py-2'>
                           <input

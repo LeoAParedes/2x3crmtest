@@ -43,26 +43,23 @@ export async function GET(request: Request) {
   const query = searchParams.get('q')?.trim()
   const sortBy = (searchParams.get('sortBy') || 'productName') as keyof typeof sortFieldMap
   const sortDirection = searchParams.get('sortDirection') === 'desc' ? 'desc' : 'asc'
+  const includeArchived = searchParams.get('includeArchived') === 'true'
   const page = Math.max(1, Number(searchParams.get('page') || 1))
   const pageSize = Math.min(100, Math.max(5, Number(searchParams.get('pageSize') || 20)))
   const skip = (page - 1) * pageSize
   const orderField = sortFieldMap[sortBy] || sortFieldMap.productName
 
-  const baseWhere = { NOT: { aisle: '__archived__' } }
-  const where = query
+  const archiveWhere = includeArchived ? undefined : { NOT: { aisle: '__archived__' } }
+  const queryWhere = query
     ? {
-        AND: [
-          baseWhere,
-          {
-            OR: [
-              { sku: { contains: query, mode: 'insensitive' as const } },
-              { productName: { contains: query, mode: 'insensitive' as const } },
-              { category: { contains: query, mode: 'insensitive' as const } }
-            ]
-          }
+        OR: [
+          { sku: { contains: query, mode: 'insensitive' as const } },
+          { productName: { contains: query, mode: 'insensitive' as const } },
+          { category: { contains: query, mode: 'insensitive' as const } }
         ]
       }
-    : baseWhere
+    : undefined
+  const where = archiveWhere && queryWhere ? { AND: [archiveWhere, queryWhere] } : archiveWhere || queryWhere
 
   const prisma = await getPrisma()
   await applyDueScheduledPrices(prisma)
@@ -85,6 +82,7 @@ export async function GET(request: Request) {
     sortDirection,
     page,
     pageSize,
+    includeArchived,
     total,
     totalPages,
     returnedItems: items.length,
