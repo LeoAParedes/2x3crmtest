@@ -1,8 +1,9 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 import type { CrmRole } from '@/src/lib/security/rbac'
 
@@ -16,7 +17,7 @@ type NavItem = {
   href: string
   label: string
   section: 'pos' | 'operations' | 'inventory' | 'finance'
-  icon: string
+  iconSrc: string
   adminOnly?: boolean
 }
 
@@ -26,13 +27,13 @@ type ParsedNavHref = {
 }
 
 const navItems: NavItem[] = [
-  { href: '/pos', label: 'Punto de venta', section: 'pos', icon: '🧾' },
-  { href: '/admin', label: 'Dashboard operativo', section: 'operations', icon: '📊' },
-  { href: '/operaciones', label: 'Operaciones', section: 'operations', icon: '⚙️' },
-  { href: '/inventario', label: 'Inventarios', section: 'inventory', icon: '📦' },
-  { href: '/inventario?shortcut=ajuste', label: 'Ajuste rápido', section: 'inventory', icon: '🛠️' },
-  { href: '/inventario?shortcut=bitacora', label: 'Bitácora', section: 'inventory', icon: '🔁' },
-  { href: '/finanzas', label: 'Finanzas', section: 'finance', icon: '💳' }
+  { href: '/pos', label: 'Punto de venta', section: 'pos', iconSrc: '/icons/nav/pos.png' },
+  { href: '/admin', label: 'Dashboard operativo', section: 'operations', iconSrc: '/icons/nav/dashboard.png' },
+  { href: '/operaciones', label: 'Operaciones', section: 'operations', iconSrc: '/icons/nav/operations.png' },
+  { href: '/inventario', label: 'Inventarios', section: 'inventory', iconSrc: '/icons/nav/inventory.png' },
+  { href: '/inventario?shortcut=ajuste', label: 'Ajuste rápido', section: 'inventory', iconSrc: '/icons/nav/adjust.png' },
+  { href: '/inventario?shortcut=bitacora', label: 'Bitácora', section: 'inventory', iconSrc: '/icons/nav/bitacora.png' },
+  { href: '/finanzas', label: 'Finanzas', section: 'finance', iconSrc: '/icons/nav/finance.png' }
 ]
 
 const sectionTitle: Record<NavItem['section'], string> = {
@@ -110,6 +111,11 @@ const formatCartCount = (value: number) => {
   return Number.isInteger(value) ? String(value) : value.toFixed(2)
 }
 
+const handleNavKeyDown = (event: KeyboardEvent<HTMLAnchorElement>) => {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  if (event.key === ' ') event.preventDefault()
+}
+
 export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps) => {
   const [expanded, setExpanded] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -156,8 +162,21 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
     }
   }, [])
 
+  const handleToggleExpanded = () => {
+    setExpanded(current => !current)
+  }
+
+  const handleOpenMobileNav = () => {
+    setMobileOpenRouteKey(routeKey)
+    setMobileOpen(true)
+  }
+
+  const handleCloseMobileNav = () => {
+    setMobileOpen(false)
+  }
+
   const renderNavigation = () => (
-    <nav className='space-y-4 px-3 py-4' aria-label='Navegación principal del sistema'>
+    <nav className='flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 py-4' aria-label='Navegación principal del sistema'>
       {(Object.keys(sectionTitle) as Array<NavItem['section']>).map(section => {
         const items = visibleItems.filter(item => item.section === section)
         if (!items.length) return null
@@ -165,7 +184,9 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
         return (
           <section key={section} className='space-y-1'>
             {isSidebarExpanded ? (
-              <p className='px-2 text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-400'>{sectionTitle[section]}</p>
+              <p className='px-2 font-mono text-[11px] font-normal uppercase tracking-[1.2px] text-[#898989]'>
+                {sectionTitle[section]}
+              </p>
             ) : null}
             {items.map(item => {
               const active = item.href === activeItemHref
@@ -174,15 +195,27 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
                   key={item.href}
                   href={item.href}
                   aria-label={item.label}
-                  onClick={() => setMobileOpen(false)}
-                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
-                    active ? 'bg-emerald-400 font-semibold text-slate-950' : 'text-slate-200 hover:bg-slate-800 hover:text-white'
+                  aria-current={active ? 'page' : undefined}
+                  tabIndex={0}
+                  onClick={handleCloseMobileNav}
+                  onKeyDown={handleNavKeyDown}
+                  className={`group flex items-center gap-2.5 rounded-[6px] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40 ${
+                    active
+                      ? 'border border-[rgba(62,207,142,0.3)] bg-[rgba(62,207,142,0.12)] text-[#fafafa]'
+                      : 'border border-transparent text-[#b4b4b4] hover:border-[#363636] hover:bg-[#1c1c1c] hover:text-[#fafafa]'
                   }`}
                 >
-                  <span aria-hidden='true' className='text-base'>
-                    {item.icon}
-                  </span>
-                  {isSidebarExpanded ? <span>{item.label}</span> : null}
+                  <Image
+                    src={item.iconSrc}
+                    alt=''
+                    width={18}
+                    height={18}
+                    aria-hidden='true'
+                    className={`h-[18px] w-[18px] shrink-0 object-contain transition ${
+                      active ? 'opacity-100' : 'opacity-75'
+                    }`}
+                  />
+                  {isSidebarExpanded ? <span className='truncate'>{item.label}</span> : null}
                 </Link>
               )
             })}
@@ -193,27 +226,31 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
   )
 
   return (
-    <div className='flex min-h-screen bg-slate-950 text-slate-100'>
+    <div className='flex min-h-dvh bg-[#171717] text-[#fafafa]'>
       {isMobileDrawerOpen ? (
         <button
           type='button'
           aria-label='Cerrar menú'
-          onClick={() => setMobileOpen(false)}
+          onClick={handleCloseMobileNav}
           className='fixed inset-0 z-30 bg-black/50 lg:hidden'
         />
       ) : null}
       <aside
-        className={`fixed left-0 top-0 z-40 h-screen border-r border-slate-800 bg-slate-900 transition-[width,transform] duration-300 ease-out lg:static ${
+        className={`fixed inset-y-0 left-0 z-40 flex h-dvh flex-col border-r border-[#2e2e2e] bg-[#171717] transition-[width,transform] duration-300 ease-out lg:sticky lg:top-0 lg:z-30 ${
           isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
         } ${isSidebarExpanded ? 'w-72' : 'w-20'}`}
       >
-        <div className='flex items-center justify-between border-b border-slate-800 px-4 py-4'>
-          {isSidebarExpanded ? <p className='text-sm font-semibold tracking-wide text-emerald-300'>2x3 Operaciones</p> : null}
+        <div className='flex shrink-0 items-center justify-between border-b border-[#242424] px-4 py-4'>
+          {isSidebarExpanded ? (
+            <p className='text-sm font-medium tracking-wide text-[#3ecf8e]'>2x3 Operaciones</p>
+          ) : (
+            <span className='sr-only'>2x3 Operaciones</span>
+          )}
           <button
             type='button'
             aria-label={expanded ? 'Contraer navegación' : 'Expandir navegación'}
-            onClick={() => setExpanded(current => !current)}
-            className='rounded-lg border border-slate-700 px-2 py-1 text-xs text-slate-200 hover:bg-slate-800'
+            onClick={handleToggleExpanded}
+            className='rounded-[6px] border border-[#2e2e2e] px-2 py-1 text-xs text-[#b4b4b4] transition hover:border-[#363636] hover:bg-[#1c1c1c] hover:text-[#fafafa] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
           >
             {expanded ? '<<' : '>>'}
           </button>
@@ -221,27 +258,37 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
 
         {renderNavigation()}
 
-        <div className='border-t border-slate-800 px-3 py-4'>
+        <div className='shrink-0 border-t border-[#242424] px-3 py-4'>
           {isSidebarExpanded ? (
             <div className='space-y-3'>
-              <p className='text-xs text-slate-400'>Sesión</p>
-              <p className='text-sm font-medium text-white'>{username}</p>
+              <p className='font-mono text-[11px] uppercase tracking-[1.2px] text-[#898989]'>Sesión</p>
+              <p className='truncate text-sm font-medium text-[#fafafa]'>{username}</p>
               <form action='/auth/logout' method='post'>
                 <button
                   type='submit'
                   aria-label='Cerrar sesión'
-                  className='w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-100 hover:bg-slate-800'
+                  className='w-full rounded-[6px] border border-[#2e2e2e] px-3 py-2 text-sm font-medium text-[#fafafa] transition hover:border-[#363636] hover:bg-[#1c1c1c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
                 >
                   Salir
                 </button>
               </form>
+              <a
+                href='https://icons8.com'
+                target='_blank'
+                rel='noreferrer'
+                aria-label='Iconos por Icons8'
+                tabIndex={0}
+                className='block text-[10px] text-[#898989] transition hover:text-[#b4b4b4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
+              >
+                Icons by Icons8
+              </a>
             </div>
           ) : (
             <form action='/auth/logout' method='post'>
               <button
                 type='submit'
                 aria-label='Cerrar sesión'
-                className='w-full rounded-lg border border-slate-700 px-2 py-2 text-xs text-slate-100 hover:bg-slate-800'
+                className='w-full rounded-[6px] border border-[#2e2e2e] px-2 py-2 text-xs text-[#fafafa] transition hover:border-[#363636] hover:bg-[#1c1c1c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
               >
                 X
               </button>
@@ -250,16 +297,13 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
         </div>
       </aside>
 
-      <div className='min-h-screen flex-1 overflow-x-hidden bg-slate-100 text-slate-950 lg:pl-0'>
+      <div className='flex min-h-dvh min-w-0 flex-1 flex-col overflow-x-hidden bg-slate-100 text-slate-950'>
         <header className='sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur'>
           <div className='mx-auto flex h-14 max-w-7xl items-center justify-between px-4 md:px-8'>
             <button
               type='button'
               aria-label='Abrir navegación'
-              onClick={() => {
-                setMobileOpenRouteKey(routeKey)
-                setMobileOpen(true)
-              }}
+              onClick={handleOpenMobileNav}
               className='rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-700 lg:hidden'
             >
               Menú
@@ -273,6 +317,7 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
                 <Link
                   href='/pos?openCart=1'
                   aria-label='Abrir carrito universal'
+                  tabIndex={0}
                   className='inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300'
                 >
                   <span aria-hidden='true'>🛒</span>
