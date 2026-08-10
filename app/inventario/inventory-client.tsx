@@ -363,6 +363,12 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }
 
   const logAdjustmentDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
+    const canSendDebugLog =
+      typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    if (!canSendDebugLog) {
+      return
+    }
+
     // #region agent log
     fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
       method: 'POST',
