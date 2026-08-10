@@ -22,6 +22,7 @@ type CartItem = {
   sku: string
   productName: string
   unitPrice: number
+  supportsWeight: boolean
   unitMode: 'piece' | 'weight'
   quantityInput: string
 }
@@ -174,10 +175,13 @@ const normalizeQuantityInput = (item: CartItem) => {
 
 const sanitizeCartItem = (item: CartItem): CartItem => {
   const normalizedMode: CartItem['unitMode'] = item.unitMode === 'weight' ? 'weight' : 'piece'
+  const supportsWeight = item.supportsWeight ?? normalizedMode === 'weight'
+  const enforcedMode: CartItem['unitMode'] = supportsWeight ? 'weight' : 'piece'
   return {
     ...item,
-    unitMode: normalizedMode,
-    quantityInput: normalizeQuantityInput({ ...item, unitMode: normalizedMode })
+    supportsWeight,
+    unitMode: enforcedMode,
+    quantityInput: normalizeQuantityInput({ ...item, supportsWeight, unitMode: enforcedMode })
   }
 }
 
@@ -340,12 +344,14 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const handleAddToCart = (product: Product) => {
     setMessage(null)
     const unitMode: CartItem['unitMode'] = product.supportsWeight ? 'weight' : 'piece'
-    const existing = cart.find(item => item.inventoryItemId === product.id && item.unitMode === unitMode)
+    const existing = cart.find(item => item.inventoryItemId === product.id)
     const nextCart: CartItem[] = existing
       ? cart.map(item =>
-          item.inventoryItemId === product.id && item.unitMode === unitMode
+          item.inventoryItemId === product.id
             ? {
                 ...item,
+                supportsWeight: product.supportsWeight,
+                unitMode,
                 quantityInput:
                   unitMode === 'weight'
                     ? String((Number(item.quantityInput || '0') + 0.25).toFixed(2))
@@ -360,6 +366,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             sku: product.sku,
             productName: product.productName,
             unitPrice: product.unitPrice,
+            supportsWeight: product.supportsWeight,
             unitMode,
             quantityInput: unitMode === 'weight' ? '0.25' : '1'
           }
@@ -607,17 +614,27 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
               <div className='mt-2 grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)_auto]'>
                 <select
                   value={item.unitMode}
-                  onChange={event =>
+                  onChange={event => {
+                    const selectedMode = event.target.value as 'piece' | 'weight'
+                    const allowedMode: CartItem['unitMode'] = item.supportsWeight ? 'weight' : 'piece'
+                    const nextMode = item.supportsWeight ? allowedMode : selectedMode
                     handleUpdateCartItem(index, {
-                      unitMode: event.target.value as 'piece' | 'weight',
-                      quantityInput: event.target.value === 'weight' ? '0.25' : '1'
+                      unitMode: nextMode,
+                      quantityInput: nextMode === 'weight' ? '0.25' : '1'
                     })
-                  }
+                  }}
                   aria-label={`Modo de venta para ${item.productName}`}
-                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100'
+                  disabled={item.supportsWeight}
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500'
                 >
-                  <option value='piece'>Pieza</option>
-                  <option value='weight'>Peso (kg)</option>
+                  {item.supportsWeight ? (
+                    <option value='weight'>Peso (kg)</option>
+                  ) : (
+                    <>
+                      <option value='piece'>Pieza</option>
+                      <option value='weight'>Peso (kg)</option>
+                    </>
+                  )}
                 </select>
 
                 <div className='flex h-9 items-center overflow-hidden rounded-full border border-slate-300 bg-white'>

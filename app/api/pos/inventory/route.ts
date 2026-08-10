@@ -13,7 +13,9 @@ const sortFieldMap = {
 
 const inferWeightSupport = (category: string, aisle: string | null) => {
   const fingerprint = `${category} ${aisle || ''}`.toLowerCase()
-  return /(granel|verdura|fruta|carn|peso|kg)/.test(fingerprint)
+  return /(granel|peso|kg|fruta|verdura|vegetal|carn|res|pollo|cerdo|pesc|marisc|legumbr|ra[ií]z|tub[eé]rc)/.test(
+    fingerprint
+  )
 }
 
 const logInventoryPaginationDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
