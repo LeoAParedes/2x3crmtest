@@ -1,8 +1,10 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 
+import { calculateWeightedAveragePrice } from '@/src/lib/inventory/valuation'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 import type { CrmRole } from '@/src/lib/security/rbac'
 
@@ -163,6 +165,12 @@ type InventoryAdjustmentsResponse = {
   }>
 }
 
+type ToastItem = {
+  id: string
+  kind: 'success' | 'error' | 'info'
+  text: string
+}
+
 type RowAdjustmentOperation = 'correct_price' | 'schedule_price' | 'stock_entry' | 'stock_exit' | 'delete_product'
 
 type RowAdjustmentDraft = {
@@ -176,6 +184,15 @@ type RowAdjustmentDraft = {
 }
 
 type BulkOperation = 'correct_price' | 'schedule_price' | 'stock_entry' | 'stock_exit' | 'delete_product'
+type RowAdjustmentPayload = Extract<AdjustmentPayload, { operation: RowAdjustmentOperation }>
+
+type RowAdjustmentPreview = {
+  payload: RowAdjustmentPayload
+  itemId: string
+  itemName: string
+  operationLabel: string
+  previewLines: string[]
+}
 
 const createDefaultRowDraft = (): RowAdjustmentDraft => ({
   operation: 'correct_price',
@@ -186,6 +203,83 @@ const createDefaultRowDraft = (): RowAdjustmentDraft => ({
   unitCost: '',
   valuationMethod: 'fifo'
 })
+
+const getRowOperationLabel = (operation: RowAdjustmentOperation) => {
+  if (operation === 'correct_price') return 'Corrección de precio'
+  if (operation === 'schedule_price') return 'Programación de precio'
+  if (operation === 'stock_entry') return 'Entrada de inventario'
+  if (operation === 'stock_exit') return 'Salida de inventario'
+  return 'Eliminación de producto'
+}
+
+const getRequiredFieldFlags = (operation: RowAdjustmentOperation) => ({
+  requiresPrice: operation === 'correct_price' || operation === 'schedule_price',
+  requiresEffectiveFrom: operation === 'schedule_price',
+  requiresQuantity: operation === 'stock_entry' || operation === 'stock_exit',
+  requiresUnitCost: operation === 'stock_entry',
+  requiresValuationMethod: operation === 'stock_exit'
+})
+
+const getRequiredFieldLabels = (flags: ReturnType<typeof getRequiredFieldFlags>) => {
+  const labels = ['Motivo']
+  if (flags.requiresPrice) labels.push('Nuevo precio')
+  if (flags.requiresEffectiveFrom) labels.push('Fecha vigencia')
+  if (flags.requiresQuantity) labels.push('Cantidad')
+  if (flags.requiresUnitCost) labels.push('Costo unitario')
+  if (flags.requiresValuationMethod) labels.push('Método valoración')
+  return labels
+}
+
+const getMissingFieldAlertStyle = (isMissing: boolean): CSSProperties | undefined =>
+  isMissing
+    ? {
+        borderColor: '#f59e0b',
+        backgroundColor: '#fffbeb',
+        boxShadow: '0 0 0 2px #fbbf24'
+      }
+    : undefined
+
+const normalizeAdjustmentErrorMessage = (message: string) => {
+  const lowered = message.toLowerCase()
+  if (
+    lowered.includes('stock en cero') ||
+    lowered.includes('stock en 0') ||
+    message.includes('INVENTORY_DELETE_REQUIRES_ZERO_STOCK')
+  ) {
+    return 'No se pudo eliminar el producto. Actualiza la página e intenta nuevamente.'
+  }
+  return message
+}
+
+const getOperationHelpText = (operation: RowAdjustmentOperation) => {
+  if (operation === 'delete_product') {
+    return 'Si el producto tiene stock, se registrará salida automática y luego se eliminará del catálogo.'
+  }
+  if (operation === 'correct_price') {
+    return 'Indica el nuevo precio por unidad.'
+  }
+  if (operation === 'schedule_price') {
+    return 'Indica precio y fecha de vigencia.'
+  }
+  if (operation === 'stock_entry') {
+    return 'Indica cantidad y costo unitario de entrada.'
+  }
+  if (operation === 'stock_exit') {
+    return 'Indica cantidad a retirar y método de valoración.'
+  }
+  return ''
+}
+
+const getRowMissingFields = (draft: RowAdjustmentDraft) => {
+  const flags = getRequiredFieldFlags(draft.operation)
+  const missing: string[] = []
+  if (!draft.reason.trim()) missing.push('Motivo')
+  if (flags.requiresPrice && !draft.newUnitPrice.trim()) missing.push('Nuevo precio')
+  if (flags.requiresEffectiveFrom && !draft.effectiveFrom.trim()) missing.push('Fecha vigencia')
+  if (flags.requiresQuantity && !draft.quantity.trim()) missing.push('Cantidad')
+  if (flags.requiresUnitCost && !draft.unitCost.trim()) missing.push('Costo unitario')
+  return missing
+}
 
 export const InventoryClient = ({ role }: InventoryClientProps) => {
   const searchParams = useSearchParams()
@@ -199,7 +293,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [loading, setLoading] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
   const [refreshSeed, setRefreshSeed] = useState(0)
   const [activePanel, setActivePanel] = useState<'inventory' | 'logbook' | 'adjustments'>(
     shouldOpenAdjustmentsByShortcut ? 'adjustments' : shouldOpenLogbookByShortcut ? 'logbook' : 'inventory'
@@ -214,6 +307,10 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [loadingAdjustments, setLoadingAdjustments] = useState(false)
   const [adjustmentsSnapshot, setAdjustmentsSnapshot] = useState<InventoryAdjustmentsResponse | null>(null)
   const [adjustmentResult, setAdjustmentResult] = useState<string | null>(null)
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+  const [rowPreview, setRowPreview] = useState<RowAdjustmentPreview | null>(null)
+  const [bulkPreview, setBulkPreview] = useState<RowAdjustmentPreview[] | null>(null)
+  const [validationAttemptedRows, setValidationAttemptedRows] = useState<Record<string, boolean>>({})
   const [submittingAdjustment, setSubmittingAdjustment] = useState(false)
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
   const [rowDrafts, setRowDrafts] = useState<Record<string, RowAdjustmentDraft>>({})
@@ -255,6 +352,19 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     [hasFreshValidation, importing, validationResult]
   )
 
+  const pushToast = (text: string, kind: ToastItem['kind'] = 'info') => {
+    const toast: ToastItem = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      kind,
+      text
+    }
+    setToasts(current => [...current.slice(-2), toast])
+  }
+
+  const dismissToast = (toastId: string) => {
+    setToasts(current => current.filter(toast => toast.id !== toastId))
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -278,7 +388,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         setTotalPages(payload.pagination.totalPages)
       } catch (error) {
         if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : 'Error de carga')
+          pushToast(error instanceof Error ? error.message : 'Error de carga', 'error')
         }
       } finally {
         if (!cancelled) {
@@ -323,7 +433,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         setAvailableLogbookActions(payload.actions)
       } catch (error) {
         if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : 'Error de carga de bitácora')
+          pushToast(error instanceof Error ? error.message : 'Error de carga de bitácora', 'error')
         }
       } finally {
         if (!cancelled) {
@@ -355,7 +465,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         setAdjustmentsSnapshot(payload)
       } catch (error) {
         if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : 'Error de carga de ajustes')
+          pushToast(error instanceof Error ? error.message : 'Error de carga de ajustes', 'error')
         }
       } finally {
         if (!cancelled) {
@@ -378,10 +488,22 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const selectedItemsCount = effectiveSelectedItemIds.length
 
   const parseNumberInput = (raw: string) => {
-    const normalized = Number(raw.replace(',', '.'))
+    const trimmed = raw.trim()
+    if (!trimmed) return null
+    const normalized = Number(trimmed.replace(',', '.'))
     if (!Number.isFinite(normalized)) return null
     return normalized
   }
+
+  useEffect(() => {
+    if (!toasts.length) return
+    const timeoutId = window.setTimeout(() => {
+      setToasts(current => current.slice(1))
+    }, 3200)
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [toasts])
 
   useEffect(() => {
     if (!isImportModalOpen) return
@@ -484,7 +606,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const submitAdjustment = async (payload: AdjustmentPayload) => {
     setSubmittingAdjustment(true)
     setAdjustmentResult(null)
-    setMessage(null)
     try {
       const response = await fetch('/api/inventario/ajustes', {
         method: 'POST',
@@ -493,13 +614,33 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       })
       const result = (await response.json()) as InventoryAdjustmentsResponse
       if (!response.ok || !result.success) {
-        throw new Error(result.message || 'No fue posible aplicar el ajuste')
+        throw new Error(normalizeAdjustmentErrorMessage(result.message || 'No fue posible aplicar el ajuste'))
       }
 
       setAdjustmentResult(result.message || 'Ajuste aplicado')
+      if (result.item) {
+        setItems(current =>
+          current.map(item =>
+            item.id === result.item?.id
+              ? {
+                  ...item,
+                  productName: result.item?.productName || item.productName,
+                  category: result.item?.category || item.category,
+                  stock: result.item?.stock ?? item.stock,
+                  unitPrice: result.item?.unitPrice ?? item.unitPrice
+                }
+              : item
+          )
+        )
+      }
+      if (payload.operation === 'delete_product') {
+        setItems(current => current.filter(item => item.id !== payload.inventoryItemId))
+      }
+      pushToast(result.message || 'Ajuste aplicado correctamente', 'success')
       setRefreshSeed(current => current + 1)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Error aplicando ajuste')
+      const message = error instanceof Error ? error.message : 'Error aplicando ajuste'
+      pushToast(normalizeAdjustmentErrorMessage(message), 'error')
     } finally {
       setSubmittingAdjustment(false)
     }
@@ -509,7 +650,15 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     const stock = parseNumberInput(addProductForm.stock)
     const unitPrice = parseNumberInput(addProductForm.unitPrice)
     if (stock === null || unitPrice === null) {
-      setMessage('Stock y precio del producto nuevo deben ser numéricos')
+      pushToast('Stock y precio del producto nuevo deben ser numéricos', 'error')
+      return
+    }
+    if (unitPrice <= 0) {
+      pushToast('El precio inicial debe ser mayor a 0', 'error')
+      return
+    }
+    if (stock < 0) {
+      pushToast('El stock inicial no puede ser negativo', 'error')
       return
     }
 
@@ -548,7 +697,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }))
   }
 
-  const buildRowPayload = (itemId: string, draft: RowAdjustmentDraft): AdjustmentPayload | null => {
+  const buildRowPayload = (itemId: string, draft: RowAdjustmentDraft): RowAdjustmentPayload | null => {
     const normalizedReason = draft.reason.trim()
     if (!normalizedReason) {
       throw new Error('Debes indicar un motivo para el ajuste')
@@ -567,6 +716,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       if (parsedPrice === null) {
         throw new Error('Precio inválido para corrección')
       }
+      if (parsedPrice <= 0) {
+        throw new Error('El precio de corrección debe ser mayor a 0')
+      }
       return {
         operation: 'correct_price',
         inventoryItemId: itemId,
@@ -579,6 +731,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       const parsedPrice = parseNumberInput(draft.newUnitPrice)
       if (parsedPrice === null) {
         throw new Error('Precio inválido para programación')
+      }
+      if (parsedPrice <= 0) {
+        throw new Error('El precio programado debe ser mayor a 0')
       }
       if (!draft.effectiveFrom) {
         throw new Error('Fecha/hora requerida para precio programado')
@@ -598,6 +753,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       if (quantity === null || unitCost === null) {
         throw new Error('Cantidad/costo inválidos para entrada')
       }
+      if (quantity <= 0 || unitCost <= 0) {
+        throw new Error('Cantidad y costo de entrada deben ser mayores a 0')
+      }
       return {
         operation: 'stock_entry',
         inventoryItemId: itemId,
@@ -611,6 +769,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     if (quantity === null) {
       throw new Error('Cantidad inválida para salida')
     }
+    if (quantity <= 0) {
+      throw new Error('La cantidad de salida debe ser mayor a 0')
+    }
     return {
       operation: 'stock_exit',
       inventoryItemId: itemId,
@@ -620,15 +781,157 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }
   }
 
+  const buildRowPreview = (item: InventoryItem, payload: RowAdjustmentPayload): RowAdjustmentPreview => {
+    const currentStockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`
+    const currentPriceLabel = formatMxnCurrency(item.unitPrice)
+    const lines: string[] = [
+      `Stock actual: ${currentStockLabel}`,
+      `Precio actual: ${currentPriceLabel}`
+    ]
+
+    if (payload.operation === 'correct_price') {
+      lines.push(`Nuevo precio por unidad: ${formatMxnCurrency(payload.newUnitPrice)}`)
+    }
+
+    if (payload.operation === 'schedule_price') {
+      lines.push(`Precio programado: ${formatMxnCurrency(payload.newUnitPrice)}`)
+      lines.push(`Fecha de vigencia: ${new Date(payload.effectiveFrom).toLocaleString('es-MX')}`)
+    }
+
+    if (payload.operation === 'stock_entry') {
+      const nextStock = item.stock + payload.quantity
+      const weightedAverageFormula = `(${item.stock} x ${item.unitPrice.toFixed(2)} + ${payload.quantity} x ${payload.unitCost.toFixed(
+        2
+      )}) / ${nextStock}`
+      const nextPrice = calculateWeightedAveragePrice({
+        currentStock: item.stock,
+        currentUnitPrice: item.unitPrice,
+        incomingQuantity: payload.quantity,
+        incomingUnitCost: payload.unitCost
+      })
+      const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} und`
+      lines.push(`Entrada: +${payload.quantity} und`)
+      lines.push(`Costo de entrada: ${formatMxnCurrency(payload.unitCost)}`)
+      lines.push(`Stock proyectado: ${nextStockLabel}`)
+      lines.push(`Precio promedio proyectado: ${formatMxnCurrency(nextPrice)}`)
+      lines.push(`Fórmula aplicada: ${weightedAverageFormula}`)
+      lines.push('Regla: un costo más bajo reduce el precio promedio, uno más alto lo incrementa')
+    }
+
+    if (payload.operation === 'stock_exit') {
+      const nextStock = Math.max(0, item.stock - payload.quantity)
+      const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} und`
+      lines.push(`Salida: -${payload.quantity} und`)
+      lines.push(`Método de valoración: ${payload.valuationMethod === 'fifo' ? 'FIFO' : 'Promedio general'}`)
+      lines.push(`Stock proyectado: ${nextStockLabel}`)
+      if (payload.valuationMethod === 'fifo') {
+        lines.push('Precio proyectado: se recalcula por lotes FIFO')
+      } else {
+        lines.push(`Precio proyectado: ${currentPriceLabel}`)
+      }
+    }
+
+    if (payload.operation === 'delete_product') {
+      lines.push('Acción: eliminación del producto en catálogo')
+      if (item.stock > 0) {
+        const stockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`
+        lines.push(`Inventario actual: ${stockLabel}`)
+        lines.push(`Se registrará salida automática de ${item.stock} unidad(es)`)
+        lines.push('Después se eliminará el producto del catálogo')
+      } else {
+        lines.push('Inventario actual: 0 unidades')
+        lines.push('Se eliminará el producto del catálogo')
+      }
+    }
+
+    lines.push(`Motivo: ${payload.reason}`)
+
+    return {
+      payload,
+      itemId: item.id,
+      itemName: `${item.sku} - ${item.productName}`,
+      operationLabel: getRowOperationLabel(payload.operation),
+      previewLines: lines
+    }
+  }
+
   const handleApplyRowAdjustment = async (itemId: string) => {
     const draft = rowDrafts[itemId] || createDefaultRowDraft()
+    const missingFields = getRowMissingFields(draft)
+    if (missingFields.length) {
+      setValidationAttemptedRows(current => ({ ...current, [itemId]: true }))
+      pushToast(`Completa los campos requeridos: ${missingFields.join(', ')}`, 'error')
+      return
+    }
+
     try {
       const payload = buildRowPayload(itemId, draft)
       if (!payload) return
-      await submitAdjustment(payload)
+      const item = items.find(candidate => candidate.id === itemId)
+      if (!item) {
+        throw new Error('Producto no encontrado para previsualización')
+      }
+      setBulkPreview(null)
+      setRowPreview(buildRowPreview(item, payload))
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No fue posible aplicar ajuste de fila')
+      pushToast(error instanceof Error ? error.message : 'No fue posible aplicar ajuste de fila', 'error')
     }
+  }
+
+  const handleConfirmRowAdjustment = async () => {
+    if (!rowPreview) return
+    const payload = rowPreview.payload
+    setRowPreview(null)
+    await submitAdjustment(payload)
+  }
+
+  const buildBulkPreviews = (mode: 'same' | 'per_row') => {
+    const previews: RowAdjustmentPreview[] = []
+    for (const itemId of effectiveSelectedItemIds) {
+      const item = items.find(candidate => candidate.id === itemId)
+      if (!item) continue
+      const draft = mode === 'per_row' ? rowDrafts[itemId] || createDefaultRowDraft() : null
+      if (mode === 'per_row' && draft) {
+        const missingFields = getRowMissingFields(draft)
+        if (missingFields.length) {
+          setValidationAttemptedRows(current => ({ ...current, [itemId]: true }))
+          throw new Error(`${item.productName}: faltan ${missingFields.join(', ')}`)
+        }
+      }
+      const payload = mode === 'per_row' ? buildRowPayload(itemId, draft || createDefaultRowDraft()) : buildBulkPayloadForItem(itemId)
+      if (!payload || payload.operation === 'add_product') continue
+      previews.push(buildRowPreview(item, payload))
+    }
+    return previews
+  }
+
+  const handleOpenBulkPreview = (mode: 'same' | 'per_row') => {
+    if (!effectiveSelectedItemIds.length) {
+      pushToast('Selecciona al menos un producto para ajuste masivo', 'error')
+      return
+    }
+
+    try {
+      const previews = buildBulkPreviews(mode)
+      if (!previews.length) {
+        pushToast('No hay ajustes válidos para previsualizar', 'error')
+        return
+      }
+      setRowPreview(null)
+      setBulkPreview(previews)
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : 'No fue posible previsualizar ajuste masivo', 'error')
+    }
+  }
+
+  const handleConfirmBulkAdjustment = async () => {
+    if (!bulkPreview?.length) return
+    const payloads = bulkPreview.map(preview => preview.payload)
+    setBulkPreview(null)
+    for (const payload of payloads) {
+      await submitAdjustment(payload)
+    }
+    setAdjustmentResult(`Ajuste masivo aplicado en ${payloads.length} producto(s)`)
   }
 
   const buildBulkPayloadForItem = (itemId: string): AdjustmentPayload | null => {
@@ -650,6 +953,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       if (parsed === null) {
         throw new Error('Precio inválido para corrección en lote')
       }
+      if (parsed <= 0) {
+        throw new Error('El precio de corrección en lote debe ser mayor a 0')
+      }
       return {
         operation: 'correct_price',
         inventoryItemId: itemId,
@@ -662,6 +968,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       const parsed = parseNumberInput(bulkNewUnitPrice)
       if (parsed === null) {
         throw new Error('Precio inválido para programación en lote')
+      }
+      if (parsed <= 0) {
+        throw new Error('El precio programado en lote debe ser mayor a 0')
       }
       if (!bulkEffectiveFrom) {
         throw new Error('Fecha requerida para programación en lote')
@@ -681,6 +990,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       if (quantity === null || unitCost === null) {
         throw new Error('Cantidad/costo inválidos para entrada en lote')
       }
+      if (quantity <= 0 || unitCost <= 0) {
+        throw new Error('Cantidad y costo de entrada en lote deben ser mayores a 0')
+      }
       return {
         operation: 'stock_entry',
         inventoryItemId: itemId,
@@ -694,6 +1006,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     if (quantity === null) {
       throw new Error('Cantidad inválida para salida en lote')
     }
+    if (quantity <= 0) {
+      throw new Error('La cantidad de salida en lote debe ser mayor a 0')
+    }
     return {
       operation: 'stock_exit',
       inventoryItemId: itemId,
@@ -703,42 +1018,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }
   }
 
-  const handleApplyBulkSameValues = async () => {
-    if (!effectiveSelectedItemIds.length) {
-      setMessage('Selecciona al menos un producto para ajuste masivo')
-      return
-    }
-
-    try {
-      for (const itemId of effectiveSelectedItemIds) {
-        const payload = buildBulkPayloadForItem(itemId)
-        if (!payload) continue
-        await submitAdjustment(payload)
-      }
-      setAdjustmentResult(`Ajuste masivo aplicado en ${effectiveSelectedItemIds.length} producto(s)`)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No fue posible aplicar ajuste masivo')
-    }
-  }
-
-  const handleApplyBulkRowValues = async () => {
-    if (!effectiveSelectedItemIds.length) {
-      setMessage('Selecciona productos para aplicar ajustes por fila')
-      return
-    }
-
-    try {
-      for (const itemId of effectiveSelectedItemIds) {
-        const draft = rowDrafts[itemId] || createDefaultRowDraft()
-        const payload = buildRowPayload(itemId, draft)
-        if (!payload) continue
-        await submitAdjustment(payload)
-      }
-      setAdjustmentResult(`Ajustes por fila aplicados en ${effectiveSelectedItemIds.length} producto(s)`)
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No fue posible aplicar ajustes por fila')
-    }
-  }
+  const canRenderPortal = typeof document !== 'undefined'
 
   return (
     <main className='mx-auto max-w-7xl px-4 py-8 md:px-8'>
@@ -1044,24 +1324,27 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 </button>
                 <button
                   type='button'
-                  onClick={() => void handleApplyBulkSameValues()}
+                  onClick={() => handleOpenBulkPreview('same')}
                   disabled={!selectedItemsCount || submittingAdjustment}
                   className='h-9 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60'
                 >
-                  Aplicar mismos datos ({selectedItemsCount})
+                  Previsualizar mismos datos ({selectedItemsCount})
                 </button>
                 <button
                   type='button'
-                  onClick={() => void handleApplyBulkRowValues()}
+                  onClick={() => handleOpenBulkPreview('per_row')}
                   disabled={!selectedItemsCount || submittingAdjustment}
                   className='h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-white disabled:opacity-60'
                 >
-                  Aplicar datos por fila
+                  Previsualizar datos por fila
                 </button>
               </div>
             </div>
 
             <div className='overflow-x-auto rounded-xl border border-slate-200'>
+              <div className='border-b border-slate-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800'>
+                Campos obligatorios para la operación elegida se resaltan en ámbar (*)
+              </div>
               <table className='min-w-[1500px] divide-y divide-slate-200 bg-white'>
                 <thead className='bg-slate-50'>
                   <tr>
@@ -1082,6 +1365,22 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   {items.map(item => {
                     const draft = rowDrafts[item.id] || createDefaultRowDraft()
                     const isSelected = effectiveSelectedItemIds.includes(item.id)
+                    const requiredFlags = getRequiredFieldFlags(draft.operation)
+                    const requiredLabels = getRequiredFieldLabels(requiredFlags)
+                    const missingPrice = requiredFlags.requiresPrice && !draft.newUnitPrice.trim()
+                    const missingEffectiveFrom = requiredFlags.requiresEffectiveFrom && !draft.effectiveFrom.trim()
+                    const missingQuantity = requiredFlags.requiresQuantity && !draft.quantity.trim()
+                    const missingUnitCost = requiredFlags.requiresUnitCost && !draft.unitCost.trim()
+                    const missingReason = !draft.reason.trim()
+                    const showValidationHints = validationAttemptedRows[item.id] === true
+                    const requiredInputClass = (isMissing: boolean) =>
+                      `h-8 rounded-md border px-2 text-xs ${
+                        isMissing ? 'border-amber-500 bg-amber-50' : 'border-slate-300'
+                      }`
+                    const disabledInputClass = 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400'
+                    const fieldAlertStyle = (isMissing: boolean) =>
+                      showValidationHints || isMissing ? getMissingFieldAlertStyle(isMissing) : undefined
+
                     return (
                       <tr key={item.id} className={isSelected ? 'bg-emerald-50/60' : 'bg-white'}>
                         <td className='px-2 py-2'>
@@ -1117,8 +1416,12 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           <input
                             value={draft.newUnitPrice}
                             onChange={event => updateRowDraft(item.id, { newUnitPrice: event.target.value })}
-                            className='h-8 w-28 rounded-md border border-slate-300 px-2 text-xs'
-                            placeholder='0.00'
+                            disabled={!requiredFlags.requiresPrice}
+                            style={fieldAlertStyle(missingPrice)}
+                            className={`${requiredInputClass(missingPrice)} w-28 ${
+                              requiredFlags.requiresPrice ? '' : disabledInputClass
+                            }`}
+                            placeholder={requiredFlags.requiresPrice ? '0.00 *' : '0.00'}
                           />
                         </td>
                         <td className='px-2 py-2'>
@@ -1126,30 +1429,45 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                             type='datetime-local'
                             value={draft.effectiveFrom}
                             onChange={event => updateRowDraft(item.id, { effectiveFrom: event.target.value })}
-                            className='h-8 rounded-md border border-slate-300 px-2 text-xs'
+                            disabled={!requiredFlags.requiresEffectiveFrom}
+                            style={fieldAlertStyle(missingEffectiveFrom)}
+                            className={`${requiredInputClass(missingEffectiveFrom)} ${
+                              requiredFlags.requiresEffectiveFrom ? '' : disabledInputClass
+                            }`}
                           />
                         </td>
                         <td className='px-2 py-2'>
                           <input
                             value={draft.quantity}
                             onChange={event => updateRowDraft(item.id, { quantity: event.target.value })}
-                            className='h-8 w-20 rounded-md border border-slate-300 px-2 text-xs'
-                            placeholder='0'
+                            disabled={!requiredFlags.requiresQuantity}
+                            style={fieldAlertStyle(missingQuantity)}
+                            className={`${requiredInputClass(missingQuantity)} w-20 ${
+                              requiredFlags.requiresQuantity ? '' : disabledInputClass
+                            }`}
+                            placeholder={requiredFlags.requiresQuantity ? '0 *' : '0'}
                           />
                         </td>
                         <td className='px-2 py-2'>
                           <input
                             value={draft.unitCost}
                             onChange={event => updateRowDraft(item.id, { unitCost: event.target.value })}
-                            className='h-8 w-24 rounded-md border border-slate-300 px-2 text-xs'
-                            placeholder='0.00'
+                            disabled={!requiredFlags.requiresUnitCost}
+                            style={fieldAlertStyle(missingUnitCost)}
+                            className={`${requiredInputClass(missingUnitCost)} w-24 ${
+                              requiredFlags.requiresUnitCost ? '' : disabledInputClass
+                            }`}
+                            placeholder={requiredFlags.requiresUnitCost ? '0.00 *' : '0.00'}
                           />
                         </td>
                         <td className='px-2 py-2'>
                           <select
                             value={draft.valuationMethod}
                             onChange={event => updateRowDraft(item.id, { valuationMethod: event.target.value as 'fifo' | 'average' })}
-                            className='h-8 rounded-md border border-slate-300 px-1 text-xs'
+                            disabled={!requiredFlags.requiresValuationMethod}
+                            className={`h-8 rounded-md border px-1 text-xs ${
+                              requiredFlags.requiresValuationMethod ? 'border-slate-300' : disabledInputClass
+                            }`}
                           >
                             <option value='fifo'>FIFO</option>
                             <option value='average'>Promedio</option>
@@ -1159,18 +1477,25 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           <input
                             value={draft.reason}
                             onChange={event => updateRowDraft(item.id, { reason: event.target.value })}
-                            className='h-8 w-48 rounded-md border border-slate-300 px-2 text-xs'
+                            style={fieldAlertStyle(missingReason)}
+                            className={`${requiredInputClass(missingReason)} w-48`}
                           />
                         </td>
                         <td className='px-2 py-2'>
-                          <button
-                            type='button'
-                            onClick={() => void handleApplyRowAdjustment(item.id)}
-                            disabled={submittingAdjustment}
-                            className='h-8 rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60'
-                          >
-                            Aplicar fila
-                          </button>
+                          <div className='space-y-1'>
+                            <p className='text-[11px] text-slate-600'>Requeridos: {requiredLabels.join(', ')}</p>
+                            {getOperationHelpText(draft.operation) ? (
+                              <p className='text-[11px] text-slate-500'>{getOperationHelpText(draft.operation)}</p>
+                            ) : null}
+                            <button
+                              type='button'
+                              onClick={() => void handleApplyRowAdjustment(item.id)}
+                              disabled={submittingAdjustment}
+                              className='h-8 rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60'
+                            >
+                              Previsualizar y confirmar
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )
@@ -1213,16 +1538,171 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         )}
       </section>
 
-      {message ? (
-        <p aria-live='polite' className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
-          {message}
-        </p>
-      ) : null}
-
       {adjustmentResult ? (
         <p aria-live='polite' className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700'>
           {adjustmentResult}
         </p>
+      ) : null}
+
+      {canRenderPortal && rowPreview
+        ? createPortal(
+            <div
+              className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4'
+              onMouseDown={event => {
+                if (event.target === event.currentTarget) {
+                  setRowPreview(null)
+                }
+              }}
+            >
+              <section
+                role='dialog'
+                aria-modal='true'
+                aria-label='Previsualización de ajuste'
+                className='w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl'
+              >
+                <div className='flex items-start justify-between gap-3 border-b border-slate-200 pb-3'>
+                  <div>
+                    <h2 className='text-lg font-semibold text-slate-900'>Confirmar ajuste de inventario</h2>
+                    <p className='mt-1 text-sm text-slate-600'>{rowPreview.itemName}</p>
+                  </div>
+                  <button
+                    type='button'
+                    onClick={() => setRowPreview(null)}
+                    className='rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                <div className='mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700'>
+                  <p className='font-semibold text-slate-900'>Operación: {rowPreview.operationLabel}</p>
+                  <p className='mt-1 text-xs text-slate-600'>
+                    Revisa los cambios antes de confirmar. Esta acción actualizará inventario y bitácora.
+                  </p>
+                  <ul className='mt-2 list-disc space-y-1 pl-5'>
+                    {rowPreview.previewLines.map(line => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className='mt-4 flex items-center justify-end gap-2'>
+                  <button
+                    type='button'
+                    onClick={() => setRowPreview(null)}
+                    className='rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => void handleConfirmRowAdjustment()}
+                    disabled={submittingAdjustment}
+                    className='rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60'
+                  >
+                    Confirmar cambios
+                  </button>
+                </div>
+              </section>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {canRenderPortal && bulkPreview?.length
+        ? createPortal(
+            <div
+              className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4'
+              onMouseDown={event => {
+                if (event.target === event.currentTarget) {
+                  setBulkPreview(null)
+                }
+              }}
+            >
+              <section
+                role='dialog'
+                aria-modal='true'
+                aria-label='Previsualización de ajuste masivo'
+                className='flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl'
+              >
+                <div className='flex items-start justify-between gap-3 border-b border-slate-200 pb-3'>
+                  <div>
+                    <h2 className='text-lg font-semibold text-slate-900'>Confirmar ajuste masivo</h2>
+                    <p className='mt-1 text-sm text-slate-600'>{bulkPreview.length} producto(s) seleccionado(s)</p>
+                  </div>
+                  <button
+                    type='button'
+                    onClick={() => setBulkPreview(null)}
+                    className='rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                <div className='mt-4 space-y-3 overflow-y-auto pr-1'>
+                  {bulkPreview.map(preview => (
+                    <article key={preview.itemId} className='rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700'>
+                      <p className='font-semibold text-slate-900'>{preview.itemName}</p>
+                      <p className='text-xs text-slate-600'>{preview.operationLabel}</p>
+                      <ul className='mt-2 list-disc space-y-1 pl-5 text-xs'>
+                        {preview.previewLines.map(line => (
+                          <li key={`${preview.itemId}-${line}`}>{line}</li>
+                        ))}
+                      </ul>
+                    </article>
+                  ))}
+                </div>
+
+                <div className='mt-4 flex items-center justify-end gap-2 border-t border-slate-200 pt-3'>
+                  <button
+                    type='button'
+                    onClick={() => setBulkPreview(null)}
+                    className='rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => void handleConfirmBulkAdjustment()}
+                    disabled={submittingAdjustment}
+                    className='rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60'
+                  >
+                    Confirmar cambios masivos
+                  </button>
+                </div>
+              </section>
+            </div>,
+            document.body
+          )
+        : null}
+
+      {toasts.length ? (
+        <aside className='fixed right-4 top-4 z-[120] flex w-[min(360px,92vw)] flex-col gap-2'>
+          {toasts.map(toast => (
+            <article
+              key={toast.id}
+              className={`rounded-lg border px-3 py-2 text-sm shadow-lg ${
+                toast.kind === 'success'
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : toast.kind === 'error'
+                    ? 'border-rose-300 bg-rose-50 text-rose-800'
+                    : 'border-slate-300 bg-white text-slate-800'
+              }`}
+            >
+              <div className='flex items-start justify-between gap-3'>
+                <p>{toast.text}</p>
+                <button
+                  type='button'
+                  onClick={() => dismissToast(toast.id)}
+                  aria-label='Cerrar notificación'
+                  className='rounded px-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                >
+                  x
+                </button>
+              </div>
+            </article>
+          ))}
+        </aside>
       ) : null}
 
       {isImportModalOpen ? (

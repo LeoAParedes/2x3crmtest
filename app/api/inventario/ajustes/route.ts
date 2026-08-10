@@ -12,7 +12,7 @@ const addProductSchema = z.object({
   productName: z.string().min(1).max(160),
   category: z.string().min(1).max(80),
   stock: z.number().int().min(0).max(1_000_000),
-  unitPrice: z.number().nonnegative().max(10_000_000),
+  unitPrice: z.number().positive().max(10_000_000),
   aisle: z.string().max(120).nullable().optional()
 })
 
@@ -25,14 +25,14 @@ const deleteProductSchema = z.object({
 const correctPriceSchema = z.object({
   operation: z.literal('correct_price'),
   inventoryItemId: z.string().cuid(),
-  newUnitPrice: z.number().nonnegative().max(10_000_000),
+  newUnitPrice: z.number().positive().max(10_000_000),
   reason: z.string().min(3).max(240)
 })
 
 const schedulePriceSchema = z.object({
   operation: z.literal('schedule_price'),
   inventoryItemId: z.string().cuid(),
-  newUnitPrice: z.number().nonnegative().max(10_000_000),
+  newUnitPrice: z.number().positive().max(10_000_000),
   effectiveFrom: z.string().datetime({ offset: true }),
   reason: z.string().min(3).max(240)
 })
@@ -200,12 +200,51 @@ export async function POST(request: Request) {
     }
 
     if (payload.operation === 'delete_product') {
-      await prisma.$transaction(async transaction => {
+      const deletedStock = await prisma.$transaction(async transaction => {
         const item = await transaction.inventoryItem.findUnique({
           where: { id: payload.inventoryItemId }
         })
         if (!item) throw new Error('INVENTORY_ITEM_NOT_FOUND')
-        if (item.stock > 0) throw new Error('INVENTORY_DELETE_REQUIRES_ZERO_STOCK')
+
+        if (item.stock > 0) {
+          const unitCost = Number(item.unitPrice)
+          const totalCost = Number((unitCost * item.stock).toFixed(2))
+
+          await transaction.inventoryMovement.create({
+            data: {
+              inventoryItemId: payload.inventoryItemId,
+              movementType: 'exit',
+              quantity: -item.stock,
+              reason: JSON.stringify({
+                reason: `Salida automática previa a eliminación: ${payload.reason}`,
+                valuationMethod: 'average',
+                unitCost,
+                totalCost,
+                source: 'delete_product'
+              })
+            }
+          })
+
+          await transaction.systemActionLog.create({
+            data: {
+              actorAuthUserId: access.context.actor.userId,
+              actorUsername: access.context.actor.username,
+              actorRole: access.context.actor.role,
+              action: 'inventory.movement.exit',
+              entityType: 'InventoryItem',
+              entityId: payload.inventoryItemId,
+              status: 'success',
+              metadata: {
+                quantity: item.stock,
+                valuationMethod: 'average',
+                unitCost,
+                totalCost,
+                reason: `Salida automática previa a eliminación: ${payload.reason}`,
+                automatic: true
+              }
+            }
+          })
+        }
 
         await transaction.inventoryItem.delete({
           where: { id: payload.inventoryItemId }
@@ -220,12 +259,23 @@ export async function POST(request: Request) {
             entityType: 'InventoryItem',
             entityId: payload.inventoryItemId,
             status: 'success',
-            metadata: { reason: payload.reason }
+            metadata: {
+              reason: payload.reason,
+              clearedStock: item.stock
+            }
           }
         })
+
+        return item.stock
       })
 
-      return jsonOk({ success: true, message: 'Producto eliminado correctamente' })
+      return jsonOk({
+        success: true,
+        message:
+          deletedStock > 0
+            ? `Producto eliminado. Se registró salida automática de ${deletedStock} unidad(es) antes de eliminarlo.`
+            : 'Producto eliminado del catálogo correctamente.'
+      })
     }
 
     if (payload.operation === 'correct_price') {
@@ -466,9 +516,7 @@ export async function POST(request: Request) {
     const message =
       error instanceof Error && error.message === 'INVENTORY_ITEM_NOT_FOUND'
         ? 'Producto no encontrado'
-        : error instanceof Error && error.message === 'INVENTORY_DELETE_REQUIRES_ZERO_STOCK'
-          ? 'Solo se puede eliminar un producto con stock en cero'
-          : error instanceof Error && error.message === 'INSUFFICIENT_STOCK'
+        : error instanceof Error && error.message === 'INSUFFICIENT_STOCK'
             ? 'Stock insuficiente para la salida'
             : error instanceof Error && error.message === 'FIFO_STOCK_UNAVAILABLE'
               ? 'No hay lotes FIFO suficientes para cubrir la salida'
