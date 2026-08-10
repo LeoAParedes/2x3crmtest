@@ -6,7 +6,8 @@ export const createSaleSchema = z
       .array(
         z.object({
           inventoryItemId: z.string().cuid(),
-          quantity: z.number().int().positive().max(999)
+          quantity: z.number().int().positive().max(999_000),
+          unitMode: z.enum(['piece', 'weight']).default('piece')
         })
       )
       .min(1)

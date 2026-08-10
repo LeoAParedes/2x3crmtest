@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 
 import type { CrmRole } from '@/src/lib/security/rbac'
 
@@ -71,6 +71,45 @@ const getActiveNavItemHref = (items: NavItem[], pathname: string, currentSearchP
   return activeItem?.href ?? null
 }
 
+const POS_DRAFT_COOKIE = 'pos_draft'
+
+const readCartCountFromDraftCookie = () => {
+  if (typeof document === 'undefined') return 0
+  const rawCookie = document.cookie
+    .split('; ')
+    .find(item => item.startsWith(`${POS_DRAFT_COOKIE}=`))
+    ?.split('=')
+    .slice(1)
+    .join('=')
+
+  if (!rawCookie) return 0
+
+  try {
+    const decoded = decodeURIComponent(rawCookie)
+    const parsed = JSON.parse(decoded) as {
+      cart?: Array<{ quantityInput?: string; unitMode?: 'piece' | 'weight' }>
+    }
+    const cart = parsed.cart ?? []
+    return Number(
+      cart
+        .reduce((sum, item) => {
+          const rawValue = String(item.quantityInput ?? '0').replace(',', '.')
+          const numericValue = Number(rawValue)
+          if (!Number.isFinite(numericValue) || numericValue <= 0) return sum
+          return sum + numericValue
+        }, 0)
+        .toFixed(2)
+    )
+  } catch {
+    return 0
+  }
+}
+
+const formatCartCount = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
+
 export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps) => {
   const [expanded, setExpanded] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -89,8 +128,33 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
   )
   const currentModule = visibleItems.find(item => item.href === activeItemHref)?.label || 'Sistema'
   const canAccessPos = role === 'admin' || role === 'cashier'
+  const [universalCartCount, setUniversalCartCount] = useState(0)
   const isMobileDrawerOpen = mobileOpen && mobileOpenRouteKey === routeKey
   const isSidebarExpanded = isMobileDrawerOpen || expanded
+
+  useEffect(() => {
+    const syncFromCookie = () => {
+      setUniversalCartCount(readCartCountFromDraftCookie())
+    }
+
+    syncFromCookie()
+    const handleCartUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ totalQuantity?: number }>).detail
+      const nextCount = typeof detail?.totalQuantity === 'number' ? detail.totalQuantity : readCartCountFromDraftCookie()
+      setUniversalCartCount(nextCount)
+    }
+
+    const handleWindowFocus = () => {
+      syncFromCookie()
+    }
+
+    window.addEventListener('pos-cart-updated', handleCartUpdated as EventListener)
+    window.addEventListener('focus', handleWindowFocus)
+    return () => {
+      window.removeEventListener('pos-cart-updated', handleCartUpdated as EventListener)
+      window.removeEventListener('focus', handleWindowFocus)
+    }
+  }, [])
 
   const renderNavigation = () => (
     <nav className='space-y-4 px-3 py-4' aria-label='Navegación principal del sistema'>
@@ -213,6 +277,9 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
                 >
                   <span aria-hidden='true'>🛒</span>
                   <span className='hidden sm:inline'>Carrito</span>
+                  <span className='rounded-full bg-emerald-600 px-1.5 py-0.5 text-[10px] text-white'>
+                    {formatCartCount(universalCartCount)}
+                  </span>
                 </Link>
               ) : null}
               <p className='hidden text-sm text-slate-600 md:block'>Usuario: {username}</p>

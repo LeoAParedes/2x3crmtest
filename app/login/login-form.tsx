@@ -15,7 +15,7 @@ const SubmitButton = () => {
       type='submit'
       disabled={pending}
       aria-label='Iniciar sesión'
-      className='h-11 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400'
+      className='h-11 rounded-xl bg-emerald-400 px-4 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-600 disabled:text-slate-300'
     >
       {pending ? 'Validando...' : 'Iniciar sesión'}
     </button>
@@ -27,7 +27,7 @@ export const LoginForm = () => {
 
   return (
     <form action={formAction} className='grid gap-4'>
-      <label className='grid gap-1.5 text-sm font-medium text-slate-700'>
+      <label className='grid gap-1.5 text-sm font-medium text-slate-200'>
         Usuario
         <input
           name='username'
@@ -35,10 +35,10 @@ export const LoginForm = () => {
           required
           autoComplete='username'
           maxLength={20}
-          className='h-11 rounded-lg border border-slate-300 px-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
+          className='h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-slate-100 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-900'
         />
       </label>
-      <label className='grid gap-1.5 text-sm font-medium text-slate-700'>
+      <label className='grid gap-1.5 text-sm font-medium text-slate-200'>
         Contraseña
         <input
           name='password'
@@ -47,10 +47,10 @@ export const LoginForm = () => {
           autoComplete='current-password'
           minLength={8}
           maxLength={128}
-          className='h-11 rounded-lg border border-slate-300 px-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100'
+          className='h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-slate-100 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-900'
         />
       </label>
-      <div aria-live='polite' className='min-h-5 text-sm text-red-700'>
+      <div aria-live='polite' className='min-h-5 text-sm text-rose-300'>
         {state.error}
       </div>
       <SubmitButton />

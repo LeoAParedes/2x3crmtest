@@ -5,7 +5,7 @@ import { calculateSaleTotals, createSaleSchema } from '@/src/lib/pos/sale-schema
 describe('createSaleSchema', () => {
   it('rejects client-controlled cashier identity', () => {
     const result = createSaleSchema.safeParse({
-      items: [{ inventoryItemId: 'cm12345678901234567890123', quantity: 1 }],
+      items: [{ inventoryItemId: 'cm12345678901234567890123', quantity: 1, unitMode: 'piece' }],
       paymentMethod: 'cash',
       amountReceived: 20,
       cashierAuthUserId: 'forged-admin'

@@ -5,11 +5,17 @@ import { calculateSaleTotals, createSaleSchema, type CreateSaleInput } from '@/s
 import { getPrisma } from '@/src/lib/db/prisma'
 
 export const normalizeSaleItems = (items: CreateSaleInput['items']) => {
-  const quantities = new Map<string, number>()
+  const quantities = new Map<string, { inventoryItemId: string; quantity: number; unitMode: 'piece' | 'weight' }>()
   for (const item of items) {
-    quantities.set(item.inventoryItemId, (quantities.get(item.inventoryItemId) || 0) + item.quantity)
+    const key = `${item.inventoryItemId}:${item.unitMode}`
+    const current = quantities.get(key)
+    if (!current) {
+      quantities.set(key, { inventoryItemId: item.inventoryItemId, quantity: item.quantity, unitMode: item.unitMode })
+      continue
+    }
+    quantities.set(key, { ...current, quantity: current.quantity + item.quantity })
   }
-  return Array.from(quantities, ([inventoryItemId, quantity]) => ({ inventoryItemId, quantity }))
+  return Array.from(quantities.values())
 }
 
 export const validateCashPayment = (
@@ -20,6 +26,12 @@ export const validateCashPayment = (
   if (paymentMethod === 'cash' && (amountReceived === undefined || amountReceived < total)) {
     throw new Error('INSUFFICIENT_PAYMENT')
   }
+}
+
+const calculateChangeDue = (paymentMethod: CreateSaleInput['paymentMethod'], total: number, amountReceived?: number) => {
+  if (paymentMethod !== 'cash') return 0
+  const normalizedAmountReceived = Number((amountReceived || 0).toFixed(2))
+  return Number((normalizedAmountReceived - total).toFixed(2))
 }
 
 export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) => {
@@ -43,7 +55,11 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         sku: product.sku,
         productName: product.productName,
         unitPrice: Number(product.unitPrice),
-        lineTotal: Number((Number(product.unitPrice) * item.quantity).toFixed(2))
+        lineTotal: Number(
+          (
+            Number(product.unitPrice) * (item.unitMode === 'weight' ? Number((item.quantity / 1000).toFixed(3)) : item.quantity)
+          ).toFixed(2)
+        )
       }
     })
     const totals = calculateSaleTotals(lines)
@@ -63,6 +79,10 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
     }
 
     const saleNumber = `SALE-${Date.now()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+    const normalizedAmountReceived =
+      input.paymentMethod === 'cash' && input.amountReceived !== undefined ? Number(input.amountReceived.toFixed(2)) : null
+    const changeDue = calculateChangeDue(input.paymentMethod, totals.total, input.amountReceived)
+
     const sale = await transaction.sale.create({
       data: {
         saleNumber,
@@ -73,7 +93,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         tax: totals.tax,
         total: totals.total,
         paymentMethod: input.paymentMethod,
-        amountReceived: input.amountReceived,
+        amountReceived: normalizedAmountReceived,
         items: {
           create: lines.map(line => ({
             inventoryItemId: line.inventoryItemId,
@@ -121,13 +141,16 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
       tax: Number(sale.tax),
       total: Number(sale.total),
       paymentMethod: sale.paymentMethod,
+      amountReceived: sale.amountReceived === null ? null : Number(sale.amountReceived),
+      changeDue,
       createdAt: sale.createdAt.toISOString(),
-      items: sale.items.map(item => ({
-        sku: item.sku,
-        productName: item.productName,
-        quantity: item.quantity,
-        unitPrice: Number(item.unitPrice),
-        lineTotal: Number(item.lineTotal)
+      items: lines.map(line => ({
+        sku: line.sku,
+        productName: line.productName,
+        quantity: line.quantity,
+        unitMode: line.unitMode,
+        unitPrice: line.unitPrice,
+        lineTotal: line.lineTotal
       }))
     }
   })

@@ -49,10 +49,6 @@ export async function GET(request: Request) {
     return rate.response
   }
 
-  // #region agent log
-  void fetch('http://host.docker.internal:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'initial',hypothesisId:'B-C',location:'app/api/crm/mastra/settings/route.ts:52',message:'Mastra settings request started',data:{role:access.context.role},timestamp:Date.now()})}).catch(()=>{})
-  // #endregion
-
   try {
     const payload = mastraSettingsResponseSchema.safeParse({
       success: true,
@@ -72,11 +68,9 @@ export async function GET(request: Request) {
 
     return jsonOk(payload.data)
   } catch (error) {
-    // #region agent log
-    void fetch('http://host.docker.internal:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'initial',hypothesisId:'B-C',location:'app/api/crm/mastra/settings/route.ts:74',message:'Mastra settings request failed',data:{errorName:error instanceof Error?error.name:'unknown',prismaCode:typeof error==='object'&&error!==null&&'code' in error?String(error.code):undefined},timestamp:Date.now()})}).catch(()=>{})
-    // #endregion
     return jsonError('Unable to load Mastra settings', 500, {
       code: 'MASTRA_SETTINGS_STORAGE_UNAVAILABLE',
+      details: error instanceof Error ? error.message : 'unknown error',
       requestId: access.context.requestId
     })
   }

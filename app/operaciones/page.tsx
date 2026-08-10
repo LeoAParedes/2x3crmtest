@@ -1,16 +1,18 @@
 import { redirect } from 'next/navigation'
 
+import { OperationsClient } from '@/app/operaciones/operations-client'
 import { WorkspaceShell } from '@/app/components/workspace-shell'
-import { PosClient } from '@/app/pos/pos-client'
 import { getAuthenticatedActor } from '@/src/lib/security/api-auth'
 
-export default async function PosPage() {
+export default async function OperacionesPage() {
   const actor = await getAuthenticatedActor({ allowedRoles: ['admin', 'cashier'] })
-  if (!actor) redirect('/login')
+  if (!actor) {
+    redirect('/login')
+  }
 
   return (
     <WorkspaceShell username={actor.username} role={actor.role}>
-      <PosClient cashierUsername={actor.username} />
+      <OperationsClient role={actor.role} />
     </WorkspaceShell>
   )
 }

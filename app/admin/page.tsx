@@ -71,15 +71,17 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
-    // #region agent log
-    void fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'initial',hypothesisId:'E',location:'app/admin/page.tsx:74',message:'Admin viewport measured',data:{innerWidth:window.innerWidth,innerHeight:window.innerHeight,devicePixelRatio:window.devicePixelRatio,visualViewportScale:window.visualViewport?.scale},timestamp:Date.now()})}).catch(()=>{})
-    // #endregion
-    const timeoutId = window.setTimeout(() => {
-      void handleLoad()
-    }, 0)
+    let cancelled = false
+
+    const load = async () => {
+      if (cancelled) return
+      await handleLoad()
+    }
+
+    void load()
 
     return () => {
-      window.clearTimeout(timeoutId)
+      cancelled = true
     }
   }, [handleLoad])
 

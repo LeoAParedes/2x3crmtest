@@ -61,10 +61,6 @@ export async function GET(request: Request) {
     return rate.response
   }
 
-  // #region agent log
-  void fetch('http://host.docker.internal:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'initial',hypothesisId:'A-D',location:'app/api/crm/dashboard/route.ts:64',message:'Dashboard persistence request started',data:{role:access.context.role},timestamp:Date.now()})}).catch(()=>{})
-  // #endregion
-
   try {
     const prisma = await getPrisma()
     const [metrics, conversations, handoffs, returns, paymentPromises, approvals] = await Promise.all([
@@ -98,11 +94,9 @@ export async function GET(request: Request) {
 
     return jsonOk(payload.data)
   } catch (error) {
-    // #region agent log
-    void fetch('http://host.docker.internal:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'initial',hypothesisId:'A-D',location:'app/api/crm/dashboard/route.ts:95',message:'Dashboard persistence request failed',data:{errorName:error instanceof Error?error.name:'unknown',prismaCode:typeof error==='object'&&error!==null&&'code' in error?String(error.code):undefined},timestamp:Date.now()})}).catch(()=>{})
-    // #endregion
     return jsonError('Unable to load dashboard data', 500, {
       code: 'DASHBOARD_STORAGE_UNAVAILABLE',
+      details: error instanceof Error ? error.message : 'unknown error',
       requestId: access.context.requestId
     })
   }

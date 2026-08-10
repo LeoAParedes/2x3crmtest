@@ -131,6 +131,11 @@ const formatQuantityInputValue = (value: number, unitMode: CartItem['unitMode'])
   return String(Math.round(value))
 }
 
+const formatCartBadgeCount = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  return Number.isInteger(value) ? String(value) : value.toFixed(2)
+}
+
 const safeJsonParse = <T,>(value: string): T | null => {
   try {
     return JSON.parse(value) as T
@@ -155,6 +160,29 @@ const writeDraftCookie = (draft: PosDraft) => {
   document.cookie = `${POS_DRAFT_COOKIE}=${encodeURIComponent(JSON.stringify(draft))}; path=/; max-age=604800; samesite=lax`
 }
 
+const normalizeQuantityInput = (item: CartItem) => {
+  if (item.unitMode === 'weight') {
+    const value = Number(item.quantityInput.replace(',', '.'))
+    if (!Number.isFinite(value) || value <= 0) return '0.25'
+    return value.toFixed(2)
+  }
+
+  const value = Number(item.quantityInput)
+  if (!Number.isFinite(value) || value <= 0) return '1'
+  return String(Math.round(value))
+}
+
+const sanitizeCartItem = (item: CartItem): CartItem => {
+  const normalizedMode: CartItem['unitMode'] = item.unitMode === 'weight' ? 'weight' : 'piece'
+  return {
+    ...item,
+    unitMode: normalizedMode,
+    quantityInput: normalizeQuantityInput({ ...item, unitMode: normalizedMode })
+  }
+}
+
+const sanitizeCartItems = (items: CartItem[]) => items.map(sanitizeCartItem)
+
 export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const router = useRouter()
   const pathname = usePathname()
@@ -171,6 +199,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [submittingSale, setSubmittingSale] = useState(false)
   const [ticket, setTicket] = useState<SaleResponse['sale'] | null>(null)
+  const [isTicketModalOpen, setIsTicketModalOpen] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [draftLoaded, setDraftLoaded] = useState(false)
@@ -267,7 +296,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     const loadDraft = async () => {
       const cookieDraft = readDraftCookie()
       if (cookieDraft && !cancelled) {
-        setCart(cookieDraft.cart)
+        setCart(sanitizeCartItems(cookieDraft.cart))
         setPaymentMethod(cookieDraft.paymentMethod)
         setAmountReceived(cookieDraft.amountReceived !== null ? String(cookieDraft.amountReceived) : '')
       }
@@ -276,7 +305,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         const response = await fetch('/api/pos/draft')
         const data = (await response.json()) as { success?: boolean; draft?: PosDraft | null }
         if (response.ok && data.success && data.draft && !cancelled) {
-          setCart(data.draft.cart)
+          setCart(sanitizeCartItems(data.draft.cart))
           setPaymentMethod(data.draft.paymentMethod)
           setAmountReceived(data.draft.amountReceived !== null ? String(data.draft.amountReceived) : '')
         }
@@ -402,6 +431,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         throw new Error(data.message || 'No fue posible registrar la venta')
       }
       setTicket(data.sale)
+      setIsTicketModalOpen(true)
       setCart([])
       setAmountReceived('')
       await persistDraft({
@@ -417,10 +447,95 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     }
   }
 
+  const handlePrintTicket = () => {
+    if (!ticketText) return
+
+    const popup = window.open('', '_blank', 'noopener,noreferrer,width=420,height=900')
+    if (!popup) {
+      setMessage('No fue posible abrir la ventana de impresión. Habilita popups para continuar.')
+      return
+    }
+
+    const escapedTicket = ticketText
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+
+    popup.document.write(`<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ticket de venta</title>
+    <style>
+      @page {
+        size: 80mm auto;
+        margin: 0;
+      }
+
+      html, body {
+        width: 80mm;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+      }
+
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 11px;
+        line-height: 1.35;
+        color: #111827;
+      }
+
+      .ticket {
+        box-sizing: border-box;
+        width: 80mm;
+        padding: 2mm;
+        margin: 0;
+        white-space: pre-wrap;
+        page-break-inside: avoid;
+      }
+    </style>
+  </head>
+  <body>
+    <pre class="ticket">${escapedTicket}</pre>
+    <script>
+      window.onload = () => {
+        window.focus()
+        window.print()
+        window.close()
+      }
+    </script>
+  </body>
+</html>`)
+    popup.document.close()
+  }
+
   const canCheckout =
     cart.length > 0 &&
     !hasInvalidQuantities &&
     (paymentMethod === 'card' || (parsedAmountReceived !== null && parsedAmountReceived >= total))
+  const cartTotalQuantity = useMemo(
+    () =>
+      Number(
+        cart
+          .reduce((sum, item) => {
+            const quantity = quantityToDisplay(item)
+            return sum + (Number.isFinite(quantity) ? quantity : 0)
+          }, 0)
+          .toFixed(2)
+      ),
+    [cart]
+  )
+
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent('pos-cart-updated', {
+        detail: {
+          totalQuantity: cartTotalQuantity
+        }
+      })
+    )
+  }, [cartTotalQuantity])
 
   const cartDrawerId = 'pos-cart-drawer'
   const shouldOpenCartFromUrl = searchParams.get('openCart') === '1'
@@ -464,6 +579,19 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     }
   }, [isCartPanelVisible, shouldOpenCartFromUrl, pathname, router, searchParams])
 
+  useEffect(() => {
+    if (!isTicketModalOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsTicketModalOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isTicketModalOpen])
+
   const cartPanelContent = (
     <>
       <div className='space-y-3'>
@@ -503,12 +631,13 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                     -
                   </button>
                   <div className='flex h-full min-w-0 flex-1 items-center border-x border-slate-300'>
-                    <span aria-hidden='true' className='pl-2 pr-1 text-xs font-medium text-slate-500'>
-                      x
-                    </span>
                     <input
                       value={item.quantityInput}
                       onChange={event => handleUpdateCartItem(index, { quantityInput: event.target.value })}
+                      onBlur={() => {
+                        const safeQuantity = normalizeQuantityInput(item)
+                        handleUpdateCartItem(index, { quantityInput: safeQuantity })
+                      }}
                       onKeyDown={event => {
                         if (event.key === 'ArrowUp') {
                           event.preventDefault()
@@ -520,9 +649,10 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                         }
                       }}
                       inputMode={item.unitMode === 'weight' ? 'decimal' : 'numeric'}
+                      pattern={item.unitMode === 'weight' ? '^[0-9]*[\\.,]?[0-9]*$' : '^[0-9]*$'}
                       placeholder={item.unitMode === 'weight' ? '0.75' : '1'}
                       aria-label={`Cantidad de ${item.productName}`}
-                      className='h-full w-full bg-transparent px-2 text-center text-xs outline-none'
+                      className='h-full w-full bg-transparent px-2 text-center text-xs font-medium outline-none'
                     />
                   </div>
                   <button
@@ -632,7 +762,9 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
               🛒
             </span>
             <span>Carrito</span>
-            <span className='rounded-full bg-emerald-600 px-2 py-0.5 text-xs text-white'>{cart.length}</span>
+            <span className='rounded-full bg-emerald-600 px-2 py-0.5 text-xs text-white'>
+              {formatCartBadgeCount(cartTotalQuantity)}
+            </span>
           </button>
         </div>
       </section>
@@ -770,59 +902,67 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       </section>
 
       {ticket ? (
-        <section className='mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
-          <div className='no-print flex items-center justify-between gap-3'>
+        <section className='mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm no-print'>
+          <div className='flex flex-wrap items-center justify-between gap-3'>
             <div>
-              <h2 className='text-lg font-semibold text-slate-900'>Ticket emitido</h2>
+              <h2 className='text-lg font-semibold text-slate-900'>Último ticket generado</h2>
               <p className='mt-1 text-sm text-slate-600'>
                 Nro: {ticket.saleNumber} | Total: {formatMxnCurrency(ticket.total)}
               </p>
             </div>
             <button
               type='button'
-              onClick={() => window.print()}
+              onClick={() => setIsTicketModalOpen(true)}
               className='rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50'
             >
-              Imprimir ticket
+              Ver ticket
             </button>
           </div>
-
-          <pre className='pos-ticket-print mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-xs leading-5 text-slate-900'>
-            {ticketText}
-          </pre>
         </section>
       ) : null}
 
-      <style jsx global>{`
-        @media print {
-          body * {
-            visibility: hidden;
-          }
-          .pos-ticket-print,
-          .pos-ticket-print * {
-            visibility: visible;
-          }
-          .pos-ticket-print {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 80mm;
-            max-width: 80mm;
-            border: none;
-            background: white;
-            padding: 0;
-            margin: 0;
-            font-size: 11px;
-            line-height: 1.35;
-          }
-          .no-print {
-            display: none !important;
-          }
-          @page {
-            margin: 4mm;
-          }
-        }
-      `}</style>
+      {ticket && isTicketModalOpen ? (
+        <>
+          <div
+            className='fixed inset-0 z-[70] bg-slate-950/70 no-print'
+            aria-hidden='true'
+            onClick={() => setIsTicketModalOpen(false)}
+          />
+          <section
+            role='dialog'
+            aria-modal='true'
+            aria-label='Ticket de venta para impresión'
+            className='fixed left-1/2 top-1/2 z-[80] w-[min(720px,94vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl'
+          >
+            <div className='no-print mb-4 flex items-center justify-between gap-3'>
+              <div>
+                <h2 className='text-lg font-semibold text-slate-900'>Recibo de venta</h2>
+                <p className='text-sm text-slate-600'>Vista previa lista para impresión o guardado en PDF.</p>
+              </div>
+              <div className='flex items-center gap-2'>
+                <button
+                  type='button'
+                  onClick={handlePrintTicket}
+                  className='rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700'
+                >
+                  Mostrar impresión
+                </button>
+                <button
+                  type='button'
+                  onClick={() => setIsTicketModalOpen(false)}
+                  className='rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50'
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+
+            <pre className='pos-ticket-print mx-auto w-[80mm] max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-xs leading-5 text-slate-900'>
+              {ticketText}
+            </pre>
+          </section>
+        </>
+      ) : null}
     </main>
   )
 }
