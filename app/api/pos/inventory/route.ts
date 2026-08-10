@@ -16,7 +16,26 @@ const inferWeightSupport = (category: string, aisle: string | null) => {
   return /(granel|verdura|fruta|carn|peso|kg)/.test(fingerprint)
 }
 
+const logInventoryPaginationDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+    body: JSON.stringify({
+      sessionId: '449600',
+      runId,
+      hypothesisId,
+      location: 'app/api/pos/inventory/route.ts',
+      message,
+      data,
+      timestamp: Date.now()
+    })
+  }).catch(() => {})
+  // #endregion
+}
+
 export async function GET(request: Request) {
+  const runId = `pos-inventory-${Date.now()}`
   const access = await requireApiAccess(request, { requiredPermission: 'inventory:view' })
   if (!access.ok) return access.response
 
@@ -50,6 +69,33 @@ export async function GET(request: Request) {
       take: pageSize
     })
   ])
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const requestedPageExceedsRange = page > totalPages
+  // #region agent log
+  console.info('[H3] inventory pagination response', {
+    runId,
+    query,
+    sortBy,
+    sortDirection,
+    page,
+    pageSize,
+    total,
+    totalPages,
+    returnedItems: items.length,
+    requestedPageExceedsRange
+  })
+  // #endregion
+  logInventoryPaginationDebug(runId, 'H3', 'inventory pagination response', {
+    query: query || null,
+    sortBy,
+    sortDirection,
+    page,
+    pageSize,
+    total,
+    totalPages,
+    returnedItems: items.length,
+    requestedPageExceedsRange
+  })
 
   return jsonOk({
     success: true,
@@ -57,7 +103,7 @@ export async function GET(request: Request) {
       page,
       pageSize,
       total,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
+      totalPages
     },
     items: items.map(item => ({
       id: item.id,
