@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url'
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
+  // standalone is required for Docker self-hosted builds; Vercel manages its own output format
+  output: process.env.VERCEL ? undefined : 'standalone',
   poweredByHeader: false,
   reactStrictMode: true,
   turbopack: {
