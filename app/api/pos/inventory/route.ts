@@ -1,5 +1,6 @@
 import { jsonOk } from '@/src/lib/http/json-response'
 import { getPrisma } from '@/src/lib/db/prisma'
+import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
 const sortFieldMap = {
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
     : undefined
 
   const prisma = await getPrisma()
+  await applyDueScheduledPrices(prisma)
   const [total, items] = await Promise.all([
     prisma.inventoryItem.count({ where }),
     prisma.inventoryItem.findMany({

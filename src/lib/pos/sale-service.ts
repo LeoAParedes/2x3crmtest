@@ -3,6 +3,7 @@ import crypto from 'node:crypto'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 import { calculateSaleTotals, createSaleSchema, type CreateSaleInput } from '@/src/lib/pos/sale-schema'
 import { getPrisma } from '@/src/lib/db/prisma'
+import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 
 export const normalizeSaleItems = (items: CreateSaleInput['items']) => {
   const quantities = new Map<string, { inventoryItemId: string; quantity: number; unitMode: 'piece' | 'weight' }>()
@@ -38,6 +39,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
   const input = createSaleSchema.parse(rawInput)
   const items = normalizeSaleItems(input.items)
   const prisma = await getPrisma()
+  await applyDueScheduledPrices(prisma)
 
   return prisma.$transaction(async transaction => {
     const inventory = await transaction.inventoryItem.findMany({

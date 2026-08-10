@@ -212,7 +212,8 @@ export async function POST(request: Request) {
         metadata: {
           created,
           updated,
-          failed: errors.length
+          failed: errors.length,
+          errors: errors.slice(0, 20)
         }
       }
     })

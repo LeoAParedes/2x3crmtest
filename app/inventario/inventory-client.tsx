@@ -58,15 +58,13 @@ type InventoryClientProps = {
   role: CrmRole
 }
 
-type MovementCategory = 'sales' | 'inventory'
+type LogbookCategory = 'sales' | 'inventory' | 'pos' | 'crm' | 'system'
 
-type MovementOperationType = 'sale.create' | 'inventory.import.csv'
-
-type MovementItem = {
+type LogbookItem = {
   id: string
-  category: MovementCategory
-  operationType: MovementOperationType
-  operationLabel: string
+  category: LogbookCategory
+  action: string
+  actionLabel: string
   status: string
   actorUsername: string
   actorRole: string
@@ -74,25 +72,126 @@ type MovementItem = {
   details: string
 }
 
-type MovementsResponse = {
+type LogbookResponse = {
   success: boolean
   filters: {
     limit: number
-    operationType: MovementOperationType | 'all'
-    category: MovementCategory | 'all'
+    action?: string
+    status: 'all' | 'success' | 'failed' | 'pending'
+    category: LogbookCategory | 'all'
+    actor?: string
   }
-  operationTypes: MovementOperationType[]
-  grouped: {
-    sales: MovementItem[]
-    inventory: MovementItem[]
-  }
-  items: MovementItem[]
+  actions: string[]
+  categories: LogbookCategory[]
+  items: LogbookItem[]
 }
+
+type AdjustmentPayload =
+  | {
+      operation: 'add_product'
+      sku: string
+      productName: string
+      category: string
+      stock: number
+      unitPrice: number
+      aisle: string | null
+    }
+  | {
+      operation: 'delete_product'
+      inventoryItemId: string
+      reason: string
+    }
+  | {
+      operation: 'correct_price'
+      inventoryItemId: string
+      newUnitPrice: number
+      reason: string
+    }
+  | {
+      operation: 'schedule_price'
+      inventoryItemId: string
+      newUnitPrice: number
+      effectiveFrom: string
+      reason: string
+    }
+  | {
+      operation: 'stock_entry'
+      inventoryItemId: string
+      quantity: number
+      unitCost: number
+      reason: string
+    }
+  | {
+      operation: 'stock_exit'
+      inventoryItemId: string
+      quantity: number
+      valuationMethod: 'fifo' | 'average'
+      reason: string
+    }
+
+type InventoryAdjustmentsResponse = {
+  success: boolean
+  message?: string
+  item?: {
+    id: string
+    sku: string
+    productName: string
+    category?: string
+    stock: number
+    unitPrice: number
+  }
+  valuation?: {
+    unitCost: number
+    totalCost: number
+  }
+  schedules?: Array<{
+    id: string
+    inventoryItemId: string
+    status: string
+    metadata: unknown
+    createdAt: string
+  }>
+  movements?: Array<{
+    id: string
+    inventoryItemId: string
+    sku: string
+    productName: string
+    movementType: string
+    quantity: number
+    reason: string | null
+    createdAt: string
+  }>
+}
+
+type RowAdjustmentOperation = 'correct_price' | 'schedule_price' | 'stock_entry' | 'stock_exit' | 'delete_product'
+
+type RowAdjustmentDraft = {
+  operation: RowAdjustmentOperation
+  reason: string
+  newUnitPrice: string
+  effectiveFrom: string
+  quantity: string
+  unitCost: string
+  valuationMethod: 'fifo' | 'average'
+}
+
+type BulkOperation = 'correct_price' | 'schedule_price' | 'stock_entry' | 'stock_exit' | 'delete_product'
+
+const createDefaultRowDraft = (): RowAdjustmentDraft => ({
+  operation: 'correct_price',
+  reason: 'Ajuste manual de inventario',
+  newUnitPrice: '',
+  effectiveFrom: '',
+  quantity: '',
+  unitCost: '',
+  valuationMethod: 'fifo'
+})
 
 export const InventoryClient = ({ role }: InventoryClientProps) => {
   const searchParams = useSearchParams()
   const shortcut = searchParams.get('shortcut')
-  const shouldOpenMovementsByShortcut = shortcut === 'movimientos'
+  const shouldOpenLogbookByShortcut = shortcut === 'movimientos' || shortcut === 'bitacora'
+  const shouldOpenAdjustmentsByShortcut = shortcut === 'ajuste'
   const [items, setItems] = useState<InventoryItem[]>([])
   const [query, setQuery] = useState('')
   const [sortBy, setSortBy] = useState<'productName' | 'sku' | 'stock' | 'unitPrice'>('productName')
@@ -102,12 +201,37 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [refreshSeed, setRefreshSeed] = useState(0)
-  const [activePanel, setActivePanel] = useState<'inventory' | 'movements'>(shouldOpenMovementsByShortcut ? 'movements' : 'inventory')
-  const [movements, setMovements] = useState<MovementsResponse['grouped'] | null>(null)
-  const [movementOperationTypeFilter, setMovementOperationTypeFilter] = useState<MovementOperationType | 'all'>('all')
-  const [movementCategoryFilter, setMovementCategoryFilter] = useState<MovementCategory | 'all'>('all')
-  const [availableMovementOperationTypes, setAvailableMovementOperationTypes] = useState<MovementOperationType[]>([])
-  const [loadingMovements, setLoadingMovements] = useState(false)
+  const [activePanel, setActivePanel] = useState<'inventory' | 'logbook' | 'adjustments'>(
+    shouldOpenAdjustmentsByShortcut ? 'adjustments' : shouldOpenLogbookByShortcut ? 'logbook' : 'inventory'
+  )
+  const [logbookItems, setLogbookItems] = useState<LogbookItem[]>([])
+  const [logbookActionFilter, setLogbookActionFilter] = useState<string>('all')
+  const [logbookStatusFilter, setLogbookStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all')
+  const [logbookCategoryFilter, setLogbookCategoryFilter] = useState<LogbookCategory | 'all'>('all')
+  const [logbookActorFilter, setLogbookActorFilter] = useState('')
+  const [availableLogbookActions, setAvailableLogbookActions] = useState<string[]>([])
+  const [loadingLogbook, setLoadingLogbook] = useState(false)
+  const [loadingAdjustments, setLoadingAdjustments] = useState(false)
+  const [adjustmentsSnapshot, setAdjustmentsSnapshot] = useState<InventoryAdjustmentsResponse | null>(null)
+  const [adjustmentResult, setAdjustmentResult] = useState<string | null>(null)
+  const [submittingAdjustment, setSubmittingAdjustment] = useState(false)
+  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
+  const [rowDrafts, setRowDrafts] = useState<Record<string, RowAdjustmentDraft>>({})
+  const [bulkOperation, setBulkOperation] = useState<BulkOperation>('correct_price')
+  const [bulkReason, setBulkReason] = useState('Ajuste masivo de inventario')
+  const [bulkNewUnitPrice, setBulkNewUnitPrice] = useState('')
+  const [bulkEffectiveFrom, setBulkEffectiveFrom] = useState('')
+  const [bulkQuantity, setBulkQuantity] = useState('')
+  const [bulkUnitCost, setBulkUnitCost] = useState('')
+  const [bulkValuationMethod, setBulkValuationMethod] = useState<'fifo' | 'average'>('fifo')
+  const [addProductForm, setAddProductForm] = useState({
+    sku: '',
+    productName: '',
+    category: '',
+    stock: '0',
+    unitPrice: '0',
+    aisle: ''
+  })
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [importCsv, setImportCsv] = useState('')
@@ -171,65 +295,92 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }, [query, sortBy, sortDirection, page, refreshSeed])
 
   useEffect(() => {
-    if (activePanel !== 'movements') return
+    if (activePanel !== 'logbook') return
 
     let cancelled = false
-    const loadMovements = async () => {
-      setLoadingMovements(true)
+    const loadLogbook = async () => {
+      setLoadingLogbook(true)
       try {
         const params = new URLSearchParams({
-          operationType: movementOperationTypeFilter,
-          category: movementCategoryFilter,
-          limit: '120'
+          category: logbookCategoryFilter,
+          status: logbookStatusFilter,
+          limit: '180'
         })
-        const response = await fetch(`/api/inventario/movimientos?${params.toString()}`)
-        const payload = (await response.json()) as MovementsResponse
+        if (logbookActionFilter !== 'all') {
+          params.set('action', logbookActionFilter)
+        }
+        if (logbookActorFilter.trim().length > 0) {
+          params.set('actor', logbookActorFilter.trim())
+        }
+
+        const response = await fetch(`/api/inventario/bitacora?${params.toString()}`)
+        const payload = (await response.json()) as LogbookResponse
         if (!response.ok || !payload.success) {
-          throw new Error('No fue posible cargar movimientos')
+          throw new Error('No fue posible cargar la bitácora')
         }
         if (cancelled) return
-        setMovements(payload.grouped)
-        setAvailableMovementOperationTypes(payload.operationTypes)
+        setLogbookItems(payload.items)
+        setAvailableLogbookActions(payload.actions)
       } catch (error) {
         if (!cancelled) {
-          setMessage(error instanceof Error ? error.message : 'Error de carga de movimientos')
+          setMessage(error instanceof Error ? error.message : 'Error de carga de bitácora')
         }
       } finally {
         if (!cancelled) {
-          setLoadingMovements(false)
+          setLoadingLogbook(false)
         }
       }
     }
 
-    void loadMovements()
+    void loadLogbook()
 
     return () => {
       cancelled = true
     }
-  }, [activePanel, movementOperationTypeFilter, movementCategoryFilter, refreshSeed])
+  }, [activePanel, logbookActionFilter, logbookCategoryFilter, logbookStatusFilter, logbookActorFilter, refreshSeed])
 
-  const movementSections = useMemo(() => {
-    const grouped = movements || { sales: [], inventory: [] }
-    return [
-      {
-        key: 'sales',
-        title: 'Ventas',
-        description: 'Operaciones de cobro y emisión de ticket',
-        items: grouped.sales
-      },
-      {
-        key: 'inventory',
-        title: 'Manejo de inventario',
-        description: 'Operaciones administrativas de inventario',
-        items: grouped.inventory
+  useEffect(() => {
+    if (activePanel !== 'adjustments') return
+
+    let cancelled = false
+    const loadAdjustments = async () => {
+      setLoadingAdjustments(true)
+      try {
+        const response = await fetch('/api/inventario/ajustes')
+        const payload = (await response.json()) as InventoryAdjustmentsResponse
+        if (!response.ok || !payload.success) {
+          throw new Error('No fue posible cargar estado de ajustes')
+        }
+        if (cancelled) return
+        setAdjustmentsSnapshot(payload)
+      } catch (error) {
+        if (!cancelled) {
+          setMessage(error instanceof Error ? error.message : 'Error de carga de ajustes')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingAdjustments(false)
+        }
       }
-    ] as const
-  }, [movements])
+    }
 
-  const formatOperationType = (operationType: MovementOperationType) => {
-    if (operationType === 'sale.create') return 'Venta registrada'
-    if (operationType === 'inventory.import.csv') return 'Importación de inventario'
-    return operationType
+    void loadAdjustments()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activePanel, refreshSeed])
+
+  const effectiveSelectedItemIds = useMemo(
+    () => selectedItemIds.filter(id => items.some(item => item.id === id)),
+    [selectedItemIds, items]
+  )
+  const selectedItemsCount = effectiveSelectedItemIds.length
+
+  const parseNumberInput = (raw: string) => {
+    const normalized = Number(raw.replace(',', '.'))
+    if (!Number.isFinite(normalized)) return null
+    return normalized
   }
 
   useEffect(() => {
@@ -330,6 +481,265 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }
   }
 
+  const submitAdjustment = async (payload: AdjustmentPayload) => {
+    setSubmittingAdjustment(true)
+    setAdjustmentResult(null)
+    setMessage(null)
+    try {
+      const response = await fetch('/api/inventario/ajustes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const result = (await response.json()) as InventoryAdjustmentsResponse
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'No fue posible aplicar el ajuste')
+      }
+
+      setAdjustmentResult(result.message || 'Ajuste aplicado')
+      setRefreshSeed(current => current + 1)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Error aplicando ajuste')
+    } finally {
+      setSubmittingAdjustment(false)
+    }
+  }
+
+  const handleAddProduct = async () => {
+    const stock = parseNumberInput(addProductForm.stock)
+    const unitPrice = parseNumberInput(addProductForm.unitPrice)
+    if (stock === null || unitPrice === null) {
+      setMessage('Stock y precio del producto nuevo deben ser numéricos')
+      return
+    }
+
+    await submitAdjustment({
+      operation: 'add_product',
+      sku: addProductForm.sku.trim(),
+      productName: addProductForm.productName.trim(),
+      category: addProductForm.category.trim(),
+      stock: Math.max(0, Math.round(stock)),
+      unitPrice: Number(unitPrice.toFixed(2)),
+      aisle: addProductForm.aisle.trim() ? addProductForm.aisle.trim() : null
+    })
+  }
+
+  const handleToggleItemSelection = (itemId: string) => {
+    setSelectedItemIds(current =>
+      current.includes(itemId) ? current.filter(id => id !== itemId) : [...current, itemId]
+    )
+  }
+
+  const handleToggleAllSelections = () => {
+    if (effectiveSelectedItemIds.length === items.length) {
+      setSelectedItemIds([])
+      return
+    }
+    setSelectedItemIds(items.map(item => item.id))
+  }
+
+  const updateRowDraft = (itemId: string, patch: Partial<RowAdjustmentDraft>) => {
+    setRowDrafts(current => ({
+      ...current,
+      [itemId]: {
+        ...(current[itemId] || createDefaultRowDraft()),
+        ...patch
+      }
+    }))
+  }
+
+  const buildRowPayload = (itemId: string, draft: RowAdjustmentDraft): AdjustmentPayload | null => {
+    const normalizedReason = draft.reason.trim()
+    if (!normalizedReason) {
+      throw new Error('Debes indicar un motivo para el ajuste')
+    }
+
+    if (draft.operation === 'delete_product') {
+      return {
+        operation: 'delete_product',
+        inventoryItemId: itemId,
+        reason: normalizedReason
+      }
+    }
+
+    if (draft.operation === 'correct_price') {
+      const parsedPrice = parseNumberInput(draft.newUnitPrice)
+      if (parsedPrice === null) {
+        throw new Error('Precio inválido para corrección')
+      }
+      return {
+        operation: 'correct_price',
+        inventoryItemId: itemId,
+        newUnitPrice: Number(parsedPrice.toFixed(2)),
+        reason: normalizedReason
+      }
+    }
+
+    if (draft.operation === 'schedule_price') {
+      const parsedPrice = parseNumberInput(draft.newUnitPrice)
+      if (parsedPrice === null) {
+        throw new Error('Precio inválido para programación')
+      }
+      if (!draft.effectiveFrom) {
+        throw new Error('Fecha/hora requerida para precio programado')
+      }
+      return {
+        operation: 'schedule_price',
+        inventoryItemId: itemId,
+        newUnitPrice: Number(parsedPrice.toFixed(2)),
+        effectiveFrom: new Date(draft.effectiveFrom).toISOString(),
+        reason: normalizedReason
+      }
+    }
+
+    if (draft.operation === 'stock_entry') {
+      const quantity = parseNumberInput(draft.quantity)
+      const unitCost = parseNumberInput(draft.unitCost)
+      if (quantity === null || unitCost === null) {
+        throw new Error('Cantidad/costo inválidos para entrada')
+      }
+      return {
+        operation: 'stock_entry',
+        inventoryItemId: itemId,
+        quantity: Math.max(1, Math.round(quantity)),
+        unitCost: Number(unitCost.toFixed(2)),
+        reason: normalizedReason
+      }
+    }
+
+    const quantity = parseNumberInput(draft.quantity)
+    if (quantity === null) {
+      throw new Error('Cantidad inválida para salida')
+    }
+    return {
+      operation: 'stock_exit',
+      inventoryItemId: itemId,
+      quantity: Math.max(1, Math.round(quantity)),
+      valuationMethod: draft.valuationMethod,
+      reason: normalizedReason
+    }
+  }
+
+  const handleApplyRowAdjustment = async (itemId: string) => {
+    const draft = rowDrafts[itemId] || createDefaultRowDraft()
+    try {
+      const payload = buildRowPayload(itemId, draft)
+      if (!payload) return
+      await submitAdjustment(payload)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No fue posible aplicar ajuste de fila')
+    }
+  }
+
+  const buildBulkPayloadForItem = (itemId: string): AdjustmentPayload | null => {
+    const normalizedReason = bulkReason.trim()
+    if (!normalizedReason) {
+      throw new Error('Define un motivo para el ajuste en lote')
+    }
+
+    if (bulkOperation === 'delete_product') {
+      return {
+        operation: 'delete_product',
+        inventoryItemId: itemId,
+        reason: normalizedReason
+      }
+    }
+
+    if (bulkOperation === 'correct_price') {
+      const parsed = parseNumberInput(bulkNewUnitPrice)
+      if (parsed === null) {
+        throw new Error('Precio inválido para corrección en lote')
+      }
+      return {
+        operation: 'correct_price',
+        inventoryItemId: itemId,
+        newUnitPrice: Number(parsed.toFixed(2)),
+        reason: normalizedReason
+      }
+    }
+
+    if (bulkOperation === 'schedule_price') {
+      const parsed = parseNumberInput(bulkNewUnitPrice)
+      if (parsed === null) {
+        throw new Error('Precio inválido para programación en lote')
+      }
+      if (!bulkEffectiveFrom) {
+        throw new Error('Fecha requerida para programación en lote')
+      }
+      return {
+        operation: 'schedule_price',
+        inventoryItemId: itemId,
+        newUnitPrice: Number(parsed.toFixed(2)),
+        effectiveFrom: new Date(bulkEffectiveFrom).toISOString(),
+        reason: normalizedReason
+      }
+    }
+
+    if (bulkOperation === 'stock_entry') {
+      const quantity = parseNumberInput(bulkQuantity)
+      const unitCost = parseNumberInput(bulkUnitCost)
+      if (quantity === null || unitCost === null) {
+        throw new Error('Cantidad/costo inválidos para entrada en lote')
+      }
+      return {
+        operation: 'stock_entry',
+        inventoryItemId: itemId,
+        quantity: Math.max(1, Math.round(quantity)),
+        unitCost: Number(unitCost.toFixed(2)),
+        reason: normalizedReason
+      }
+    }
+
+    const quantity = parseNumberInput(bulkQuantity)
+    if (quantity === null) {
+      throw new Error('Cantidad inválida para salida en lote')
+    }
+    return {
+      operation: 'stock_exit',
+      inventoryItemId: itemId,
+      quantity: Math.max(1, Math.round(quantity)),
+      valuationMethod: bulkValuationMethod,
+      reason: normalizedReason
+    }
+  }
+
+  const handleApplyBulkSameValues = async () => {
+    if (!effectiveSelectedItemIds.length) {
+      setMessage('Selecciona al menos un producto para ajuste masivo')
+      return
+    }
+
+    try {
+      for (const itemId of effectiveSelectedItemIds) {
+        const payload = buildBulkPayloadForItem(itemId)
+        if (!payload) continue
+        await submitAdjustment(payload)
+      }
+      setAdjustmentResult(`Ajuste masivo aplicado en ${effectiveSelectedItemIds.length} producto(s)`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No fue posible aplicar ajuste masivo')
+    }
+  }
+
+  const handleApplyBulkRowValues = async () => {
+    if (!effectiveSelectedItemIds.length) {
+      setMessage('Selecciona productos para aplicar ajustes por fila')
+      return
+    }
+
+    try {
+      for (const itemId of effectiveSelectedItemIds) {
+        const draft = rowDrafts[itemId] || createDefaultRowDraft()
+        const payload = buildRowPayload(itemId, draft)
+        if (!payload) continue
+        await submitAdjustment(payload)
+      }
+      setAdjustmentResult(`Ajustes por fila aplicados en ${effectiveSelectedItemIds.length} producto(s)`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'No fue posible aplicar ajustes por fila')
+    }
+  }
+
   return (
     <main className='mx-auto max-w-7xl px-4 py-8 md:px-8'>
       <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
@@ -354,13 +764,23 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             </button>
             <button
               type='button'
-              onClick={() => setActivePanel('movements')}
-              aria-label='Ver vista de movimientos'
+              onClick={() => setActivePanel('logbook')}
+              aria-label='Ver vista de bitácora'
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                activePanel === 'movements' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+                activePanel === 'logbook' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
               }`}
             >
-              Movimientos
+              Bitácora
+            </button>
+            <button
+              type='button'
+              onClick={() => setActivePanel('adjustments')}
+              aria-label='Ver vista de ajustes'
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                activePanel === 'adjustments' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              Ajustes
             </button>
           </div>
           {activePanel === 'inventory' && role === 'admin' ? (
@@ -460,80 +880,335 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
               </button>
             </div>
           </>
-        ) : (
+        ) : activePanel === 'logbook' ? (
           <section className='space-y-4'>
-            <div className='grid gap-3 md:grid-cols-3'>
+            <div className='grid gap-3 md:grid-cols-4'>
               <select
-                value={movementOperationTypeFilter}
-                onChange={event => setMovementOperationTypeFilter(event.target.value as MovementOperationType | 'all')}
+                value={logbookActionFilter}
+                onChange={event => setLogbookActionFilter(event.target.value)}
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               >
                 <option value='all'>Todos los tipos</option>
-                {availableMovementOperationTypes.map(operationType => (
-                  <option key={operationType} value={operationType}>
-                    {formatOperationType(operationType)}
+                {availableLogbookActions.map(action => (
+                  <option key={action} value={action}>
+                    {action}
                   </option>
                 ))}
               </select>
               <select
-                value={movementCategoryFilter}
-                onChange={event => setMovementCategoryFilter(event.target.value as MovementCategory | 'all')}
+                value={logbookCategoryFilter}
+                onChange={event => setLogbookCategoryFilter(event.target.value as LogbookCategory | 'all')}
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               >
                 <option value='all'>Todas las categorías</option>
                 <option value='sales'>Ventas</option>
-                <option value='inventory'>Manejo de inventario</option>
+                <option value='inventory'>Inventario</option>
+                <option value='pos'>POS</option>
+                <option value='crm'>CRM</option>
+                <option value='system'>Sistema</option>
               </select>
+              <select
+                value={logbookStatusFilter}
+                onChange={event => setLogbookStatusFilter(event.target.value as 'all' | 'success' | 'failed' | 'pending')}
+                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+              >
+                <option value='all'>Todos los estados</option>
+                <option value='success'>Success</option>
+                <option value='failed'>Failed</option>
+                <option value='pending'>Pending</option>
+              </select>
+              <input
+                value={logbookActorFilter}
+                onChange={event => setLogbookActorFilter(event.target.value)}
+                placeholder='Filtrar por usuario'
+                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+              />
+            </div>
+
+            <div className='flex justify-end'>
               <button
                 type='button'
                 onClick={() => setRefreshSeed(current => current + 1)}
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50'
               >
-                Actualizar movimientos
+                Actualizar bitácora
               </button>
             </div>
 
-            {loadingMovements ? <p className='text-sm text-slate-500'>Cargando movimientos...</p> : null}
+            {loadingLogbook ? <p className='text-sm text-slate-500'>Cargando bitácora...</p> : null}
 
-            {movementSections.map(section => (
-              <article key={section.key} className='rounded-xl border border-slate-200'>
-                <header className='border-b border-slate-200 bg-slate-50 px-4 py-3'>
-                  <h2 className='text-sm font-semibold text-slate-900'>{section.title}</h2>
-                  <p className='mt-1 text-xs text-slate-600'>{section.description}</p>
-                </header>
-                <div className='overflow-x-auto'>
-                  <table className='min-w-full divide-y divide-slate-200'>
-                    <thead className='bg-white'>
-                      <tr>
-                        <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Fecha</th>
-                        <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Operación</th>
-                        <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Detalle</th>
-                        <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Usuario</th>
-                        <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Estado</th>
+            <article className='rounded-xl border border-slate-200'>
+              <header className='border-b border-slate-200 bg-slate-50 px-4 py-3'>
+                <h2 className='text-sm font-semibold text-slate-900'>Registro de operaciones del sistema</h2>
+                <p className='mt-1 text-xs text-slate-600'>Orden cronológico (más reciente primero)</p>
+              </header>
+              <div className='overflow-x-auto'>
+                <table className='min-w-full divide-y divide-slate-200'>
+                  <thead className='bg-white'>
+                    <tr>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Fecha</th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Categoría</th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Operación</th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Detalle</th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Usuario</th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody className='divide-y divide-slate-100 bg-white'>
+                    {logbookItems.map(item => (
+                      <tr key={item.id}>
+                        <td className='whitespace-nowrap px-3 py-2 text-sm text-slate-700'>
+                          {new Date(item.createdAt).toLocaleString('es-MX')}
+                        </td>
+                        <td className='px-3 py-2 text-sm text-slate-700'>{item.category}</td>
+                        <td className='px-3 py-2 text-sm text-slate-800'>
+                          <p>{item.actionLabel}</p>
+                          <p className='text-xs text-slate-500'>{item.action}</p>
+                        </td>
+                        <td className='px-3 py-2 text-sm text-slate-700'>{item.details}</td>
+                        <td className='px-3 py-2 text-sm text-slate-700'>
+                          {item.actorUsername} <span className='text-xs text-slate-500'>({item.actorRole})</span>
+                        </td>
+                        <td className='px-3 py-2 text-sm text-slate-700'>{item.status}</td>
                       </tr>
-                    </thead>
-                    <tbody className='divide-y divide-slate-100 bg-white'>
-                      {section.items.map(item => (
-                        <tr key={item.id}>
-                          <td className='whitespace-nowrap px-3 py-2 text-sm text-slate-700'>
-                            {new Date(item.createdAt).toLocaleString('es-MX')}
-                          </td>
-                          <td className='px-3 py-2 text-sm text-slate-800'>{item.operationLabel}</td>
-                          <td className='px-3 py-2 text-sm text-slate-700'>{item.details}</td>
-                          <td className='px-3 py-2 text-sm text-slate-700'>
-                            {item.actorUsername} <span className='text-xs text-slate-500'>({item.actorRole})</span>
-                          </td>
-                          <td className='px-3 py-2 text-sm text-slate-700'>{item.status}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {!section.items.length ? (
-                    <p className='px-3 py-4 text-sm text-slate-500'>Sin movimientos para los filtros seleccionados.</p>
-                  ) : null}
+                    ))}
+                  </tbody>
+                </table>
+                {!logbookItems.length ? (
+                  <p className='px-3 py-4 text-sm text-slate-500'>Sin operaciones para los filtros seleccionados.</p>
+                ) : null}
+              </div>
+            </article>
+          </section>
+        ) : (
+          <section className='space-y-4'>
+            <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+              <div className='grid gap-3 md:grid-cols-6'>
+                <select
+                  value={bulkOperation}
+                  onChange={event => setBulkOperation(event.target.value as BulkOperation)}
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                >
+                  <option value='correct_price'>Lote: corregir precio</option>
+                  <option value='schedule_price'>Lote: programar precio</option>
+                  <option value='stock_entry'>Lote: entrada</option>
+                  <option value='stock_exit'>Lote: salida</option>
+                  <option value='delete_product'>Lote: eliminar</option>
+                </select>
+                <input
+                  value={bulkNewUnitPrice}
+                  onChange={event => setBulkNewUnitPrice(event.target.value)}
+                  placeholder='Precio lote'
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                />
+                <input
+                  type='datetime-local'
+                  value={bulkEffectiveFrom}
+                  onChange={event => setBulkEffectiveFrom(event.target.value)}
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                />
+                <input
+                  value={bulkQuantity}
+                  onChange={event => setBulkQuantity(event.target.value)}
+                  placeholder='Cantidad lote'
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                />
+                <input
+                  value={bulkUnitCost}
+                  onChange={event => setBulkUnitCost(event.target.value)}
+                  placeholder='Costo lote'
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                />
+                <select
+                  value={bulkValuationMethod}
+                  onChange={event => setBulkValuationMethod(event.target.value as 'fifo' | 'average')}
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                >
+                  <option value='fifo'>FIFO</option>
+                  <option value='average'>Promedio</option>
+                </select>
+              </div>
+              <div className='mt-2 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]'>
+                <input
+                  value={bulkReason}
+                  onChange={event => setBulkReason(event.target.value)}
+                  placeholder='Motivo de ajuste masivo'
+                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
+                />
+                <button
+                  type='button'
+                  onClick={handleToggleAllSelections}
+                  className='h-9 rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-white'
+                >
+                  {effectiveSelectedItemIds.length === items.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                </button>
+                <button
+                  type='button'
+                  onClick={() => void handleApplyBulkSameValues()}
+                  disabled={!selectedItemsCount || submittingAdjustment}
+                  className='h-9 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60'
+                >
+                  Aplicar mismos datos ({selectedItemsCount})
+                </button>
+                <button
+                  type='button'
+                  onClick={() => void handleApplyBulkRowValues()}
+                  disabled={!selectedItemsCount || submittingAdjustment}
+                  className='h-9 rounded-lg border border-slate-300 px-3 text-xs font-semibold text-slate-700 hover:bg-white disabled:opacity-60'
+                >
+                  Aplicar datos por fila
+                </button>
+              </div>
+            </div>
+
+            <div className='overflow-x-auto rounded-xl border border-slate-200'>
+              <table className='min-w-[1500px] divide-y divide-slate-200 bg-white'>
+                <thead className='bg-slate-50'>
+                  <tr>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Sel.</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Producto</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Stock / Precio</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Operación</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Nuevo precio</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Fecha vigencia</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Cantidad</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Costo unitario</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Método</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Motivo</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Acción</th>
+                  </tr>
+                </thead>
+                <tbody className='divide-y divide-slate-100'>
+                  {items.map(item => {
+                    const draft = rowDrafts[item.id] || createDefaultRowDraft()
+                    const isSelected = effectiveSelectedItemIds.includes(item.id)
+                    return (
+                      <tr key={item.id} className={isSelected ? 'bg-emerald-50/60' : 'bg-white'}>
+                        <td className='px-2 py-2'>
+                          <input
+                            type='checkbox'
+                            checked={isSelected}
+                            onChange={() => handleToggleItemSelection(item.id)}
+                            aria-label={`Seleccionar ${item.productName}`}
+                          />
+                        </td>
+                        <td className='px-2 py-2 text-xs text-slate-700'>
+                          <p className='font-medium text-slate-900'>{item.productName}</p>
+                          <p>{item.sku}</p>
+                        </td>
+                        <td className='px-2 py-2 text-xs text-slate-700'>
+                          <p>{item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`}</p>
+                          <p>{formatMxnCurrency(item.unitPrice)}</p>
+                        </td>
+                        <td className='px-2 py-2'>
+                          <select
+                            value={draft.operation}
+                            onChange={event => updateRowDraft(item.id, { operation: event.target.value as RowAdjustmentOperation })}
+                            className='h-8 rounded-md border border-slate-300 px-1 text-xs'
+                          >
+                            <option value='correct_price'>Corregir precio</option>
+                            <option value='schedule_price'>Programar precio</option>
+                            <option value='stock_entry'>Entrada</option>
+                            <option value='stock_exit'>Salida</option>
+                            <option value='delete_product'>Eliminar</option>
+                          </select>
+                        </td>
+                        <td className='px-2 py-2'>
+                          <input
+                            value={draft.newUnitPrice}
+                            onChange={event => updateRowDraft(item.id, { newUnitPrice: event.target.value })}
+                            className='h-8 w-28 rounded-md border border-slate-300 px-2 text-xs'
+                            placeholder='0.00'
+                          />
+                        </td>
+                        <td className='px-2 py-2'>
+                          <input
+                            type='datetime-local'
+                            value={draft.effectiveFrom}
+                            onChange={event => updateRowDraft(item.id, { effectiveFrom: event.target.value })}
+                            className='h-8 rounded-md border border-slate-300 px-2 text-xs'
+                          />
+                        </td>
+                        <td className='px-2 py-2'>
+                          <input
+                            value={draft.quantity}
+                            onChange={event => updateRowDraft(item.id, { quantity: event.target.value })}
+                            className='h-8 w-20 rounded-md border border-slate-300 px-2 text-xs'
+                            placeholder='0'
+                          />
+                        </td>
+                        <td className='px-2 py-2'>
+                          <input
+                            value={draft.unitCost}
+                            onChange={event => updateRowDraft(item.id, { unitCost: event.target.value })}
+                            className='h-8 w-24 rounded-md border border-slate-300 px-2 text-xs'
+                            placeholder='0.00'
+                          />
+                        </td>
+                        <td className='px-2 py-2'>
+                          <select
+                            value={draft.valuationMethod}
+                            onChange={event => updateRowDraft(item.id, { valuationMethod: event.target.value as 'fifo' | 'average' })}
+                            className='h-8 rounded-md border border-slate-300 px-1 text-xs'
+                          >
+                            <option value='fifo'>FIFO</option>
+                            <option value='average'>Promedio</option>
+                          </select>
+                        </td>
+                        <td className='px-2 py-2'>
+                          <input
+                            value={draft.reason}
+                            onChange={event => updateRowDraft(item.id, { reason: event.target.value })}
+                            className='h-8 w-48 rounded-md border border-slate-300 px-2 text-xs'
+                          />
+                        </td>
+                        <td className='px-2 py-2'>
+                          <button
+                            type='button'
+                            onClick={() => void handleApplyRowAdjustment(item.id)}
+                            disabled={submittingAdjustment}
+                            className='h-8 rounded-md bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60'
+                          >
+                            Aplicar fila
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className='rounded-xl border border-slate-200 p-3'>
+              <p className='text-xs font-semibold text-slate-800'>Agregar producto nuevo</p>
+              <div className='mt-2 grid gap-2 md:grid-cols-6'>
+                <input value={addProductForm.sku} onChange={event => setAddProductForm(current => ({ ...current, sku: event.target.value }))} placeholder='SKU' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
+                <input value={addProductForm.productName} onChange={event => setAddProductForm(current => ({ ...current, productName: event.target.value }))} placeholder='Producto' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
+                <input value={addProductForm.category} onChange={event => setAddProductForm(current => ({ ...current, category: event.target.value }))} placeholder='Categoría' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
+                <input value={addProductForm.stock} onChange={event => setAddProductForm(current => ({ ...current, stock: event.target.value }))} placeholder='Stock' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
+                <input value={addProductForm.unitPrice} onChange={event => setAddProductForm(current => ({ ...current, unitPrice: event.target.value }))} placeholder='Precio' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
+                <div className='flex gap-2'>
+                  <input value={addProductForm.aisle} onChange={event => setAddProductForm(current => ({ ...current, aisle: event.target.value }))} placeholder='Pasillo' className='h-8 w-full rounded-md border border-slate-300 px-2 text-xs' />
+                  <button type='button' onClick={() => void handleAddProduct()} disabled={submittingAdjustment} className='h-8 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60'>Agregar</button>
                 </div>
-              </article>
-            ))}
+              </div>
+            </div>
+
+            <article className='rounded-xl border border-slate-200 p-3'>
+              <p className='text-xs font-semibold text-slate-800'>Programaciones pendientes</p>
+              {loadingAdjustments ? <p className='mt-2 text-xs text-slate-500'>Cargando...</p> : null}
+              {adjustmentsSnapshot?.schedules?.length ? (
+                <ul className='mt-2 space-y-1 text-xs text-slate-700'>
+                  {adjustmentsSnapshot.schedules.map(schedule => (
+                    <li key={schedule.id}>
+                      {schedule.inventoryItemId} | {JSON.stringify(schedule.metadata)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className='mt-2 text-xs text-slate-500'>Sin pendientes.</p>
+              )}
+            </article>
           </section>
         )}
       </section>
@@ -541,6 +1216,12 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       {message ? (
         <p aria-live='polite' className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
           {message}
+        </p>
+      ) : null}
+
+      {adjustmentResult ? (
+        <p aria-live='polite' className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700'>
+          {adjustmentResult}
         </p>
       ) : null}
 
