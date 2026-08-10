@@ -1,0 +1,101 @@
+﻿sku,producto,categoria,unidad,precio,stock
+FRV-001,Tomate saladet,Frutas y Verduras,kg,28.50,120
+FRV-002,Cebolla blanca,Frutas y Verduras,kg,24.00,90
+FRV-003,Papa blanca,Frutas y Verduras,kg,32.00,150
+FRV-004,Aguacate Hass,Frutas y Verduras,kg,89.00,60
+FRV-005,Limón sin semilla,Frutas y Verduras,kg,38.00,80
+FRV-006,Plátano tabasco,Frutas y Verduras,kg,22.50,110
+FRV-007,Manzana red delicious,Frutas y Verduras,kg,54.00,75
+FRV-008,Naranja de jugo,Frutas y Verduras,kg,19.00,140
+FRV-009,Zanahoria,Frutas y Verduras,kg,18.50,95
+FRV-010,Chile serrano,Frutas y Verduras,kg,45.00,40
+FRV-011,Chile jalapeño,Frutas y Verduras,kg,42.00,45
+FRV-012,Calabacita italiana,Frutas y Verduras,kg,26.00,70
+FRV-013,Pepino,Frutas y Verduras,kg,21.00,85
+FRV-014,Lechuga romana,Frutas y Verduras,pieza,18.00,50
+FRV-015,Brócoli,Frutas y Verduras,kg,34.00,55
+FRV-016,Uva roja sin semilla,Frutas y Verduras,kg,78.00,35
+FRV-017,Fresa,Frutas y Verduras,kg,65.00,30
+FRV-018,Piña miel,Frutas y Verduras,pieza,42.00,40
+FRV-019,Sandía,Frutas y Verduras,kg,15.50,60
+FRV-020,Cilantro,Frutas y Verduras,manojo,8.00,100
+CAR-001,Bistec de res,Carnes y Pescados,kg,185.00,45
+CAR-002,Molida de res 90/10,Carnes y Pescados,kg,165.00,50
+CAR-003,Costilla de res,Carnes y Pescados,kg,155.00,30
+CAR-004,Pechuga de pollo sin hueso,Carnes y Pescados,kg,129.00,65
+CAR-005,Pierna y muslo de pollo,Carnes y Pescados,kg,72.00,70
+CAR-006,Pollo entero,Carnes y Pescados,kg,58.00,40
+CAR-007,Chuleta de cerdo,Carnes y Pescados,kg,118.00,45
+CAR-008,Costilla de cerdo,Carnes y Pescados,kg,125.00,35
+CAR-009,Chorizo argentino,Carnes y Pescados,kg,145.00,25
+CAR-010,Filete de tilapia,Carnes y Pescados,kg,139.00,30
+CAR-011,Camarón mediano,Carnes y Pescados,kg,245.00,20
+CAR-012,Salmón fresco,Carnes y Pescados,kg,389.00,15
+LAC-001,Leche entera 1 L,Lácteos y Huevo,pieza,26.50,200
+LAC-002,Leche deslactosada 1 L,Lácteos y Huevo,pieza,29.00,150
+LAC-003,Huevo blanco 30 pzas,Lácteos y Huevo,paquete,92.00,80
+LAC-004,Queso panela,Lácteos y Huevo,kg,145.00,40
+LAC-005,Queso Oaxaca,Lácteos y Huevo,kg,168.00,35
+LAC-006,Queso manchego rebanado 400 g,Lácteos y Huevo,paquete,89.00,60
+LAC-007,Yogurt natural 1 L,Lácteos y Huevo,pieza,42.00,70
+LAC-008,Yogurt griego 150 g,Lácteos y Huevo,pieza,18.50,120
+LAC-009,Crema ácida 450 ml,Lácteos y Huevo,pieza,34.00,65
+LAC-010,Mantequilla con sal 90 g,Lácteos y Huevo,pieza,24.00,90
+LAC-011,Queso crema 190 g,Lácteos y Huevo,pieza,38.50,75
+LAC-012,Leche evaporada 360 ml,Lácteos y Huevo,pieza,22.00,100
+PAN-001,Tortilla de maíz,Panadería y Tortillería,kg,24.00,100
+PAN-002,Tortilla de harina 10 pzas,Panadería y Tortillería,paquete,32.00,60
+PAN-003,Pan de caja blanco 680 g,Panadería y Tortillería,pieza,46.00,55
+PAN-004,Pan de caja integral 680 g,Panadería y Tortillería,pieza,52.00,45
+PAN-005,Bolillo,Panadería y Tortillería,pieza,3.50,200
+PAN-006,Concha de vainilla,Panadería y Tortillería,pieza,9.00,80
+PAN-007,Pan molido 210 g,Panadería y Tortillería,pieza,21.00,40
+PAN-008,Tostadas horneadas 20 pzas,Panadería y Tortillería,paquete,26.50,50
+ABA-001,Arroz súper extra 1 kg,Abarrotes,paquete,34.00,120
+ABA-002,Frijol negro 1 kg,Abarrotes,paquete,42.00,100
+ABA-003,Frijol pinto 1 kg,Abarrotes,paquete,44.00,90
+ABA-004,Azúcar estándar 1 kg,Abarrotes,paquete,32.50,110
+ABA-005,Sal refinada 1 kg,Abarrotes,paquete,14.00,130
+ABA-006,Aceite vegetal 1 L,Abarrotes,pieza,48.00,95
+ABA-007,Aceite de oliva 500 ml,Abarrotes,pieza,129.00,30
+ABA-008,Harina de trigo 1 kg,Abarrotes,paquete,28.00,85
+ABA-009,Pasta espagueti 200 g,Abarrotes,pieza,12.50,150
+ABA-010,Sopa de fideo 200 g,Abarrotes,pieza,11.00,140
+ABA-011,Atún en agua 140 g,Abarrotes,pieza,24.50,180
+ABA-012,Sardina en tomate 425 g,Abarrotes,pieza,36.00,70
+ABA-013,Chiles en vinagre 380 g,Abarrotes,pieza,28.50,80
+ABA-014,Puré de tomate 210 g,Abarrotes,pieza,9.50,160
+ABA-015,Mayonesa 390 g,Abarrotes,pieza,46.00,75
+ABA-016,Salsa cátsup 320 g,Abarrotes,pieza,29.00,85
+ABA-017,Café soluble 225 g,Abarrotes,pieza,145.00,50
+ABA-018,Cereal hojuelas de maíz 500 g,Abarrotes,paquete,62.00,60
+ABA-019,Avena en hojuelas 800 g,Abarrotes,paquete,38.00,65
+ABA-020,Miel de abeja 300 g,Abarrotes,pieza,68.00,35
+BEB-001,Agua purificada 1.5 L,Bebidas,pieza,14.00,250
+BEB-002,Agua purificada garrafón 20 L,Bebidas,pieza,45.00,60
+BEB-003,Refresco de cola 600 ml,Bebidas,pieza,19.00,200
+BEB-004,Refresco de cola 2.5 L,Bebidas,pieza,42.00,120
+BEB-005,Jugo de naranja 1 L,Bebidas,pieza,32.00,80
+BEB-006,Agua mineral 600 ml,Bebidas,pieza,16.50,90
+BEB-007,Bebida energética 473 ml,Bebidas,pieza,38.00,70
+BEB-008,Cerveza clara 355 ml lata,Bebidas,pieza,21.00,180
+BEB-009,Cerveza clara 12 pack,Bebidas,paquete,215.00,40
+BEB-010,Vino tinto 750 ml,Bebidas,pieza,185.00,25
+BEB-011,Té helado 1 L,Bebidas,pieza,26.00,60
+BEB-012,Leche de almendra 946 ml,Bebidas,pieza,48.00,45
+LIM-001,Detergente en polvo 1 kg,Limpieza,paquete,45.50,70
+LIM-002,Jabón lavatrastes líquido 750 ml,Limpieza,pieza,39.00,80
+LIM-003,Cloro 950 ml,Limpieza,pieza,22.00,90
+LIM-004,Limpiador multiusos 1 L,Limpieza,pieza,35.00,65
+LIM-005,Suavizante de telas 850 ml,Limpieza,pieza,42.50,55
+LIM-006,Papel higiénico 4 rollos,Limpieza,paquete,42.00,100
+LIM-007,Servilletas 500 pzas,Limpieza,paquete,46.00,60
+LIM-008,Bolsa para basura grande 10 pzas,Limpieza,paquete,28.00,75
+HIG-001,Shampoo 750 ml,Higiene Personal,pieza,78.00,50
+HIG-002,Jabón de tocador 3 pack,Higiene Personal,paquete,42.00,70
+HIG-003,Pasta dental 100 ml,Higiene Personal,pieza,36.50,85
+HIG-004,Cepillo dental 2 pzas,Higiene Personal,paquete,45.00,60
+HIG-005,Desodorante en barra 50 g,Higiene Personal,pieza,58.00,55
+HIG-006,Rastrillo desechable 4 pzas,Higiene Personal,paquete,52.00,45
+HIG-007,Toallas femeninas 14 pzas,Higiene Personal,paquete,48.50,65
+HIG-008,"Pañal etapa 4, 40 pzas",Higiene Personal,paquete,189.00,30

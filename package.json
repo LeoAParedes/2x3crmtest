@@ -1,0 +1,52 @@
+{
+  "name": "2x3crmtest",
+  "version": "1.0.0",
+  "description": "ERP supermercado sucesor de uscores con Next.js + Mastra + WhatsApp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "bootstrap:users": "tsx scripts/bootstrap-users.ts",
+    "security:audit": "npm audit --omit=dev --audit-level=high"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@mastra/core": "^1.57.0",
+    "@prisma/adapter-pg": "latest",
+    "@prisma/client": "^7.9.1",
+    "@supabase/ssr": "latest",
+    "@supabase/supabase-js": "latest",
+    "next": "^16.3.0",
+    "pg": "latest",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.2.0",
+    "@types/pg": "latest",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "dotenv": "^17.4.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.0",
+    "prisma": "^7.9.1",
+    "tailwindcss": "^4.3.3",
+    "tsx": "latest",
+    "typescript": "^6.0.3",
+    "vitest": "latest"
+  }
+}

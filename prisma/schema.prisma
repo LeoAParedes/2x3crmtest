@@ -1,0 +1,301 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  cashier
+}
+
+model UserProfile {
+  id         String   @id @default(cuid())
+  authUserId String   @unique @db.Uuid
+  username   String   @unique
+  role       UserRole
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  sales      Sale[]
+}
+
+model Customer {
+  id                String              @id @default(cuid())
+  displayName       String?
+  phone             String?             @unique
+  email             String?             @unique
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  channels          CustomerChannel[]
+  conversations     Conversation[]
+  account           FinanceAccount?
+  orders            Order[]
+  handoffTickets    HandoffTicket[]
+  returnCases       ReturnCase[]
+  paymentPromises   PaymentPromise[]
+}
+
+model CustomerChannel {
+  id               String   @id @default(cuid())
+  customerId       String
+  channel          String
+  externalIdentity String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([channel, externalIdentity])
+  @@index([customerId, channel])
+}
+
+model Conversation {
+  id               String                @id @default(cuid())
+  customerId       String?
+  channel          String
+  sessionId        String
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  customer         Customer?             @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  messages         ConversationMessage[]
+}
+
+model ConversationMessage {
+  id               String       @id @default(cuid())
+  conversationId   String
+  direction        String
+  messageText      String       @db.Text
+  intent           String?
+  runMode          String?
+  metadata         Json?
+  createdAt        DateTime     @default(now())
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model AgentAction {
+  id               String   @id @default(cuid())
+  conversationId   String?
+  actionType       String
+  payload          Json
+  status           String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model HandoffTicket {
+  id               String   @id @default(cuid())
+  customerId       String
+  reason           String
+  priority         String
+  status           String   @default("opened")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, status])
+}
+
+model Order {
+  id               String      @id @default(cuid())
+  externalOrderId  String      @unique
+  customerId       String?
+  status           String
+  total            Decimal     @db.Decimal(10, 2)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  customer         Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items            OrderItem[]
+}
+
+model OrderItem {
+  id               String        @id @default(cuid())
+  orderId          String
+  sku              String
+  productName      String
+  quantity         Int
+  unitPrice        Decimal       @db.Decimal(10, 2)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  order            Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model InventoryItem {
+  id               String               @id @default(cuid())
+  sku              String               @unique
+  productName      String
+  category         String
+  stock            Int
+  unitPrice        Decimal              @db.Decimal(10, 2)
+  aisle            String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  movements        InventoryMovement[]
+  saleItems        SaleItem[]
+}
+
+model InventoryMovement {
+  id               String        @id @default(cuid())
+  inventoryItemId  String
+  movementType     String
+  quantity         Int
+  reason           String?
+  createdAt        DateTime      @default(now())
+  inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@index([inventoryItemId, createdAt])
+}
+
+model FinanceAccount {
+  id               String         @id @default(cuid())
+  customerId       String         @unique
+  creditLimit      Decimal        @db.Decimal(10, 2)
+  openBalance      Decimal        @db.Decimal(10, 2)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  receivables      Receivable[]
+  payments         Payment[]
+  paymentPromises  PaymentPromise[]
+}
+
+model Receivable {
+  id               String         @id @default(cuid())
+  accountId        String
+  description      String
+  amount           Decimal        @db.Decimal(10, 2)
+  dueDate          DateTime
+  status           String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  account          FinanceAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, status])
+}
+
+model Payment {
+  id               String         @id @default(cuid())
+  accountId        String
+  amount           Decimal        @db.Decimal(10, 2)
+  method           String
+  reference        String?
+  createdAt        DateTime       @default(now())
+  account          FinanceAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, createdAt])
+}
+
+model ReturnCase {
+  id               String   @id @default(cuid())
+  customerId       String
+  reason           String   @db.Text
+  status           String   @default("opened")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, status])
+}
+
+model PaymentPromise {
+  id               String         @id @default(cuid())
+  customerId       String
+  financeAccountId String?
+  amount           Decimal        @db.Decimal(10, 2)
+  dueDate          DateTime
+  status           String         @default("pending")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  customer         Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  financeAccount   FinanceAccount? @relation(fields: [financeAccountId], references: [id], onDelete: SetNull)
+
+  @@index([customerId, status])
+}
+
+model Sale {
+  id                String      @id @default(cuid())
+  saleNumber        String      @unique
+  cashierProfileId  String
+  cashierAuthUserId String      @db.Uuid
+  cashierUsername   String
+  subtotal          Decimal     @db.Decimal(10, 2)
+  tax               Decimal     @db.Decimal(10, 2)
+  total             Decimal     @db.Decimal(10, 2)
+  paymentMethod     String
+  amountReceived    Decimal?    @db.Decimal(10, 2)
+  status            String      @default("completed")
+  createdAt         DateTime    @default(now())
+  cashierProfile    UserProfile @relation(fields: [cashierProfileId], references: [id], onDelete: Restrict)
+  items             SaleItem[]
+
+  @@index([cashierAuthUserId, createdAt])
+}
+
+model SaleItem {
+  id              String        @id @default(cuid())
+  saleId          String
+  inventoryItemId String
+  sku             String
+  productName     String
+  quantity        Int
+  unitPrice       Decimal       @db.Decimal(10, 2)
+  lineTotal       Decimal       @db.Decimal(10, 2)
+  sale            Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([saleId])
+  @@index([inventoryItemId])
+}
+
+model SystemActionLog {
+  id              String   @id @default(cuid())
+  actorAuthUserId String?  @db.Uuid
+  actorUsername   String
+  actorRole       String
+  action          String
+  entityType      String
+  entityId        String
+  status          String
+  metadata        Json?
+  createdAt       DateTime @default(now())
+
+  @@index([actorAuthUserId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model ApprovalRequest {
+  id         String    @id @default(cuid())
+  actionType String
+  targetId   String
+  reason     String
+  status     String    @default("pending")
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([status, createdAt])
+}
+
+model MastraSettings {
+  id                    String   @id @default("default")
+  enabled               Boolean  @default(true)
+  modelId               String   @default("openai/gpt-4.1-mini")
+  instructions          String   @db.Text
+  allowWriteActions     Boolean  @default(true)
+  allowFinancialActions Boolean  @default(true)
+  maxReplyChars         Int      @default(900)
+  defaultLocale         String   @default("es-MX")
+  updatedAt             DateTime @updatedAt
+}
+
+model ProcessedEvent {
+  id          String   @id
+  processedAt DateTime @default(now())
+  expiresAt   DateTime
+
+  @@index([expiresAt])
+}
