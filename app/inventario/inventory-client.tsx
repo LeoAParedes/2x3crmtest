@@ -364,6 +364,14 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     () => Boolean(validationResult?.validateOnly && lastValidatedCsv === importCsv),
     [importCsv, lastValidatedCsv, validationResult]
   )
+  const rejectedValidationLines = useMemo(
+    () => (validationResult?.errors || []).map(error => error.line),
+    [validationResult]
+  )
+  const rejectedImportLines = useMemo(
+    () => (importResult?.errors || []).map(error => error.line),
+    [importResult]
+  )
   const canSubmitImport = useMemo(
     () => Boolean(hasFreshValidation && validationResult?.canImport && !importing),
     [hasFreshValidation, importing, validationResult]
@@ -2010,6 +2018,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 {validationResult.errors?.length ? (
                   <div className='mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3'>
                     <p className='text-xs font-semibold uppercase tracking-wide text-amber-800'>Filas rechazadas</p>
+                    <p className='mt-1 text-xs text-amber-800'>
+                      {validationResult.errors.length} fila(s) con error. Líneas: {rejectedValidationLines.join(', ')}.
+                    </p>
                     <ul className='mt-2 max-h-40 list-disc space-y-1 overflow-y-auto pl-5 text-sm text-amber-700'>
                       {validationResult.errors.slice(0, 20).map(error => (
                         <li key={`${error.line}-${error.reason}`}>Línea {error.line}: {error.reason}</li>
@@ -2032,11 +2043,17 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                       {importResult.summary.failed}
                     </p>
                     {importResult.errors?.length ? (
-                      <ul className='mt-2 list-disc space-y-1 pl-5 text-sm text-amber-700'>
+                      <div className='mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3'>
+                        <p className='text-xs font-semibold uppercase tracking-wide text-amber-800'>Filas rechazadas</p>
+                        <p className='mt-1 text-xs text-amber-800'>
+                          {importResult.errors.length} fila(s) con error. Líneas: {rejectedImportLines.join(', ')}.
+                        </p>
+                        <ul className='mt-2 list-disc space-y-1 pl-5 text-sm text-amber-700'>
                         {importResult.errors.slice(0, 20).map(error => (
                           <li key={`${error.line}-${error.reason}`}>Línea {error.line}: {error.reason}</li>
                         ))}
-                      </ul>
+                        </ul>
+                      </div>
                     ) : null}
                   </>
                 ) : (

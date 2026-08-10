@@ -93,6 +93,38 @@ const buildAisleHint = (unitRaw: string, aisleRaw: string) => {
   return null
 }
 
+const parseCsvLine = (line: string): string[] => {
+  const values: string[] = []
+  let current = ''
+  let inQuotes = false
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    const nextChar = line[index + 1]
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        current += '"'
+        index += 1
+      } else {
+        inQuotes = !inQuotes
+      }
+      continue
+    }
+
+    if (char === ',' && !inQuotes) {
+      values.push(current.trim())
+      current = ''
+      continue
+    }
+
+    current += char
+  }
+
+  values.push(current.trim())
+  return values
+}
+
 export const parseCsvRows = (csv: string) => {
   const lines = csv
     .split(/\r?\n/)
@@ -103,7 +135,7 @@ export const parseCsvRows = (csv: string) => {
     throw new Error('CSV_EMPTY')
   }
 
-  const header = lines[0].split(',').map(item => item.trim())
+  const header = parseCsvLine(lines[0])
   const config = resolveHeaderConfig(header)
 
   const mapIndex = (column: string) => header.indexOf(column)
@@ -111,7 +143,7 @@ export const parseCsvRows = (csv: string) => {
   const errors: Array<{ line: number; reason: string }> = []
 
   for (let lineIndex = 1; lineIndex < lines.length; lineIndex += 1) {
-    const row = lines[lineIndex].split(',').map(item => item.trim())
+    const row = parseCsvLine(lines[lineIndex])
     const sku = row[mapIndex(config.sku)] || ''
     const productName = row[mapIndex(config.productName)] || ''
     const category = row[mapIndex(config.category)] || ''

@@ -78,6 +78,25 @@ FRV-002,Cebolla,Frutas y Verduras,kg,abc,140`
     expect(result.message).toBeNull()
   })
 
+  it('accepts quoted fields containing commas', () => {
+    const csv = `sku,producto,categoria,unidad,precio,stock
+HIG-008,"Pañal etapa 4, 40 pzas",Higiene Personal,paquete,189.00,30`
+
+    const { parsedRows, errors } = parseCsvRows(csv)
+
+    expect(errors).toEqual([])
+    expect(parsedRows).toEqual([
+      {
+        sku: 'HIG-008',
+        productName: 'Pañal etapa 4, 40 pzas',
+        category: 'Higiene Personal',
+        stock: 30,
+        unitPrice: 189,
+        aisle: null
+      }
+    ])
+  })
+
   it('blocks import when all rows are invalid', () => {
     const csv = `sku,producto,categoria,unidad,precio,stock
 FRV-001,Tomate,Frutas y Verduras,,28.50,120`
