@@ -51,9 +51,13 @@ const formatMetadataFallback = (metadata: unknown) => {
     return 'Sin detalle adicional'
   }
 
-  const raw = JSON.stringify(metadata)
-  if (raw.length <= 220) return raw
-  return `${raw.slice(0, 217)}...`
+  const values = metadata as Record<string, unknown>
+  const entries = Object.entries(values)
+    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+    .slice(0, 6)
+
+  if (!entries.length) return 'Sin detalle adicional'
+  return entries.join(' | ')
 }
 
 const buildSaleDetails = (metadata: unknown) => {
@@ -92,9 +96,89 @@ const buildInventoryImportDetails = (metadata: unknown) => {
   return `${base} | Línea ${firstError.line}: ${firstError.reason}`
 }
 
+const buildInventoryDeleteDetails = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return 'Producto eliminado del catálogo'
+  }
+  const values = metadata as Record<string, unknown>
+  const mode = values.mode === 'archived' ? 'Archivado por historial de ventas' : 'Eliminado definitivamente'
+  const reason = typeof values.reason === 'string' ? values.reason : 'Sin motivo'
+  const linkedSalesCount = typeof values.linkedSalesCount === 'number' ? values.linkedSalesCount : 0
+  const clearedStock = typeof values.clearedStock === 'number' ? values.clearedStock : 0
+  return `${mode} | Stock liberado: ${clearedStock} | Ventas vinculadas: ${linkedSalesCount} | Motivo: ${reason}`
+}
+
+const buildInventoryPriceDetails = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return 'Precio actualizado'
+  }
+  const values = metadata as Record<string, unknown>
+  const newUnitPrice = typeof values.newUnitPrice === 'number' ? values.newUnitPrice : null
+  const reason = typeof values.reason === 'string' ? values.reason : 'Sin motivo'
+  if (newUnitPrice === null) return `Precio actualizado | Motivo: ${reason}`
+  return `Nuevo precio: ${newUnitPrice.toFixed(2)} MXN | Motivo: ${reason}`
+}
+
+const buildInventoryMovementEntryDetails = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return 'Entrada registrada'
+  }
+  const values = metadata as Record<string, unknown>
+  const quantity = typeof values.quantity === 'number' ? values.quantity : null
+  const unitCost = typeof values.unitCost === 'number' ? values.unitCost : null
+  const nextUnitPrice = typeof values.nextUnitPrice === 'number' ? values.nextUnitPrice : null
+  const reason = typeof values.reason === 'string' ? values.reason : 'Sin motivo'
+  return `Entrada: +${quantity ?? '?'} | Costo: ${unitCost?.toFixed(2) ?? '?'} MXN | Precio promedio: ${
+    nextUnitPrice?.toFixed(2) ?? '?'
+  } MXN | Motivo: ${reason}`
+}
+
+const buildInventoryMovementExitDetails = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return 'Salida registrada'
+  }
+  const values = metadata as Record<string, unknown>
+  const quantity = typeof values.quantity === 'number' ? values.quantity : null
+  const valuationMethod = values.valuationMethod === 'fifo' ? 'FIFO' : values.valuationMethod === 'average' ? 'Promedio' : 'N/A'
+  const unitCost = typeof values.unitCost === 'number' ? values.unitCost : null
+  const totalCost = typeof values.totalCost === 'number' ? values.totalCost : null
+  const reason = typeof values.reason === 'string' ? values.reason : 'Sin motivo'
+  return `Salida: -${quantity ?? '?'} | Método: ${valuationMethod} | Costo unitario: ${
+    unitCost?.toFixed(2) ?? '?'
+  } MXN | Costo total: ${totalCost?.toFixed(2) ?? '?'} MXN | Motivo: ${reason}`
+}
+
+const buildPosDraftDetails = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return 'Borrador de caja actualizado'
+  }
+  const values = metadata as Record<string, unknown>
+  const cart = Array.isArray(values.cart) ? values.cart : []
+  const paymentMethod = typeof values.paymentMethod === 'string' ? values.paymentMethod : 'N/A'
+  return `Carrito: ${cart.length} item(s) | Pago: ${paymentMethod}`
+}
+
+const buildInventoryCreateDetails = (metadata: unknown) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return 'Producto agregado'
+  }
+  const values = metadata as Record<string, unknown>
+  const sku = typeof values.sku === 'string' ? values.sku : 'N/A'
+  const productName = typeof values.productName === 'string' ? values.productName : 'N/A'
+  const stock = typeof values.stock === 'number' ? values.stock : 0
+  const unitPrice = typeof values.unitPrice === 'number' ? values.unitPrice : null
+  return `${sku} | ${productName} | Stock inicial: ${stock} | Precio: ${unitPrice?.toFixed(2) ?? '?'} MXN`
+}
+
 const buildDetails = (action: string, metadata: unknown) => {
   if (action === 'sale.create') return buildSaleDetails(metadata)
   if (action === 'inventory.import.csv') return buildInventoryImportDetails(metadata)
+  if (action === 'inventory.product.delete') return buildInventoryDeleteDetails(metadata)
+  if (action === 'inventory.price.correct' || action === 'inventory.price.schedule') return buildInventoryPriceDetails(metadata)
+  if (action === 'inventory.movement.entry') return buildInventoryMovementEntryDetails(metadata)
+  if (action === 'inventory.movement.exit') return buildInventoryMovementExitDetails(metadata)
+  if (action === 'pos.draft.saved') return buildPosDraftDetails(metadata)
+  if (action === 'inventory.product.create') return buildInventoryCreateDetails(metadata)
   return formatMetadataFallback(metadata)
 }
 

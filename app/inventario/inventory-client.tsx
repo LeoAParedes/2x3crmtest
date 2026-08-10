@@ -300,7 +300,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [logbookItems, setLogbookItems] = useState<LogbookItem[]>([])
   const [logbookActionFilter, setLogbookActionFilter] = useState<string>('all')
   const [logbookStatusFilter, setLogbookStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all')
-  const [logbookCategoryFilter, setLogbookCategoryFilter] = useState<LogbookCategory | 'all'>('all')
+  const [logbookCategoryFilter, setLogbookCategoryFilter] = useState<LogbookCategory | 'all'>('inventory')
   const [logbookActorFilter, setLogbookActorFilter] = useState('')
   const [availableLogbookActions, setAvailableLogbookActions] = useState<string[]>([])
   const [loadingLogbook, setLoadingLogbook] = useState(false)
@@ -311,6 +311,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [rowPreview, setRowPreview] = useState<RowAdjustmentPreview | null>(null)
   const [bulkPreview, setBulkPreview] = useState<RowAdjustmentPreview[] | null>(null)
   const [validationAttemptedRows, setValidationAttemptedRows] = useState<Record<string, boolean>>({})
+  const [adjustmentQuery, setAdjustmentQuery] = useState('')
   const [submittingAdjustment, setSubmittingAdjustment] = useState(false)
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
   const [rowDrafts, setRowDrafts] = useState<Record<string, RowAdjustmentDraft>>({})
@@ -525,6 +526,20 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const effectiveSelectedItemIds = useMemo(
     () => selectedItemIds.filter(id => items.some(item => item.id === id)),
     [selectedItemIds, items]
+  )
+  const adjustmentFilteredItems = useMemo(() => {
+    const normalizedQuery = adjustmentQuery.trim().toLowerCase()
+    if (!normalizedQuery) return items
+    return items.filter(
+      item =>
+        item.sku.toLowerCase().includes(normalizedQuery) ||
+        item.productName.toLowerCase().includes(normalizedQuery) ||
+        item.category.toLowerCase().includes(normalizedQuery)
+    )
+  }, [adjustmentQuery, items])
+  const effectiveAdjustmentSelectedIds = useMemo(
+    () => effectiveSelectedItemIds.filter(id => adjustmentFilteredItems.some(item => item.id === id)),
+    [effectiveSelectedItemIds, adjustmentFilteredItems]
   )
   const selectedItemsCount = effectiveSelectedItemIds.length
 
@@ -779,11 +794,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }
 
   const handleToggleAllSelections = () => {
-    if (effectiveSelectedItemIds.length === items.length) {
+    if (effectiveAdjustmentSelectedIds.length === adjustmentFilteredItems.length) {
       setSelectedItemIds([])
       return
     }
-    setSelectedItemIds(items.map(item => item.id))
+    setSelectedItemIds(adjustmentFilteredItems.map(item => item.id))
   }
 
   const updateRowDraft = (itemId: string, patch: Partial<RowAdjustmentDraft>) => {
@@ -1344,11 +1359,25 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           <p>{item.actionLabel}</p>
                           <p className='text-xs text-slate-500'>{item.action}</p>
                         </td>
-                        <td className='px-3 py-2 text-sm text-slate-700'>{item.details}</td>
+                        <td className='px-3 py-2 text-sm text-slate-700'>
+                          <div className='max-w-[460px] whitespace-pre-wrap break-words text-xs leading-5'>{item.details}</div>
+                        </td>
                         <td className='px-3 py-2 text-sm text-slate-700'>
                           {item.actorUsername} <span className='text-xs text-slate-500'>({item.actorRole})</span>
                         </td>
-                        <td className='px-3 py-2 text-sm text-slate-700'>{item.status}</td>
+                        <td className='px-3 py-2 text-sm text-slate-700'>
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
+                              item.status === 'success'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : item.status === 'failed'
+                                  ? 'bg-rose-100 text-rose-800'
+                                  : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1361,6 +1390,18 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
           </section>
         ) : (
           <section className='space-y-4'>
+            <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
+              <input
+                value={adjustmentQuery}
+                onChange={event => setAdjustmentQuery(event.target.value)}
+                placeholder='Buscar en ajustes por SKU o nombre'
+                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+              />
+              <p className='self-center text-xs text-slate-500'>
+                Mostrando {adjustmentFilteredItems.length} de {items.length} producto(s)
+              </p>
+            </div>
+
             <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
               <div className='grid gap-3 md:grid-cols-6'>
                 <select
@@ -1419,7 +1460,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   onClick={handleToggleAllSelections}
                   className='h-9 rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-white'
                 >
-                  {effectiveSelectedItemIds.length === items.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                  {effectiveAdjustmentSelectedIds.length === adjustmentFilteredItems.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
                 </button>
                 <button
                   type='button'
@@ -1461,7 +1502,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   </tr>
                 </thead>
                 <tbody className='divide-y divide-slate-100'>
-                  {items.map(item => {
+                  {adjustmentFilteredItems.map(item => {
                     const draft = rowDrafts[item.id] || createDefaultRowDraft()
                     const isSelected = effectiveSelectedItemIds.includes(item.id)
                     const requiredFlags = getRequiredFieldFlags(draft.operation)
@@ -1601,6 +1642,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   })}
                 </tbody>
               </table>
+              {!adjustmentFilteredItems.length ? (
+                <p className='px-3 py-4 text-sm text-slate-500'>Sin productos que coincidan con la búsqueda de ajustes.</p>
+              ) : null}
             </div>
 
             <div className='rounded-xl border border-slate-200 p-3'>
