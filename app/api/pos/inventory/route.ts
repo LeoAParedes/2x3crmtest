@@ -48,15 +48,21 @@ export async function GET(request: Request) {
   const skip = (page - 1) * pageSize
   const orderField = sortFieldMap[sortBy] || sortFieldMap.productName
 
+  const baseWhere = { NOT: { aisle: '__archived__' } }
   const where = query
     ? {
-        OR: [
-          { sku: { contains: query, mode: 'insensitive' as const } },
-          { productName: { contains: query, mode: 'insensitive' as const } },
-          { category: { contains: query, mode: 'insensitive' as const } }
+        AND: [
+          baseWhere,
+          {
+            OR: [
+              { sku: { contains: query, mode: 'insensitive' as const } },
+              { productName: { contains: query, mode: 'insensitive' as const } },
+              { category: { contains: query, mode: 'insensitive' as const } }
+            ]
+          }
         ]
       }
-    : undefined
+    : baseWhere
 
   const prisma = await getPrisma()
   await applyDueScheduledPrices(prisma)

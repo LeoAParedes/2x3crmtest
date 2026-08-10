@@ -258,7 +258,7 @@ export async function POST(request: Request) {
       logInventoryAdjustmentDebug(runId, 'H4', 'delete operation received', {
         inventoryItemId: payload.inventoryItemId
       })
-      const deletedStock = await prisma.$transaction(async transaction => {
+      const deleteResult = await prisma.$transaction(async transaction => {
         const item = await transaction.inventoryItem.findUnique({
           where: { id: payload.inventoryItemId }
         })
@@ -266,6 +266,10 @@ export async function POST(request: Request) {
         logInventoryAdjustmentDebug(runId, 'H5', 'delete target item loaded', {
           inventoryItemId: item.id,
           stock: item.stock
+        })
+
+        const linkedSalesCount = await transaction.saleItem.count({
+          where: { inventoryItemId: payload.inventoryItemId }
         })
 
         if (item.stock > 0) {
@@ -308,12 +312,29 @@ export async function POST(request: Request) {
           })
         }
 
-        await transaction.inventoryItem.delete({
-          where: { id: payload.inventoryItemId }
-        })
-        logInventoryAdjustmentDebug(runId, 'H6', 'delete transaction removed inventory item', {
-          inventoryItemId: payload.inventoryItemId
-        })
+        if (linkedSalesCount > 0) {
+          const archivedSuffix = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)
+          await transaction.inventoryItem.update({
+            where: { id: payload.inventoryItemId },
+            data: {
+              sku: `${item.sku}-archived-${archivedSuffix}`,
+              productName: `${item.productName} [Archivado]`,
+              stock: 0,
+              aisle: '__archived__'
+            }
+          })
+          logInventoryAdjustmentDebug(runId, 'H6', 'delete converted to archive due to sale links', {
+            inventoryItemId: payload.inventoryItemId,
+            linkedSalesCount
+          })
+        } else {
+          await transaction.inventoryItem.delete({
+            where: { id: payload.inventoryItemId }
+          })
+          logInventoryAdjustmentDebug(runId, 'H6', 'delete transaction removed inventory item', {
+            inventoryItemId: payload.inventoryItemId
+          })
+        }
 
         await transaction.systemActionLog.create({
           data: {
@@ -326,20 +347,28 @@ export async function POST(request: Request) {
             status: 'success',
             metadata: {
               reason: payload.reason,
-              clearedStock: item.stock
+              clearedStock: item.stock,
+              mode: linkedSalesCount > 0 ? 'archived' : 'deleted',
+              linkedSalesCount
             }
           }
         })
 
-        return item.stock
+        return {
+          deletedStock: item.stock,
+          mode: linkedSalesCount > 0 ? 'archived' : 'deleted',
+          linkedSalesCount
+        }
       })
 
       return jsonOk({
         success: true,
         message:
-          deletedStock > 0
-            ? `Producto eliminado. Se registró salida automática de ${deletedStock} unidad(es) antes de eliminarlo.`
-            : 'Producto eliminado del catálogo correctamente.'
+          deleteResult.mode === 'archived'
+            ? `Producto archivado por historial de ventas (${deleteResult.linkedSalesCount} registros). Ya no aparece en inventario activo.`
+            : deleteResult.deletedStock > 0
+              ? `Producto eliminado. Se registró salida automática de ${deleteResult.deletedStock} unidad(es) antes de eliminarlo.`
+              : 'Producto eliminado del catálogo correctamente.'
       })
     }
 
