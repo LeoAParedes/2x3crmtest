@@ -194,6 +194,21 @@ type RowAdjustmentPreview = {
   previewLines: string[]
 }
 
+const getLogbookActionDisplayLabel = (action: string) => {
+  const actionLabelMap: Record<string, string> = {
+    'sale.create': 'Venta registrada',
+    'inventory.import.csv': 'Importación de inventario',
+    'pos.draft.saved': 'Borrador POS guardado',
+    'inventory.product.create': 'Producto agregado',
+    'inventory.product.delete': 'Producto eliminado',
+    'inventory.price.correct': 'Precio corregido',
+    'inventory.price.schedule': 'Precio programado',
+    'inventory.movement.entry': 'Entrada manual de stock',
+    'inventory.movement.exit': 'Salida manual de stock'
+  }
+  return actionLabelMap[action] || action
+}
+
 const createDefaultRowDraft = (): RowAdjustmentDraft => ({
   operation: 'correct_price',
   reason: 'Ajuste manual de inventario',
@@ -1285,7 +1300,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 <option value='all'>Todos los tipos</option>
                 {availableLogbookActions.map(action => (
                   <option key={action} value={action}>
-                    {action}
+                    {getLogbookActionDisplayLabel(action)}
                   </option>
                 ))}
               </select>
@@ -1357,7 +1372,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <td className='px-3 py-2 text-sm text-slate-700'>{item.category}</td>
                         <td className='px-3 py-2 text-sm text-slate-800'>
                           <p>{item.actionLabel}</p>
-                          <p className='text-xs text-slate-500'>{item.action}</p>
                         </td>
                         <td className='px-3 py-2 text-sm text-slate-700'>
                           <div className='max-w-[460px] whitespace-pre-wrap break-words text-xs leading-5'>{item.details}</div>
