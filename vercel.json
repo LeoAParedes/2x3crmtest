@@ -3,15 +3,12 @@
   "regions": ["iad1"],
   "functions": {
     "app/api/whatsapp/webhook/route.ts": {
-      "runtime": "nodejs22.x",
       "maxDuration": 15
     },
     "app/api/whatsapp/send/route.ts": {
-      "runtime": "nodejs22.x",
       "maxDuration": 10
     },
     "app/api/crm/**/route.ts": {
-      "runtime": "nodejs22.x",
       "maxDuration": 10
     }
   }
