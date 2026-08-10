@@ -600,15 +600,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }, [isInventorySettingsOpen, isLowStockAlertsOpen])
 
   useEffect(() => {
-    setPage(1)
-  }, [query, sortBy, sortDirection])
-
-  useEffect(() => {
-    setIsInventorySettingsOpen(false)
-    setIsLowStockAlertsOpen(false)
-  }, [activePanel])
-
-  useEffect(() => {
     if (activePanel !== 'logbook') return
 
     let cancelled = false
@@ -1086,6 +1077,12 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     setSelectedItemIds(sortedAdjustmentItems.map(item => item.id))
   }
 
+  const handleActivePanelChange = (panel: 'inventory' | 'logbook' | 'adjustments') => {
+    setIsInventorySettingsOpen(false)
+    setIsLowStockAlertsOpen(false)
+    setActivePanel(panel)
+  }
+
   const handleInventoryHeaderSort = (field: InventorySortField) => {
     setPage(1)
     if (sortBy === field) {
@@ -1501,7 +1498,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
           <div className='inline-flex rounded-lg border border-slate-300 bg-white p-1'>
             <button
               type='button'
-              onClick={() => setActivePanel('inventory')}
+              onClick={() => handleActivePanelChange('inventory')}
               aria-label='Ver vista de inventario'
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                 activePanel === 'inventory' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
@@ -1511,7 +1508,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             </button>
             <button
               type='button'
-              onClick={() => setActivePanel('logbook')}
+              onClick={() => handleActivePanelChange('logbook')}
               aria-label='Ver vista de bitácora'
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                 activePanel === 'logbook' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
@@ -1521,7 +1518,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             </button>
             <button
               type='button'
-              onClick={() => setActivePanel('adjustments')}
+              onClick={() => handleActivePanelChange('adjustments')}
               aria-label='Ver vista de ajustes'
               className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
                 activePanel === 'adjustments' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
