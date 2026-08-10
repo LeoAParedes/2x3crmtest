@@ -116,6 +116,12 @@ export const loginAction = async (_previousState: LoginState, formData: FormData
     )
 
     if ('error' in result) {
+      // #region agent log
+      console.warn('[H5] login denied with controlled error', {
+        runId,
+        errorMessage: result.error
+      })
+      // #endregion
       loginDebugLog(runId, 'H5', 'login denied with controlled error', {
         errorMessage: result.error
       })
@@ -123,11 +129,26 @@ export const loginAction = async (_previousState: LoginState, formData: FormData
       return result
     }
 
+    // #region agent log
+    console.info('[H5] login about to redirect', {
+      runId,
+      destination: result.destination
+    })
+    // #endregion
     loginDebugLog(runId, 'H5', 'login redirecting to destination', {
       destination: result.destination
     })
     redirect(result.destination)
   } catch (error) {
+    // #region agent log
+    console.error('[HX] login action threw unhandled error', {
+      runId,
+      name: error instanceof Error ? error.name : 'unknown',
+      message: error instanceof Error ? error.message : 'unknown',
+      digest:
+        typeof error === 'object' && error && 'digest' in error && typeof error.digest === 'string' ? error.digest : null
+    })
+    // #endregion
     loginDebugLog(runId, 'HX', 'login action threw unhandled error', {
       name: error instanceof Error ? error.name : 'unknown',
       message: error instanceof Error ? error.message : 'unknown',
