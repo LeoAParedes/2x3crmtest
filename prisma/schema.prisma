@@ -131,6 +131,7 @@ model InventoryItem {
   productName      String
   category         String
   stock            Int
+  minStock         Int                  @default(20)
   unitPrice        Decimal              @db.Decimal(10, 2)
   aisle            String?
   createdAt        DateTime             @default(now())

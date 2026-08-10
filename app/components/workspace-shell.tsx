@@ -88,19 +88,15 @@ const readCartCountFromDraftCookie = () => {
   try {
     const decoded = decodeURIComponent(rawCookie)
     const parsed = JSON.parse(decoded) as {
-      cart?: Array<{ quantityInput?: string; unitMode?: 'piece' | 'weight' }>
+      cart?: Array<{ inventoryItemId?: string }>
     }
     const cart = parsed.cart ?? []
-    return Number(
+    const productIds = new Set(
       cart
-        .reduce((sum, item) => {
-          const rawValue = String(item.quantityInput ?? '0').replace(',', '.')
-          const numericValue = Number(rawValue)
-          if (!Number.isFinite(numericValue) || numericValue <= 0) return sum
-          return sum + numericValue
-        }, 0)
-        .toFixed(2)
+        .map(item => item.inventoryItemId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
     )
+    return productIds.size
   } catch {
     return 0
   }
@@ -108,7 +104,7 @@ const readCartCountFromDraftCookie = () => {
 
 const formatCartCount = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return '0'
-  return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  return String(Math.round(value))
 }
 
 const handleNavKeyDown = (event: KeyboardEvent<HTMLAnchorElement>) => {
@@ -145,8 +141,11 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
 
     syncFromCookie()
     const handleCartUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ totalQuantity?: number }>).detail
-      const nextCount = typeof detail?.totalQuantity === 'number' ? detail.totalQuantity : readCartCountFromDraftCookie()
+      const detail = (event as CustomEvent<{ distinctProductCount?: number }>).detail
+      const nextCount =
+        typeof detail?.distinctProductCount === 'number'
+          ? detail.distinctProductCount
+          : readCartCountFromDraftCookie()
       setUniversalCartCount(nextCount)
     }
 

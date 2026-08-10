@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSPropert
 import { createPortal } from 'react-dom'
 
 import { calculateWeightedAveragePrice } from '@/src/lib/inventory/valuation'
+import { DEFAULT_MIN_STOCK, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 import type { CrmRole } from '@/src/lib/security/rbac'
 
@@ -14,6 +15,7 @@ type InventoryItem = {
   productName: string
   category: string
   stock: number
+  minStock: number
   unitPrice: number
   aisle: string | null
   supportsWeight: boolean
@@ -95,8 +97,15 @@ type AdjustmentPayload =
       productName: string
       category: string
       stock: number
+      minStock: number
       unitPrice: number
       aisle: string | null
+    }
+  | {
+      operation: 'set_min_stock'
+      inventoryItemId: string
+      minStock: number
+      reason: string
     }
   | {
       operation: 'delete_product'
@@ -140,6 +149,7 @@ type InventoryAdjustmentsResponse = {
     productName: string
     category?: string
     stock: number
+    minStock?: number
     unitPrice: number
   }
   valuation?: {
@@ -171,7 +181,13 @@ type ToastItem = {
   text: string
 }
 
-type RowAdjustmentOperation = 'correct_price' | 'schedule_price' | 'stock_entry' | 'stock_exit' | 'delete_product'
+type RowAdjustmentOperation =
+  | 'correct_price'
+  | 'schedule_price'
+  | 'stock_entry'
+  | 'stock_exit'
+  | 'set_min_stock'
+  | 'delete_product'
 
 type RowAdjustmentDraft = {
   operation: RowAdjustmentOperation
@@ -183,8 +199,18 @@ type RowAdjustmentDraft = {
   valuationMethod: 'fifo' | 'average'
 }
 
-type BulkOperation = 'correct_price' | 'schedule_price' | 'stock_entry' | 'stock_exit' | 'delete_product'
+type BulkOperation =
+  | 'correct_price'
+  | 'schedule_price'
+  | 'stock_entry'
+  | 'stock_exit'
+  | 'set_min_stock'
+  | 'delete_product'
 type RowAdjustmentPayload = Extract<AdjustmentPayload, { operation: RowAdjustmentOperation }>
+type SortDirection = 'asc' | 'desc'
+type InventorySortField = 'productName' | 'sku' | 'category' | 'stock' | 'unitPrice'
+type LogbookSortField = 'createdAt' | 'category' | 'actionLabel' | 'details' | 'actor' | 'status'
+type AdjustmentSortField = 'sku' | 'productName' | 'category' | 'stock' | 'unitPrice' | 'operation' | 'reason'
 
 type RowAdjustmentPreview = {
   payload: RowAdjustmentPayload
@@ -203,6 +229,7 @@ const getLogbookActionDisplayLabel = (action: string) => {
     'inventory.product.delete': 'Producto eliminado',
     'inventory.price.correct': 'Precio corregido',
     'inventory.price.schedule': 'Precio programado',
+    'inventory.min_stock.update': 'Umbral de stock bajo actualizado',
     'inventory.movement.entry': 'Entrada manual de stock',
     'inventory.movement.exit': 'Salida manual de stock'
   }
@@ -224,13 +251,14 @@ const getRowOperationLabel = (operation: RowAdjustmentOperation) => {
   if (operation === 'schedule_price') return 'Programación de precio'
   if (operation === 'stock_entry') return 'Entrada de inventario'
   if (operation === 'stock_exit') return 'Salida de inventario'
+  if (operation === 'set_min_stock') return 'Umbral de stock bajo'
   return 'Eliminación de producto'
 }
 
 const getRequiredFieldFlags = (operation: RowAdjustmentOperation) => ({
   requiresPrice: operation === 'correct_price' || operation === 'schedule_price',
   requiresEffectiveFrom: operation === 'schedule_price',
-  requiresQuantity: operation === 'stock_entry' || operation === 'stock_exit',
+  requiresQuantity: operation === 'stock_entry' || operation === 'stock_exit' || operation === 'set_min_stock',
   requiresUnitCost: operation === 'stock_entry',
   requiresValuationMethod: operation === 'stock_exit'
 })
@@ -239,10 +267,16 @@ const getRequiredFieldLabels = (flags: ReturnType<typeof getRequiredFieldFlags>)
   const labels = ['Motivo']
   if (flags.requiresPrice) labels.push('Nuevo precio')
   if (flags.requiresEffectiveFrom) labels.push('Fecha vigencia')
-  if (flags.requiresQuantity) labels.push('Cantidad')
+  if (flags.requiresQuantity) labels.push('Cantidad / Umbral')
   if (flags.requiresUnitCost) labels.push('Costo unitario')
   if (flags.requiresValuationMethod) labels.push('Método valoración')
   return labels
+}
+
+const getLowStockRowClassName = (item: InventoryItem, extraClassName = '') => {
+  const base = extraClassName.trim()
+  if (!isLowStockItem(item)) return base || undefined
+  return [base, 'outline outline-2 -outline-offset-2 outline-orange-500 bg-orange-50/50'].filter(Boolean).join(' ')
 }
 
 const getMissingFieldAlertStyle = (isMissing: boolean): CSSProperties | undefined =>
@@ -291,9 +325,24 @@ const getRowMissingFields = (draft: RowAdjustmentDraft) => {
   if (!draft.reason.trim()) missing.push('Motivo')
   if (flags.requiresPrice && !draft.newUnitPrice.trim()) missing.push('Nuevo precio')
   if (flags.requiresEffectiveFrom && !draft.effectiveFrom.trim()) missing.push('Fecha vigencia')
-  if (flags.requiresQuantity && !draft.quantity.trim()) missing.push('Cantidad')
+  if (flags.requiresQuantity && !draft.quantity.trim()) {
+    missing.push(draft.operation === 'set_min_stock' ? 'Umbral' : 'Cantidad')
+  }
   if (flags.requiresUnitCost && !draft.unitCost.trim()) missing.push('Costo unitario')
   return missing
+}
+
+const compareText = (left: string, right: string) =>
+  left.localeCompare(right, 'es', {
+    sensitivity: 'base',
+    numeric: true
+  })
+
+const compareNumber = (left: number, right: number) => left - right
+
+const getSortIndicator = (isActive: boolean, direction: SortDirection) => {
+  if (!isActive) return '↕'
+  return direction === 'asc' ? '▲' : '▼'
 }
 
 export const InventoryClient = ({ role }: InventoryClientProps) => {
@@ -303,8 +352,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const shouldOpenAdjustmentsByShortcut = shortcut === 'ajuste'
   const [items, setItems] = useState<InventoryItem[]>([])
   const [query, setQuery] = useState('')
-  const [sortBy, setSortBy] = useState<'productName' | 'sku' | 'stock' | 'unitPrice'>('productName')
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
+  const [sortBy, setSortBy] = useState<InventorySortField>('productName')
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
@@ -312,6 +361,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [refreshSeed, setRefreshSeed] = useState(0)
   const [showArchivedCodes, setShowArchivedCodes] = useState(false)
   const [isInventorySettingsOpen, setIsInventorySettingsOpen] = useState(false)
+  const [isLowStockAlertsOpen, setIsLowStockAlertsOpen] = useState(false)
+  const [lowStockAlerts, setLowStockAlerts] = useState<InventoryItem[]>([])
+  const [loadingLowStockAlerts, setLoadingLowStockAlerts] = useState(false)
   const [activePanel, setActivePanel] = useState<'inventory' | 'logbook' | 'adjustments'>(
     shouldOpenAdjustmentsByShortcut ? 'adjustments' : shouldOpenLogbookByShortcut ? 'logbook' : 'inventory'
   )
@@ -320,6 +372,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [logbookStatusFilter, setLogbookStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all')
   const [logbookCategoryFilter, setLogbookCategoryFilter] = useState<LogbookCategory | 'all'>('inventory')
   const [logbookActorFilter, setLogbookActorFilter] = useState('')
+  const [logbookSortBy, setLogbookSortBy] = useState<LogbookSortField>('createdAt')
+  const [logbookSortDirection, setLogbookSortDirection] = useState<SortDirection>('desc')
   const [availableLogbookActions, setAvailableLogbookActions] = useState<string[]>([])
   const [loadingLogbook, setLoadingLogbook] = useState(false)
   const [loadingAdjustments, setLoadingAdjustments] = useState(false)
@@ -330,6 +384,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [bulkPreview, setBulkPreview] = useState<RowAdjustmentPreview[] | null>(null)
   const [validationAttemptedRows, setValidationAttemptedRows] = useState<Record<string, boolean>>({})
   const [adjustmentQuery, setAdjustmentQuery] = useState('')
+  const [adjustmentSortBy, setAdjustmentSortBy] = useState<AdjustmentSortField>('sku')
+  const [adjustmentSortDirection, setAdjustmentSortDirection] = useState<SortDirection>('asc')
   const [submittingAdjustment, setSubmittingAdjustment] = useState(false)
   const [selectedItemIds, setSelectedItemIds] = useState<string[]>([])
   const [rowDrafts, setRowDrafts] = useState<Record<string, RowAdjustmentDraft>>({})
@@ -345,9 +401,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     productName: '',
     category: '',
     stock: '0',
+    minStock: String(DEFAULT_MIN_STOCK),
     unitPrice: '0',
     aisle: ''
   })
+  const [isAddProductModalOpen, setIsAddProductModalOpen] = useState(false)
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [importCsv, setImportCsv] = useState('')
@@ -358,6 +416,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [lastValidatedCsv, setLastValidatedCsv] = useState('')
   const closeModalButtonRef = useRef<HTMLButtonElement | null>(null)
   const inventoryTableContainerRef = useRef<HTMLDivElement | null>(null)
+  const toolbarClusterRef = useRef<HTMLDivElement | null>(null)
 
   const canValidateImport = useMemo(
     () => importCsv.trim().length > 0 && !importing && !validatingImport,
@@ -446,7 +505,12 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
           sortDirection
         })
         if (cancelled) return
-        setItems(payload.items)
+        setItems(
+          payload.items.map(item => ({
+            ...item,
+            minStock: typeof item.minStock === 'number' ? item.minStock : DEFAULT_MIN_STOCK
+          }))
+        )
         setTotalItems(payload.pagination.total)
         setTotalPages(payload.pagination.totalPages)
         if (page > payload.pagination.totalPages) {
@@ -471,11 +535,77 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }, [query, sortBy, sortDirection, page, refreshSeed, showArchivedCodes])
 
   useEffect(() => {
+    let cancelled = false
+
+    const loadLowStockAlerts = async () => {
+      setLoadingLowStockAlerts(true)
+      try {
+        const params = new URLSearchParams({
+          alertsOnly: 'true',
+          includeArchived: 'false'
+        })
+        const response = await fetch(`/api/pos/inventory?${params.toString()}`)
+        const payload = (await response.json()) as InventoryResponse
+        if (!response.ok || !payload.success) {
+          throw new Error('No fue posible cargar alertas de stock bajo')
+        }
+        if (cancelled) return
+        setLowStockAlerts(
+          payload.items.map(item => ({
+            ...item,
+            minStock: typeof item.minStock === 'number' ? item.minStock : DEFAULT_MIN_STOCK
+          }))
+        )
+      } catch {
+        if (!cancelled) {
+          setLowStockAlerts([])
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingLowStockAlerts(false)
+        }
+      }
+    }
+
+    void loadLowStockAlerts()
+
+    return () => {
+      cancelled = true
+    }
+  }, [refreshSeed])
+
+  useEffect(() => {
+    if (!isLowStockAlertsOpen && !isInventorySettingsOpen) return
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (toolbarClusterRef.current?.contains(target)) return
+      setIsLowStockAlertsOpen(false)
+      setIsInventorySettingsOpen(false)
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setIsLowStockAlertsOpen(false)
+      setIsInventorySettingsOpen(false)
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isInventorySettingsOpen, isLowStockAlertsOpen])
+
+  useEffect(() => {
     setPage(1)
   }, [query, sortBy, sortDirection])
 
   useEffect(() => {
     setIsInventorySettingsOpen(false)
+    setIsLowStockAlertsOpen(false)
   }, [activePanel])
 
   useEffect(() => {
@@ -569,6 +699,71 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         item.category.toLowerCase().includes(normalizedQuery)
     )
   }, [adjustmentQuery, items])
+  const sortedLogbookItems = useMemo(() => {
+    const indexedItems = logbookItems.map((item, index) => ({ item, index }))
+    indexedItems.sort((left, right) => {
+      const leftItem = left.item
+      const rightItem = right.item
+      let comparison = 0
+
+      if (logbookSortBy === 'createdAt') {
+        comparison = compareNumber(new Date(leftItem.createdAt).getTime(), new Date(rightItem.createdAt).getTime())
+      } else if (logbookSortBy === 'category') {
+        comparison = compareText(leftItem.category, rightItem.category)
+      } else if (logbookSortBy === 'actionLabel') {
+        comparison = compareText(leftItem.actionLabel, rightItem.actionLabel)
+      } else if (logbookSortBy === 'details') {
+        comparison = compareText(leftItem.details, rightItem.details)
+      } else if (logbookSortBy === 'actor') {
+        comparison = compareText(
+          `${leftItem.actorUsername} ${leftItem.actorRole}`,
+          `${rightItem.actorUsername} ${rightItem.actorRole}`
+        )
+      } else {
+        comparison = compareText(leftItem.status, rightItem.status)
+      }
+
+      if (comparison === 0) {
+        return left.index - right.index
+      }
+
+      return logbookSortDirection === 'asc' ? comparison : -comparison
+    })
+    return indexedItems.map(entry => entry.item)
+  }, [logbookItems, logbookSortBy, logbookSortDirection])
+  const sortedAdjustmentItems = useMemo(() => {
+    const indexedItems = adjustmentFilteredItems.map((item, index) => ({ item, index }))
+    indexedItems.sort((left, right) => {
+      const leftItem = left.item
+      const rightItem = right.item
+      const leftDraft = rowDrafts[leftItem.id] || createDefaultRowDraft()
+      const rightDraft = rowDrafts[rightItem.id] || createDefaultRowDraft()
+      let comparison = 0
+
+      if (adjustmentSortBy === 'sku') {
+        comparison = compareText(leftItem.sku, rightItem.sku)
+      } else if (adjustmentSortBy === 'productName') {
+        comparison = compareText(leftItem.productName, rightItem.productName)
+      } else if (adjustmentSortBy === 'category') {
+        comparison = compareText(leftItem.category, rightItem.category)
+      } else if (adjustmentSortBy === 'stock') {
+        comparison = compareNumber(leftItem.stock, rightItem.stock)
+      } else if (adjustmentSortBy === 'unitPrice') {
+        comparison = compareNumber(leftItem.unitPrice, rightItem.unitPrice)
+      } else if (adjustmentSortBy === 'operation') {
+        comparison = compareText(leftDraft.operation, rightDraft.operation)
+      } else {
+        comparison = compareText(leftDraft.reason, rightDraft.reason)
+      }
+
+      if (comparison === 0) {
+        return left.index - right.index
+      }
+
+      return adjustmentSortDirection === 'asc' ? comparison : -comparison
+    })
+    return indexedItems.map(entry => entry.item)
+  }, [adjustmentFilteredItems, adjustmentSortBy, adjustmentSortDirection, rowDrafts])
   const effectiveAdjustmentSelectedIds = useMemo(
     () => effectiveSelectedItemIds.filter(id => adjustmentFilteredItems.some(item => item.id === id)),
     [effectiveSelectedItemIds, adjustmentFilteredItems]
@@ -626,6 +821,21 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }
   }, [isImportModalOpen])
 
+  useEffect(() => {
+    if (!isAddProductModalOpen) return
+
+    const handleEscClose = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsAddProductModalOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleEscClose)
+    return () => {
+      window.removeEventListener('keydown', handleEscClose)
+    }
+  }, [isAddProductModalOpen])
+
   const handleOpenImportModal = () => {
     if (role !== 'admin') return
     logAdjustmentDebug(`import-open-${Date.now()}`, 'H5', 'import modal opened', {
@@ -640,6 +850,27 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
 
   const handleCloseImportModal = () => {
     setIsImportModalOpen(false)
+  }
+
+  const resetAddProductForm = () => {
+    setAddProductForm({
+      sku: '',
+      productName: '',
+      category: '',
+      stock: '0',
+      minStock: String(DEFAULT_MIN_STOCK),
+      unitPrice: '0',
+      aisle: ''
+    })
+  }
+
+  const handleOpenAddProductModal = () => {
+    if (role !== 'admin') return
+    setIsAddProductModalOpen(true)
+  }
+
+  const handleCloseAddProductModal = () => {
+    setIsAddProductModalOpen(false)
   }
 
   const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -694,13 +925,17 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const handleImport = async () => {
     if (!canSubmitImport) return
 
+    const csvToImport = importCsv
     setImporting(true)
     setImportResult(null)
+    setIsImportModalOpen(false)
+    pushToast('Importación en proceso', 'info')
+
     try {
       const response = await fetch('/api/inventario/importar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv: importCsv })
+        body: JSON.stringify({ csv: csvToImport })
       })
       const payload = (await response.json()) as ImportResponse
       logAdjustmentDebug(`import-submit-${Date.now()}`, 'H2', 'import submit response', {
@@ -717,17 +952,20 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
 
       setImportResult(payload)
       setRefreshSeed(current => current + 1)
+      pushToast('Importación finalizada', 'success')
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error desconocido durante importación'
       setImportResult({
         success: false,
-        message: error instanceof Error ? error.message : 'Error desconocido durante importación'
+        message
       })
+      pushToast(message, 'error')
     } finally {
       setImporting(false)
     }
   }
 
-  const submitAdjustment = async (payload: AdjustmentPayload) => {
+  const submitAdjustment = async (payload: AdjustmentPayload): Promise<boolean> => {
     const runId = `delete-ui-${Date.now()}`
     setSubmittingAdjustment(true)
     setAdjustmentResult(null)
@@ -765,6 +1003,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   productName: result.item?.productName || item.productName,
                   category: result.item?.category || item.category,
                   stock: result.item?.stock ?? item.stock,
+                  minStock: result.item?.minStock ?? item.minStock,
                   unitPrice: result.item?.unitPrice ?? item.unitPrice
                 }
               : item
@@ -784,19 +1023,24 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       }
       pushToast(result.message || 'Ajuste aplicado correctamente', 'success')
       setRefreshSeed(current => current + 1)
+      return true
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error aplicando ajuste'
       pushToast(normalizeAdjustmentErrorMessage(message), 'error')
+      return false
     } finally {
       setSubmittingAdjustment(false)
     }
   }
 
   const handleAddProduct = async () => {
+    if (role !== 'admin') return
+
     const stock = parseNumberInput(addProductForm.stock)
+    const minStock = parseNumberInput(addProductForm.minStock)
     const unitPrice = parseNumberInput(addProductForm.unitPrice)
-    if (stock === null || unitPrice === null) {
-      pushToast('Stock y precio del producto nuevo deben ser numéricos', 'error')
+    if (stock === null || minStock === null || unitPrice === null) {
+      pushToast('Stock, umbral y precio del producto nuevo deben ser numéricos', 'error')
       return
     }
     if (unitPrice <= 0) {
@@ -807,16 +1051,25 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       pushToast('El stock inicial no puede ser negativo', 'error')
       return
     }
+    if (minStock < 0) {
+      pushToast('El umbral de stock bajo no puede ser negativo', 'error')
+      return
+    }
 
-    await submitAdjustment({
+    const success = await submitAdjustment({
       operation: 'add_product',
       sku: addProductForm.sku.trim(),
       productName: addProductForm.productName.trim(),
       category: addProductForm.category.trim(),
       stock: Math.max(0, Math.round(stock)),
+      minStock: Math.max(0, Math.round(minStock)),
       unitPrice: Number(unitPrice.toFixed(2)),
       aisle: addProductForm.aisle.trim() ? addProductForm.aisle.trim() : null
     })
+    if (!success) return
+
+    resetAddProductForm()
+    setIsAddProductModalOpen(false)
   }
 
   const handleToggleItemSelection = (itemId: string) => {
@@ -826,14 +1079,14 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }
 
   const handleToggleAllSelections = () => {
-    if (effectiveAdjustmentSelectedIds.length === adjustmentFilteredItems.length) {
+    if (effectiveAdjustmentSelectedIds.length === sortedAdjustmentItems.length) {
       setSelectedItemIds([])
       return
     }
-    setSelectedItemIds(adjustmentFilteredItems.map(item => item.id))
+    setSelectedItemIds(sortedAdjustmentItems.map(item => item.id))
   }
 
-  const handleInventoryHeaderSort = (field: 'sku' | 'productName') => {
+  const handleInventoryHeaderSort = (field: InventorySortField) => {
     setPage(1)
     if (sortBy === field) {
       setSortDirection(current => (current === 'asc' ? 'desc' : 'asc'))
@@ -841,6 +1094,22 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }
     setSortBy(field)
     setSortDirection('asc')
+  }
+  const handleLogbookHeaderSort = (field: LogbookSortField) => {
+    if (logbookSortBy === field) {
+      setLogbookSortDirection(current => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setLogbookSortBy(field)
+    setLogbookSortDirection(field === 'createdAt' ? 'desc' : 'asc')
+  }
+  const handleAdjustmentHeaderSort = (field: AdjustmentSortField) => {
+    if (adjustmentSortBy === field) {
+      setAdjustmentSortDirection(current => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setAdjustmentSortBy(field)
+    setAdjustmentSortDirection('asc')
   }
 
   const updateRowDraft = (itemId: string, patch: Partial<RowAdjustmentDraft>) => {
@@ -921,6 +1190,22 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       }
     }
 
+    if (draft.operation === 'set_min_stock') {
+      const minStock = parseNumberInput(draft.quantity)
+      if (minStock === null) {
+        throw new Error('Umbral de stock bajo inválido')
+      }
+      if (minStock < 0) {
+        throw new Error('El umbral de stock bajo no puede ser negativo')
+      }
+      return {
+        operation: 'set_min_stock',
+        inventoryItemId: itemId,
+        minStock: Math.max(0, Math.round(minStock)),
+        reason: normalizedReason
+      }
+    }
+
     const quantity = parseNumberInput(draft.quantity)
     if (quantity === null) {
       throw new Error('Cantidad inválida para salida')
@@ -984,6 +1269,16 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         lines.push('Precio proyectado: se recalcula por lotes FIFO')
       } else {
         lines.push(`Precio proyectado: ${currentPriceLabel}`)
+      }
+    }
+
+    if (payload.operation === 'set_min_stock') {
+      lines.push(`Umbral actual: ${item.minStock}`)
+      lines.push(`Nuevo umbral de stock bajo: ${payload.minStock}`)
+      if (item.stock <= payload.minStock) {
+        lines.push('El producto quedará en alerta de stock bajo')
+      } else {
+        lines.push('El producto quedará fuera de alerta de stock bajo')
       }
     }
 
@@ -1158,6 +1453,22 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       }
     }
 
+    if (bulkOperation === 'set_min_stock') {
+      const minStock = parseNumberInput(bulkQuantity)
+      if (minStock === null) {
+        throw new Error('Umbral de stock bajo inválido para lote')
+      }
+      if (minStock < 0) {
+        throw new Error('El umbral de stock bajo en lote no puede ser negativo')
+      }
+      return {
+        operation: 'set_min_stock',
+        inventoryItemId: itemId,
+        minStock: Math.max(0, Math.round(minStock)),
+        reason: normalizedReason
+      }
+    }
+
     const quantity = parseNumberInput(bulkQuantity)
     if (quantity === null) {
       throw new Error('Cantidad inválida para salida en lote')
@@ -1220,42 +1531,114 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             </button>
           </div>
           <div className='flex items-center gap-2'>
-            <div className='relative'>
+            {role === 'admin' ? (
               <button
                 type='button'
-                onClick={() => setIsInventorySettingsOpen(current => !current)}
-                aria-label='Abrir configuración de inventario'
-                className='inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-lg text-slate-700 hover:bg-slate-100'
+                onClick={handleOpenAddProductModal}
+                aria-label='Agregar producto nuevo'
+                className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700'
               >
-                ⚙️
+                Agregar producto nuevo
               </button>
-              {isInventorySettingsOpen ? (
-                <div className='absolute right-0 top-12 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg'>
-                  <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>Visualización</p>
-                  <label className='mt-2 flex items-center gap-2 text-sm text-slate-700'>
-                    <input
-                      type='checkbox'
-                      checked={showArchivedCodes}
-                      onChange={event => {
-                        setShowArchivedCodes(event.target.checked)
-                        setPage(1)
-                      }}
-                    />
-                    Ver códigos archivados
-                  </label>
-                </div>
-              ) : null}
-            </div>
-            {activePanel === 'inventory' && role === 'admin' ? (
+            ) : null}
+            {role === 'admin' ? (
               <button
                 type='button'
                 onClick={handleOpenImportModal}
                 aria-label='Abrir importación de productos'
-                className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700'
+                className='rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50'
               >
-                Importación de productos
+                Importación
               </button>
             ) : null}
+            <div ref={toolbarClusterRef} className='relative flex flex-col items-center gap-1'>
+              <div className='relative'>
+                <button
+                  type='button'
+                  onClick={() => {
+                    setIsInventorySettingsOpen(false)
+                    setIsLowStockAlertsOpen(current => !current)
+                  }}
+                  aria-label={
+                    lowStockAlerts.length > 0
+                      ? `Alertas de stock bajo, ${lowStockAlerts.length} productos`
+                      : 'Alertas de stock bajo'
+                  }
+                  aria-expanded={isLowStockAlertsOpen}
+                  aria-haspopup='dialog'
+                  className='relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-lg text-slate-700 hover:bg-slate-100'
+                >
+                  <span aria-hidden='true'>🔔</span>
+                  {lowStockAlerts.length > 0 ? (
+                    <span className='absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold leading-4 text-white'>
+                      {lowStockAlerts.length > 99 ? '99+' : lowStockAlerts.length}
+                    </span>
+                  ) : null}
+                </button>
+                {isLowStockAlertsOpen ? (
+                  <div
+                    role='dialog'
+                    aria-label='Lista de productos con stock bajo'
+                    className='absolute right-0 top-12 z-30 w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-lg'
+                  >
+                    <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>Stock bajo</p>
+                    <p className='mt-1 text-xs text-slate-600'>
+                      Productos en o por debajo de su umbral, más urgentes primero.
+                    </p>
+                    {loadingLowStockAlerts ? (
+                      <p className='mt-3 text-sm text-slate-500'>Cargando alertas...</p>
+                    ) : lowStockAlerts.length === 0 ? (
+                      <p className='mt-3 text-sm text-slate-500'>No hay productos con stock bajo.</p>
+                    ) : (
+                      <ul className='mt-3 max-h-64 space-y-2 overflow-y-auto'>
+                        {lowStockAlerts.map(item => (
+                          <li
+                            key={item.id}
+                            className='rounded-lg border border-orange-500 bg-orange-50/60 px-3 py-2'
+                          >
+                            <p className='text-sm font-medium text-slate-900'>{item.productName}</p>
+                            <p className='text-xs text-slate-600'>
+                              SKU {item.sku} · Stock {item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : item.stock} / umbral{' '}
+                              {item.minStock}
+                            </p>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              <div className='relative'>
+                <button
+                  type='button'
+                  onClick={() => {
+                    setIsLowStockAlertsOpen(false)
+                    setIsInventorySettingsOpen(current => !current)
+                  }}
+                  aria-label='Abrir configuración de inventario'
+                  aria-expanded={isInventorySettingsOpen}
+                  className='inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-lg text-slate-700 hover:bg-slate-100'
+                >
+                  ⚙️
+                </button>
+                {isInventorySettingsOpen ? (
+                  <div className='absolute right-0 top-12 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg'>
+                    <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>Visualización</p>
+                    <label className='mt-2 flex items-center gap-2 text-sm text-slate-700'>
+                      <input
+                        type='checkbox'
+                        checked={showArchivedCodes}
+                        onChange={event => {
+                          setShowArchivedCodes(event.target.checked)
+                          setPage(1)
+                        }}
+                      />
+                      Ver códigos archivados
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1287,7 +1670,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         className='inline-flex items-center gap-1 text-left'
                       >
                         SKU
-                        {sortBy === 'sku' ? (sortDirection === 'asc' ? '▲' : '▼') : null}
+                        <span className='text-[10px]'>{getSortIndicator(sortBy === 'sku', sortDirection)}</span>
                       </button>
                     </th>
                     <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
@@ -1297,21 +1680,53 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         className='inline-flex items-center gap-1 text-left'
                       >
                         Producto
-                        {sortBy === 'productName' ? (sortDirection === 'asc' ? '▲' : '▼') : null}
+                        <span className='text-[10px]'>{getSortIndicator(sortBy === 'productName', sortDirection)}</span>
                       </button>
                     </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Stock</th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Precio</th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Tipo</th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                      <button
+                        type='button'
+                        onClick={() => handleInventoryHeaderSort('stock')}
+                        className='inline-flex items-center gap-1 text-left'
+                      >
+                        Stock
+                        <span className='text-[10px]'>{getSortIndicator(sortBy === 'stock', sortDirection)}</span>
+                      </button>
+                    </th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                      <button
+                        type='button'
+                        onClick={() => handleInventoryHeaderSort('unitPrice')}
+                        className='inline-flex items-center gap-1 text-left'
+                      >
+                        Precio
+                        <span className='text-[10px]'>{getSortIndicator(sortBy === 'unitPrice', sortDirection)}</span>
+                      </button>
+                    </th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                      <button
+                        type='button'
+                        onClick={() => handleInventoryHeaderSort('category')}
+                        className='inline-flex items-center gap-1 text-left'
+                      >
+                        Tipo
+                        <span className='text-[10px]'>{getSortIndicator(sortBy === 'category', sortDirection)}</span>
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className='divide-y divide-slate-100 bg-white'>
                   {items.map(item => (
-                    <tr key={item.id}>
+                    <tr key={item.id} className={getLowStockRowClassName(item)}>
                       <td className='px-3 py-2 text-sm text-slate-700'>{item.sku}</td>
                       <td className='px-3 py-2 text-sm text-slate-900'>
                         <p className='font-medium'>{item.productName}</p>
                         <p className='text-xs text-slate-500'>{item.category}</p>
+                        {isLowStockItem(item) ? (
+                          <p className='mt-1 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-800'>
+                            Stock bajo (umbral {item.minStock})
+                          </p>
+                        ) : null}
                         {item.aisle === '__archived__' ? (
                           <p className='mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800'>
                             Archivado
@@ -1412,22 +1827,54 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             <article className='rounded-xl border border-slate-200'>
               <header className='border-b border-slate-200 bg-slate-50 px-4 py-3'>
                 <h2 className='text-sm font-semibold text-slate-900'>Registro de operaciones del sistema</h2>
-                <p className='mt-1 text-xs text-slate-600'>Orden cronológico (más reciente primero)</p>
+                <p className='mt-1 text-xs text-slate-600'>
+                  Ordena haciendo clic en cualquier encabezado de columna.
+                </p>
               </header>
               <div className='overflow-x-auto'>
                 <table className='min-w-full divide-y divide-slate-200'>
                   <thead className='bg-white'>
                     <tr>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Fecha</th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Categoría</th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Operación</th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Detalle</th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Usuario</th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>Estado</th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                        <button type='button' onClick={() => handleLogbookHeaderSort('createdAt')} className='inline-flex items-center gap-1'>
+                          Fecha
+                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'createdAt', logbookSortDirection)}</span>
+                        </button>
+                      </th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                        <button type='button' onClick={() => handleLogbookHeaderSort('category')} className='inline-flex items-center gap-1'>
+                          Categoría
+                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'category', logbookSortDirection)}</span>
+                        </button>
+                      </th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                        <button type='button' onClick={() => handleLogbookHeaderSort('actionLabel')} className='inline-flex items-center gap-1'>
+                          Operación
+                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'actionLabel', logbookSortDirection)}</span>
+                        </button>
+                      </th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                        <button type='button' onClick={() => handleLogbookHeaderSort('details')} className='inline-flex items-center gap-1'>
+                          Detalle
+                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'details', logbookSortDirection)}</span>
+                        </button>
+                      </th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                        <button type='button' onClick={() => handleLogbookHeaderSort('actor')} className='inline-flex items-center gap-1'>
+                          Usuario
+                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'actor', logbookSortDirection)}</span>
+                        </button>
+                      </th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                        <button type='button' onClick={() => handleLogbookHeaderSort('status')} className='inline-flex items-center gap-1'>
+                          Estado
+                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'status', logbookSortDirection)}</span>
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody className='divide-y divide-slate-100 bg-white'>
-                    {logbookItems.map(item => (
+                    {sortedLogbookItems.map(item => (
                       <tr key={item.id}>
                         <td className='whitespace-nowrap px-3 py-2 text-sm text-slate-700'>
                           {new Date(item.createdAt).toLocaleString('es-MX')}
@@ -1459,7 +1906,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                     ))}
                   </tbody>
                 </table>
-                {!logbookItems.length ? (
+                {!sortedLogbookItems.length ? (
                   <p className='px-3 py-4 text-sm text-slate-500'>Sin operaciones para los filtros seleccionados.</p>
                 ) : null}
               </div>
@@ -1475,7 +1922,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               />
               <p className='self-center text-xs text-slate-500'>
-                Mostrando {adjustmentFilteredItems.length} de {items.length} producto(s)
+                Mostrando {sortedAdjustmentItems.length} de {items.length} producto(s)
               </p>
             </div>
 
@@ -1490,6 +1937,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   <option value='schedule_price'>Lote: programar precio</option>
                   <option value='stock_entry'>Lote: entrada</option>
                   <option value='stock_exit'>Lote: salida</option>
+                  <option value='set_min_stock'>Lote: umbral stock bajo</option>
                   <option value='delete_product'>Lote: eliminar</option>
                 </select>
                 {bulkOperation === 'correct_price' || bulkOperation === 'schedule_price' ? (
@@ -1512,11 +1960,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 ) : (
                   <div className='h-9 rounded-lg border border-dashed border-slate-200 bg-slate-100' />
                 )}
-                {bulkOperation === 'stock_entry' || bulkOperation === 'stock_exit' ? (
+                {bulkOperation === 'stock_entry' || bulkOperation === 'stock_exit' || bulkOperation === 'set_min_stock' ? (
                   <input
                     value={bulkQuantity}
                     onChange={event => setBulkQuantity(event.target.value)}
-                    placeholder='Cantidad lote'
+                    placeholder={bulkOperation === 'set_min_stock' ? 'Umbral lote' : 'Cantidad lote'}
                     className='h-9 rounded-lg border border-slate-300 px-2 text-xs'
                   />
                 ) : (
@@ -1557,7 +2005,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   onClick={handleToggleAllSelections}
                   className='h-9 rounded-lg border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-white'
                 >
-                  {effectiveAdjustmentSelectedIds.length === adjustmentFilteredItems.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
+                  {effectiveAdjustmentSelectedIds.length === sortedAdjustmentItems.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
                 </button>
                 <button
                   type='button'
@@ -1586,21 +2034,60 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 <thead className='bg-slate-50'>
                   <tr>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Sel.</th>
-                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>SKU</th>
-                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Nombre</th>
-                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Stock / Precio</th>
-                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Operación</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>
+                      <button type='button' onClick={() => handleAdjustmentHeaderSort('sku')} className='inline-flex items-center gap-1'>
+                        SKU
+                        <span className='text-[10px]'>{getSortIndicator(adjustmentSortBy === 'sku', adjustmentSortDirection)}</span>
+                      </button>
+                    </th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>
+                      <button type='button' onClick={() => handleAdjustmentHeaderSort('productName')} className='inline-flex items-center gap-1'>
+                        Nombre
+                        <span className='text-[10px]'>{getSortIndicator(adjustmentSortBy === 'productName', adjustmentSortDirection)}</span>
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => handleAdjustmentHeaderSort('category')}
+                        className='ml-2 inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600'
+                      >
+                        cat.
+                        <span className='text-[10px]'>{getSortIndicator(adjustmentSortBy === 'category', adjustmentSortDirection)}</span>
+                      </button>
+                    </th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>
+                      <div className='flex flex-wrap items-center gap-2'>
+                        <button type='button' onClick={() => handleAdjustmentHeaderSort('stock')} className='inline-flex items-center gap-1'>
+                          Stock
+                          <span className='text-[10px]'>{getSortIndicator(adjustmentSortBy === 'stock', adjustmentSortDirection)}</span>
+                        </button>
+                        <button type='button' onClick={() => handleAdjustmentHeaderSort('unitPrice')} className='inline-flex items-center gap-1'>
+                          Precio
+                          <span className='text-[10px]'>{getSortIndicator(adjustmentSortBy === 'unitPrice', adjustmentSortDirection)}</span>
+                        </button>
+                      </div>
+                    </th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>
+                      <button type='button' onClick={() => handleAdjustmentHeaderSort('operation')} className='inline-flex items-center gap-1'>
+                        Operación
+                        <span className='text-[10px]'>{getSortIndicator(adjustmentSortBy === 'operation', adjustmentSortDirection)}</span>
+                      </button>
+                    </th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Nuevo precio</th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Fecha vigencia</th>
-                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Cantidad</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Cantidad / Umbral</th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Costo unitario</th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Método</th>
-                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Motivo</th>
+                    <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>
+                      <button type='button' onClick={() => handleAdjustmentHeaderSort('reason')} className='inline-flex items-center gap-1'>
+                        Motivo
+                        <span className='text-[10px]'>{getSortIndicator(adjustmentSortBy === 'reason', adjustmentSortDirection)}</span>
+                      </button>
+                    </th>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Acción</th>
                   </tr>
                 </thead>
                 <tbody className='divide-y divide-slate-100'>
-                  {adjustmentFilteredItems.map(item => {
+                  {sortedAdjustmentItems.map(item => {
                     const draft = rowDrafts[item.id] || createDefaultRowDraft()
                     const isSelected = effectiveSelectedItemIds.includes(item.id)
                     const requiredFlags = getRequiredFieldFlags(draft.operation)
@@ -1619,7 +2106,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                       showValidationHints || isMissing ? getMissingFieldAlertStyle(isMissing) : undefined
 
                     return (
-                      <tr key={item.id} className={isSelected ? 'bg-emerald-50/60' : 'bg-white'}>
+                      <tr key={item.id} className={getLowStockRowClassName(item, isSelected ? 'bg-emerald-50/60' : 'bg-white')}>
                         <td className='px-2 py-2'>
                           <input
                             type='checkbox'
@@ -1634,6 +2121,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <td className='px-2 py-2 text-xs text-slate-700'>
                           <p className='font-medium text-slate-900'>{item.productName}</p>
                           <p className='text-slate-500'>{item.category}</p>
+                          {isLowStockItem(item) ? (
+                            <p className='mt-1 text-[11px] font-medium text-orange-700'>Stock bajo · umbral {item.minStock}</p>
+                          ) : null}
                         </td>
                         <td className='px-2 py-2 text-xs text-slate-700'>
                           <p>{item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`}</p>
@@ -1649,6 +2139,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                             <option value='schedule_price'>Programar precio</option>
                             <option value='stock_entry'>Entrada</option>
                             <option value='stock_exit'>Salida</option>
+                            <option value='set_min_stock'>Umbral stock bajo</option>
                             <option value='delete_product'>Eliminar</option>
                           </select>
                         </td>
@@ -1685,7 +2176,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                               onChange={event => updateRowDraft(item.id, { quantity: event.target.value })}
                               style={fieldAlertStyle(missingQuantity)}
                               className={`${requiredInputClass(missingQuantity)} w-20`}
-                              placeholder='0 *'
+                              placeholder={draft.operation === 'set_min_stock' ? 'Umbral *' : '0 *'}
+                              aria-label={draft.operation === 'set_min_stock' ? 'Umbral de stock bajo' : 'Cantidad'}
                             />
                           ) : (
                             <span className='text-xs text-slate-400'>—</span>
@@ -1747,24 +2239,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   })}
                 </tbody>
               </table>
-              {!adjustmentFilteredItems.length ? (
+              {!sortedAdjustmentItems.length ? (
                 <p className='px-3 py-4 text-sm text-slate-500'>Sin productos que coincidan con la búsqueda de ajustes.</p>
               ) : null}
-            </div>
-
-            <div className='rounded-xl border border-slate-200 p-3'>
-              <p className='text-xs font-semibold text-slate-800'>Agregar producto nuevo</p>
-              <div className='mt-2 grid gap-2 md:grid-cols-6'>
-                <input value={addProductForm.sku} onChange={event => setAddProductForm(current => ({ ...current, sku: event.target.value }))} placeholder='SKU' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
-                <input value={addProductForm.productName} onChange={event => setAddProductForm(current => ({ ...current, productName: event.target.value }))} placeholder='Producto' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
-                <input value={addProductForm.category} onChange={event => setAddProductForm(current => ({ ...current, category: event.target.value }))} placeholder='Categoría' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
-                <input value={addProductForm.stock} onChange={event => setAddProductForm(current => ({ ...current, stock: event.target.value }))} placeholder='Stock' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
-                <input value={addProductForm.unitPrice} onChange={event => setAddProductForm(current => ({ ...current, unitPrice: event.target.value }))} placeholder='Precio' className='h-8 rounded-md border border-slate-300 px-2 text-xs' />
-                <div className='flex gap-2'>
-                  <input value={addProductForm.aisle} onChange={event => setAddProductForm(current => ({ ...current, aisle: event.target.value }))} placeholder='Pasillo' className='h-8 w-full rounded-md border border-slate-300 px-2 text-xs' />
-                  <button type='button' onClick={() => void handleAddProduct()} disabled={submittingAdjustment} className='h-8 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-60'>Agregar</button>
-                </div>
-              </div>
             </div>
 
             <article className='rounded-xl border border-slate-200 p-3'>
@@ -1925,10 +2402,15 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         : null}
 
       {toasts.length ? (
-        <aside className='fixed right-4 top-4 z-[120] flex w-[min(360px,92vw)] flex-col gap-2'>
+        <aside
+          className='fixed right-4 top-4 z-[120] flex w-[min(360px,92vw)] flex-col gap-2'
+          aria-live='polite'
+          aria-relevant='additions text'
+        >
           {toasts.map(toast => (
             <article
               key={toast.id}
+              role='status'
               className={`rounded-lg border px-3 py-2 text-sm shadow-lg ${
                 toast.kind === 'success'
                   ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
@@ -1952,6 +2434,141 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
           ))}
         </aside>
       ) : null}
+
+      {canRenderPortal && isAddProductModalOpen
+        ? createPortal(
+            <div
+              className='fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4'
+              onMouseDown={event => {
+                if (event.target === event.currentTarget) {
+                  handleCloseAddProductModal()
+                }
+              }}
+            >
+              <section
+                role='dialog'
+                aria-modal='true'
+                aria-labelledby='add-product-modal-title'
+                className='w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl'
+              >
+                <div className='flex items-start justify-between gap-3 border-b border-slate-200 pb-3'>
+                  <div>
+                    <h2 id='add-product-modal-title' className='text-lg font-semibold text-slate-900'>
+                      Agregar producto nuevo
+                    </h2>
+                    <p className='mt-1 text-sm text-slate-600'>
+                      Captura SKU, nombre, categoría, stock, umbral, precio y pasillo opcional.
+                    </p>
+                  </div>
+                  <button
+                    type='button'
+                    onClick={handleCloseAddProductModal}
+                    aria-label='Cerrar modal de agregar producto'
+                    className='rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+                  >
+                    Cerrar
+                  </button>
+                </div>
+
+                <div className='mt-4 grid gap-3'>
+                  <label className='grid gap-1 text-sm font-medium text-slate-700'>
+                    SKU
+                    <input
+                      value={addProductForm.sku}
+                      onChange={event => setAddProductForm(current => ({ ...current, sku: event.target.value }))}
+                      aria-label='SKU del producto'
+                      className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                      autoFocus
+                    />
+                  </label>
+                  <label className='grid gap-1 text-sm font-medium text-slate-700'>
+                    Nombre
+                    <input
+                      value={addProductForm.productName}
+                      onChange={event => setAddProductForm(current => ({ ...current, productName: event.target.value }))}
+                      aria-label='Nombre del producto'
+                      className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                    />
+                  </label>
+                  <label className='grid gap-1 text-sm font-medium text-slate-700'>
+                    Categoría
+                    <input
+                      value={addProductForm.category}
+                      onChange={event => setAddProductForm(current => ({ ...current, category: event.target.value }))}
+                      aria-label='Categoría del producto'
+                      className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                    />
+                  </label>
+                  <div className='grid gap-3 sm:grid-cols-2'>
+                    <label className='grid gap-1 text-sm font-medium text-slate-700'>
+                      Stock
+                      <input
+                        value={addProductForm.stock}
+                        onChange={event => setAddProductForm(current => ({ ...current, stock: event.target.value }))}
+                        aria-label='Stock inicial'
+                        inputMode='numeric'
+                        className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                      />
+                    </label>
+                    <label className='grid gap-1 text-sm font-medium text-slate-700'>
+                      Precio
+                      <input
+                        value={addProductForm.unitPrice}
+                        onChange={event => setAddProductForm(current => ({ ...current, unitPrice: event.target.value }))}
+                        aria-label='Precio unitario'
+                        inputMode='decimal'
+                        className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                      />
+                    </label>
+                  </div>
+                  <label className='grid gap-1 text-sm font-medium text-slate-700'>
+                    Umbral de stock bajo
+                    <input
+                      value={addProductForm.minStock}
+                      onChange={event => setAddProductForm(current => ({ ...current, minStock: event.target.value }))}
+                      aria-label='Umbral de stock bajo'
+                      inputMode='numeric'
+                      className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                    />
+                    <span className='text-xs font-normal text-slate-500'>
+                      Alerta cuando el stock sea igual o menor a este valor (predeterminado {DEFAULT_MIN_STOCK}).
+                    </span>
+                  </label>
+                  <label className='grid gap-1 text-sm font-medium text-slate-700'>
+                    Pasillo
+                    <input
+                      value={addProductForm.aisle}
+                      onChange={event => setAddProductForm(current => ({ ...current, aisle: event.target.value }))}
+                      aria-label='Pasillo del producto'
+                      placeholder='Opcional'
+                      className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                    />
+                  </label>
+                </div>
+
+                <div className='mt-5 flex items-center justify-end gap-2 border-t border-slate-200 pt-3'>
+                  <button
+                    type='button'
+                    onClick={handleCloseAddProductModal}
+                    className='rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type='button'
+                    onClick={() => void handleAddProduct()}
+                    disabled={submittingAdjustment}
+                    aria-label='Guardar producto nuevo'
+                    className='rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60'
+                  >
+                    {submittingAdjustment ? 'Guardando...' : 'Agregar producto nuevo'}
+                  </button>
+                </div>
+              </section>
+            </div>,
+            document.body
+          )
+        : null}
 
       {isImportModalOpen ? (
         <div
@@ -1989,6 +2606,15 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             </div>
 
             <div className='mt-4 space-y-4 overflow-y-auto pr-1'>
+              {importing ? (
+                <p
+                  role='status'
+                  aria-live='polite'
+                  className='rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700'
+                >
+                  Hay una importación en proceso. Espera a que termine para validar o importar otro archivo.
+                </p>
+              ) : null}
               <div className='grid gap-4'>
                 <label className='grid gap-2 text-sm font-medium text-slate-700'>
                   Archivo CSV
@@ -1997,7 +2623,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                     accept='.csv,text/csv'
                     onChange={event => void handleImportFileChange(event)}
                     aria-label='Seleccionar archivo CSV de productos'
-                    className='rounded-lg border border-slate-300 px-3 py-2 text-sm'
+                    disabled={importing}
+                    className='rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50'
                   />
                 </label>
 
@@ -2012,7 +2639,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                       setLastValidatedCsv('')
                     }}
                     rows={10}
-                    className='rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs text-slate-900'
+                    disabled={importing}
+                    aria-label='Contenido CSV de productos'
+                    className='rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs text-slate-900 disabled:cursor-not-allowed disabled:opacity-50'
                   />
                 </label>
 

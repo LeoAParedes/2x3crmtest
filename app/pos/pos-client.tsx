@@ -134,7 +134,7 @@ const formatQuantityInputValue = (value: number, unitMode: CartItem['unitMode'])
 
 const formatCartBadgeCount = (value: number) => {
   if (!Number.isFinite(value) || value <= 0) return '0'
-  return Number.isInteger(value) ? String(value) : value.toFixed(2)
+  return String(Math.round(value))
 }
 
 const safeJsonParse = <T,>(value: string): T | null => {
@@ -521,28 +521,20 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     cart.length > 0 &&
     !hasInvalidQuantities &&
     (paymentMethod === 'card' || (parsedAmountReceived !== null && parsedAmountReceived >= total))
-  const cartTotalQuantity = useMemo(
-    () =>
-      Number(
-        cart
-          .reduce((sum, item) => {
-            const quantity = quantityToDisplay(item)
-            return sum + (Number.isFinite(quantity) ? quantity : 0)
-          }, 0)
-          .toFixed(2)
-      ),
-    [cart]
-  )
+  const distinctProductCount = useMemo(() => {
+    const productIds = new Set(cart.map(item => item.inventoryItemId))
+    return productIds.size
+  }, [cart])
 
   useEffect(() => {
     window.dispatchEvent(
       new CustomEvent('pos-cart-updated', {
         detail: {
-          totalQuantity: cartTotalQuantity
+          distinctProductCount
         }
       })
     )
-  }, [cartTotalQuantity])
+  }, [distinctProductCount])
 
   const cartDrawerId = 'pos-cart-drawer'
   const shouldOpenCartFromUrl = searchParams.get('openCart') === '1'
@@ -611,7 +603,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             <div key={`${item.inventoryItemId}-${item.unitMode}-${index}`} className='rounded-xl border border-slate-200 p-3'>
               <p className='text-sm font-medium text-slate-900'>{item.productName}</p>
               <p className='text-xs text-slate-500'>{item.sku}</p>
-              <div className='mt-2 grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)_auto]'>
+              <div className='mt-2 flex w-full flex-col gap-2'>
                 <select
                   value={item.unitMode}
                   onChange={event => {
@@ -625,58 +617,56 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                   }}
                   aria-label={`Modo de venta para ${item.productName}`}
                   disabled={item.supportsWeight}
-                  className='h-9 rounded-lg border border-slate-300 px-2 text-xs outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500'
+                  className='h-10 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500'
                 >
                   {item.supportsWeight ? (
-                    <option value='weight'>Peso (kg)</option>
+                    <option value='weight'>kg</option>
                   ) : (
                     <>
-                      <option value='piece'>Pieza</option>
-                      <option value='weight'>Peso (kg)</option>
+                      <option value='piece'>pz</option>
+                      <option value='weight'>kg</option>
                     </>
                   )}
                 </select>
 
-                <div className='flex h-9 items-center overflow-hidden rounded-full border border-slate-300 bg-white'>
+                <div className='flex w-full items-stretch gap-2'>
                   <button
                     type='button'
                     onClick={() => handleAdjustCartQuantity(index, -1)}
                     aria-label={`Disminuir cantidad de ${item.productName}`}
                     disabled={!canDecreaseQuantity}
-                    className='flex h-full w-9 items-center justify-center text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300'
+                    className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-base font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300'
                   >
                     -
                   </button>
-                  <div className='flex h-full min-w-0 flex-1 items-center border-x border-slate-300'>
-                    <input
-                      value={item.quantityInput}
-                      onChange={event => handleUpdateCartItem(index, { quantityInput: event.target.value })}
-                      onBlur={() => {
-                        const safeQuantity = normalizeQuantityInput(item)
-                        handleUpdateCartItem(index, { quantityInput: safeQuantity })
-                      }}
-                      onKeyDown={event => {
-                        if (event.key === 'ArrowUp') {
-                          event.preventDefault()
-                          handleAdjustCartQuantity(index, 1)
-                        }
-                        if (event.key === 'ArrowDown') {
-                          event.preventDefault()
-                          handleAdjustCartQuantity(index, -1)
-                        }
-                      }}
-                      inputMode={item.unitMode === 'weight' ? 'decimal' : 'numeric'}
-                      pattern={item.unitMode === 'weight' ? '^[0-9]*[\\.,]?[0-9]*$' : '^[0-9]*$'}
-                      placeholder={item.unitMode === 'weight' ? '0.75' : '1'}
-                      aria-label={`Cantidad de ${item.productName}`}
-                      className='h-full w-full bg-transparent px-2 text-center text-xs font-medium outline-none'
-                    />
-                  </div>
+                  <input
+                    value={item.quantityInput}
+                    onChange={event => handleUpdateCartItem(index, { quantityInput: event.target.value })}
+                    onBlur={event => {
+                      const draftItem = { ...item, quantityInput: event.currentTarget.value }
+                      handleUpdateCartItem(index, { quantityInput: normalizeQuantityInput(draftItem) })
+                    }}
+                    onKeyDown={event => {
+                      if (event.key === 'ArrowUp') {
+                        event.preventDefault()
+                        handleAdjustCartQuantity(index, 1)
+                      }
+                      if (event.key === 'ArrowDown') {
+                        event.preventDefault()
+                        handleAdjustCartQuantity(index, -1)
+                      }
+                    }}
+                    inputMode={item.unitMode === 'weight' ? 'decimal' : 'numeric'}
+                    pattern={item.unitMode === 'weight' ? '^[0-9]*[\\.,]?[0-9]*$' : '^[0-9]*$'}
+                    placeholder={item.unitMode === 'weight' ? '0.75' : '1'}
+                    aria-label={`Cantidad de ${item.productName}`}
+                    className='h-10 min-w-[6rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 text-center text-base font-medium text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100'
+                  />
                   <button
                     type='button'
                     onClick={() => handleAdjustCartQuantity(index, 1)}
                     aria-label={`Aumentar cantidad de ${item.productName}`}
-                    className='flex h-full w-9 items-center justify-center text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                    className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-base font-semibold text-slate-700 hover:bg-slate-50'
                   >
                     +
                   </button>
@@ -685,10 +675,10 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                 <button
                   type='button'
                   onClick={() => handleRemoveCartItem(index)}
-                  aria-label={`Quitar ${item.productName}`}
-                  className='h-9 rounded-lg border border-rose-300 px-2 text-xs text-rose-700 hover:bg-rose-50'
+                  aria-label={`Eliminar del carrito ${item.productName}`}
+                  className='flex h-10 w-10 items-center justify-center rounded-lg border border-rose-300 text-xl font-semibold leading-none text-rose-600 hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200'
                 >
-                  Quitar
+                  <span aria-hidden='true'>−</span>
                 </button>
               </div>
               <p className='mt-2 text-xs text-slate-600'>Subtotal línea: {formatMxnCurrency(item.unitPrice * quantityToDisplay(item))}</p>
@@ -780,14 +770,14 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             </span>
             <span>Carrito</span>
             <span className='rounded-full bg-emerald-600 px-2 py-0.5 text-xs text-white'>
-              {formatCartBadgeCount(cartTotalQuantity)}
+              {formatCartBadgeCount(distinctProductCount)}
             </span>
           </button>
         </div>
       </section>
 
       <section className='mt-6'>
-        <div className={`grid gap-6 ${isCartPanelVisible ? 'lg:grid-cols-[minmax(0,1fr)_360px]' : 'lg:grid-cols-1'}`}>
+        <div className={`grid gap-6 ${isCartPanelVisible ? 'lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]' : 'lg:grid-cols-1'}`}>
         <article className='space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
           <div className='grid gap-3 md:grid-cols-4'>
             <input
@@ -885,7 +875,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
 
         {isCartPanelVisible ? (
           <aside
-            className='hidden space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:block'
+            className='hidden max-h-[calc(100vh-8rem)] space-y-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:block'
           >
             <h2 className='text-lg font-semibold text-slate-900'>Carrito y cobro</h2>
             {cartPanelContent}

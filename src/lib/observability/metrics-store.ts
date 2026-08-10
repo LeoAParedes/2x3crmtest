@@ -1,4 +1,5 @@
 import { getPrisma } from '@/src/lib/db/prisma'
+import { Prisma } from '@prisma/client'
 
 export type CrmMetricsSnapshot = {
   generatedAt: string
@@ -17,7 +18,7 @@ export const getCrmMetricsSnapshot = async (): Promise<CrmMetricsSnapshot> => {
   const prisma = await getPrisma()
   const [
     inventoryItems,
-    lowStockItems,
+    lowStockRows,
     totalOrders,
     openBalances,
     openReturnCases,
@@ -27,7 +28,12 @@ export const getCrmMetricsSnapshot = async (): Promise<CrmMetricsSnapshot> => {
     recentConversations
   ] = await Promise.all([
     prisma.inventoryItem.count(),
-    prisma.inventoryItem.count({ where: { stock: { lte: 20 } } }),
+    prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
+      SELECT COUNT(*)::int AS count
+      FROM "InventoryItem"
+      WHERE stock <= "minStock"
+        AND ("aisle" IS NULL OR "aisle" <> '__archived__')
+    `),
     prisma.order.count(),
     prisma.financeAccount.count({ where: { openBalance: { gt: 0 } } }),
     prisma.returnCase.count({ where: { status: 'opened' } }),
@@ -36,6 +42,8 @@ export const getCrmMetricsSnapshot = async (): Promise<CrmMetricsSnapshot> => {
     prisma.approvalRequest.count({ where: { status: 'pending' } }),
     prisma.conversation.count()
   ])
+
+  const lowStockItems = lowStockRows[0]?.count ?? 0
 
   return {
     generatedAt: new Date().toISOString(),

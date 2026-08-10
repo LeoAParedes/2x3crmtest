@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "InventoryItem" ADD COLUMN "minStock" INTEGER NOT NULL DEFAULT 20;

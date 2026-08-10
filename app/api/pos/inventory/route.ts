@@ -1,5 +1,6 @@
 import { jsonOk } from '@/src/lib/http/json-response'
 import { getPrisma } from '@/src/lib/db/prisma'
+import { compareLowStockUrgency } from '@/src/lib/inventory/low-stock'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
   const sortBy = (searchParams.get('sortBy') || 'productName') as keyof typeof sortFieldMap
   const sortDirection = searchParams.get('sortDirection') === 'desc' ? 'desc' : 'asc'
   const includeArchived = searchParams.get('includeArchived') === 'true'
+  const alertsOnly = searchParams.get('alertsOnly') === 'true'
   const page = Math.max(1, Number(searchParams.get('page') || 1))
   const pageSize = Math.min(100, Math.max(5, Number(searchParams.get('pageSize') || 20)))
   const skip = (page - 1) * pageSize
@@ -80,6 +82,50 @@ export async function GET(request: Request) {
 
   const prisma = await getPrisma()
   await applyDueScheduledPrices(prisma)
+
+  if (alertsOnly) {
+    const alertCandidates = await prisma.inventoryItem.findMany({
+      where: archiveWhere,
+      select: {
+        id: true,
+        sku: true,
+        productName: true,
+        category: true,
+        stock: true,
+        minStock: true,
+        unitPrice: true,
+        aisle: true
+      }
+    })
+    const alertItems = alertCandidates
+      .filter(item => item.stock <= item.minStock)
+      .sort(compareLowStockUrgency)
+      .slice(0, 50)
+      .map(item => ({
+        id: item.id,
+        sku: item.sku,
+        productName: item.productName,
+        category: item.category,
+        stock: item.stock,
+        minStock: item.minStock,
+        unitPrice: Number(item.unitPrice),
+        aisle: item.aisle,
+        supportsWeight: inferWeightSupport(item.category, item.aisle)
+      }))
+
+    return jsonOk({
+      success: true,
+      alertsOnly: true,
+      pagination: {
+        page: 1,
+        pageSize: alertItems.length,
+        total: alertItems.length,
+        totalPages: 1
+      },
+      items: alertItems
+    })
+  }
+
   const [total, items] = await Promise.all([
     prisma.inventoryItem.count({ where }),
     prisma.inventoryItem.findMany({
@@ -132,6 +178,7 @@ export async function GET(request: Request) {
       productName: item.productName,
       category: item.category,
       stock: item.stock,
+      minStock: item.minStock,
       unitPrice: Number(item.unitPrice),
       aisle: item.aisle,
       supportsWeight: inferWeightSupport(item.category, item.aisle)

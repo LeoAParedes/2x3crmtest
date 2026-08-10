@@ -12,8 +12,16 @@ const addProductSchema = z.object({
   productName: z.string().min(1).max(160),
   category: z.string().min(1).max(80),
   stock: z.number().int().min(0).max(1_000_000),
+  minStock: z.number().int().min(0).max(1_000_000).optional(),
   unitPrice: z.number().positive().max(10_000_000),
   aisle: z.string().max(120).nullable().optional()
+})
+
+const setMinStockSchema = z.object({
+  operation: z.literal('set_min_stock'),
+  inventoryItemId: z.string().cuid(),
+  minStock: z.number().int().min(0).max(1_000_000),
+  reason: z.string().min(3).max(240)
 })
 
 const deleteProductSchema = z.object({
@@ -55,6 +63,7 @@ const stockExitSchema = z.object({
 
 const adjustmentPayloadSchema = z.union([
   addProductSchema,
+  setMinStockSchema,
   deleteProductSchema,
   correctPriceSchema,
   schedulePriceSchema,
@@ -204,6 +213,7 @@ export async function POST(request: Request) {
             productName: payload.productName,
             category: payload.category,
             stock: payload.stock,
+            minStock: payload.minStock ?? 20,
             unitPrice: payload.unitPrice,
             aisle: payload.aisle || null
           }
@@ -249,7 +259,55 @@ export async function POST(request: Request) {
           productName: created.productName,
           category: created.category,
           stock: created.stock,
+          minStock: created.minStock,
           unitPrice: Number(created.unitPrice)
+        }
+      })
+    }
+
+    if (payload.operation === 'set_min_stock') {
+      const updated = await prisma.$transaction(async transaction => {
+        const existing = await transaction.inventoryItem.findUnique({
+          where: { id: payload.inventoryItemId }
+        })
+        if (!existing) throw new Error('INVENTORY_ITEM_NOT_FOUND')
+
+        const item = await transaction.inventoryItem.update({
+          where: { id: payload.inventoryItemId },
+          data: { minStock: payload.minStock }
+        })
+
+        await transaction.systemActionLog.create({
+          data: {
+            actorAuthUserId: access.context.actor.userId,
+            actorUsername: access.context.actor.username,
+            actorRole: access.context.actor.role,
+            action: 'inventory.min_stock.update',
+            entityType: 'InventoryItem',
+            entityId: item.id,
+            status: 'success',
+            metadata: {
+              previousMinStock: existing.minStock,
+              minStock: payload.minStock,
+              reason: payload.reason
+            }
+          }
+        })
+
+        return item
+      })
+
+      return jsonOk({
+        success: true,
+        message: 'Umbral de stock bajo actualizado',
+        item: {
+          id: updated.id,
+          sku: updated.sku,
+          productName: updated.productName,
+          category: updated.category,
+          stock: updated.stock,
+          minStock: updated.minStock,
+          unitPrice: Number(updated.unitPrice)
         }
       })
     }
