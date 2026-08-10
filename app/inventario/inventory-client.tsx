@@ -420,6 +420,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         if (cancelled) return
         setItems(payload.items)
         setTotalPages(payload.pagination.totalPages)
+        if (page > payload.pagination.totalPages) {
+          setPage(payload.pagination.totalPages)
+        }
       } catch (error) {
         if (!cancelled) {
           pushToast(error instanceof Error ? error.message : 'Error de carga', 'error')
@@ -437,6 +440,10 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       cancelled = true
     }
   }, [query, sortBy, sortDirection, page, refreshSeed])
+
+  useEffect(() => {
+    setPage(1)
+  }, [query, sortBy, sortDirection])
 
   useEffect(() => {
     if (activePanel !== 'logbook') return
@@ -1799,7 +1806,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
 
       {isImportModalOpen ? (
         <div
-          className='fixed inset-0 z-40 flex items-center justify-center bg-slate-950/55 p-4'
+          className='fixed inset-0 z-40 overflow-y-auto bg-slate-950/55 p-4'
           onMouseDown={event => {
             if (event.target === event.currentTarget) {
               handleCloseImportModal()
@@ -1810,7 +1817,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             role='dialog'
             aria-modal='true'
             aria-labelledby='inventory-import-title'
-            className='w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-5 shadow-xl'
+            className='mx-auto my-6 flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-xl'
           >
             <div className='flex items-start justify-between gap-4 border-b border-slate-200 pb-4'>
               <div>
@@ -1818,7 +1825,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   Importación de productos
                 </h2>
                 <p className='mt-1 text-sm text-slate-600'>
-                  Selecciona un archivo CSV con columnas sku, productName, category, stock y unitPrice.
+                  Selecciona un CSV con columnas: sku, producto, categoria, unidad, precio, stock.
                 </p>
               </div>
               <button
@@ -1832,69 +1839,70 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
               </button>
             </div>
 
-            <div className='mt-4 grid gap-4'>
-              <label className='grid gap-2 text-sm font-medium text-slate-700'>
-                Archivo CSV
-                <input
-                  type='file'
-                  accept='.csv,text/csv'
-                  onChange={event => void handleImportFileChange(event)}
-                  aria-label='Seleccionar archivo CSV de productos'
-                  className='rounded-lg border border-slate-300 px-3 py-2 text-sm'
-                />
-              </label>
+            <div className='mt-4 space-y-4 overflow-y-auto pr-1'>
+              <div className='grid gap-4'>
+                <label className='grid gap-2 text-sm font-medium text-slate-700'>
+                  Archivo CSV
+                  <input
+                    type='file'
+                    accept='.csv,text/csv'
+                    onChange={event => void handleImportFileChange(event)}
+                    aria-label='Seleccionar archivo CSV de productos'
+                    className='rounded-lg border border-slate-300 px-3 py-2 text-sm'
+                  />
+                </label>
 
-              <label className='grid gap-2 text-sm font-medium text-slate-700'>
-                Contenido CSV
-                <textarea
-                  value={importCsv}
-                  onChange={event => {
-                    setImportCsv(event.target.value)
-                    setValidationResult(null)
-                    setImportResult(null)
-                    setLastValidatedCsv('')
-                  }}
-                  rows={12}
-                  className='rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs text-slate-900'
-                />
-              </label>
+                <label className='grid gap-2 text-sm font-medium text-slate-700'>
+                  Contenido CSV
+                  <textarea
+                    value={importCsv}
+                    onChange={event => {
+                      setImportCsv(event.target.value)
+                      setValidationResult(null)
+                      setImportResult(null)
+                      setLastValidatedCsv('')
+                    }}
+                    rows={10}
+                    className='rounded-lg border border-slate-300 px-3 py-2 font-mono text-xs text-slate-900'
+                  />
+                </label>
 
-              <div className='flex items-center gap-3'>
-                <button
-                  type='button'
-                  aria-label='Validar y previsualizar importación'
-                  onClick={() => void handleValidateImport()}
-                  disabled={!canValidateImport}
-                  className='rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50'
-                >
-                  {validatingImport ? 'Validando...' : 'Validar / Previsualizar'}
-                </button>
-                <button
-                  type='button'
-                  aria-label='Ejecutar importación de productos'
-                  onClick={() => void handleImport()}
-                  disabled={!canSubmitImport}
-                  className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'
-                >
-                  {importing ? 'Importando...' : 'Importar productos'}
-                </button>
-                <button
-                  type='button'
-                  onClick={handleCloseImportModal}
-                  className='rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'
-                >
-                  Cancelar
-                </button>
+                <div className='flex flex-wrap items-center gap-3'>
+                  <button
+                    type='button'
+                    aria-label='Validar y previsualizar importación'
+                    onClick={() => void handleValidateImport()}
+                    disabled={!canValidateImport}
+                    className='rounded-lg border border-emerald-600 px-4 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50'
+                  >
+                    {validatingImport ? 'Validando...' : 'Validar / Previsualizar'}
+                  </button>
+                  <button
+                    type='button'
+                    aria-label='Ejecutar importación de productos'
+                    onClick={() => void handleImport()}
+                    disabled={!canSubmitImport}
+                    className='rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'
+                  >
+                    {importing ? 'Importando...' : 'Importar productos'}
+                  </button>
+                  <button
+                    type='button'
+                    onClick={handleCloseImportModal}
+                    className='rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'
+                  >
+                    Cancelar
+                  </button>
+                </div>
+                {!hasFreshValidation ? (
+                  <p className='text-xs text-slate-500'>
+                    Debes validar y previsualizar el CSV antes de ejecutar la importación.
+                  </p>
+                ) : null}
               </div>
-              {!hasFreshValidation ? (
-                <p className='text-xs text-slate-500'>
-                  Debes validar y previsualizar el CSV antes de ejecutar la importación.
-                </p>
-              ) : null}
-            </div>
 
-            {validationResult?.validateOnly ? (
-              <section className='mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4'>
+              {validationResult?.validateOnly ? (
+                <section className='rounded-xl border border-slate-200 bg-slate-50 p-4'>
                 <h3 className='text-sm font-semibold text-slate-900'>Previsualización</h3>
                 <p className={`mt-1 text-sm ${validationResult.canImport ? 'text-emerald-700' : 'text-rose-700'}`}>
                   {validationResult.message
@@ -1910,8 +1918,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   </p>
                 ) : null}
                 {validationResult.preview?.rows.length ? (
-                  <div className='mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white'>
-                    <table className='min-w-full divide-y divide-slate-200'>
+                  <div className='mt-3 max-h-64 overflow-auto rounded-lg border border-slate-200 bg-white'>
+                    <table className='min-w-[720px] divide-y divide-slate-200'>
                       <thead className='bg-slate-50'>
                         <tr>
                           <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>SKU</th>
@@ -1942,19 +1950,22 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   </div>
                 ) : null}
                 {validationResult.errors?.length ? (
-                  <ul className='mt-3 list-disc space-y-1 pl-5 text-sm text-amber-700'>
-                    {validationResult.errors.slice(0, 20).map(error => (
-                      <li key={`${error.line}-${error.reason}`}>Línea {error.line}: {error.reason}</li>
-                    ))}
-                  </ul>
+                  <div className='mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3'>
+                    <p className='text-xs font-semibold uppercase tracking-wide text-amber-800'>Filas rechazadas</p>
+                    <ul className='mt-2 max-h-40 list-disc space-y-1 overflow-y-auto pl-5 text-sm text-amber-700'>
+                      {validationResult.errors.slice(0, 20).map(error => (
+                        <li key={`${error.line}-${error.reason}`}>Línea {error.line}: {error.reason}</li>
+                      ))}
+                    </ul>
+                  </div>
                 ) : (
                   <p className='mt-3 text-sm text-slate-700'>Sin errores de validación.</p>
                 )}
-              </section>
-            ) : null}
+                </section>
+              ) : null}
 
-            {importResult ? (
-              <section className='mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4'>
+              {importResult ? (
+                <section className='rounded-xl border border-slate-200 bg-slate-50 p-4'>
                 {importResult.success && importResult.summary ? (
                   <>
                     <h3 className='text-sm font-semibold text-slate-900'>Resultado de importación</h3>
@@ -1973,8 +1984,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 ) : (
                   <p className='text-sm text-rose-700'>{importResult.message || 'Error en importación'}</p>
                 )}
-              </section>
-            ) : null}
+                </section>
+              ) : null}
+            </div>
           </section>
         </div>
       ) : null}
