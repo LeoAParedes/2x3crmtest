@@ -49,16 +49,31 @@ export async function GET(request: Request) {
   const skip = (page - 1) * pageSize
   const orderField = sortFieldMap[sortBy] || sortFieldMap.productName
 
-  const archiveWhere = includeArchived ? undefined : { NOT: { aisle: '__archived__' } }
-  const queryWhere = query
-    ? {
-        OR: [
-          { sku: { contains: query, mode: 'insensitive' as const } },
-          { productName: { contains: query, mode: 'insensitive' as const } },
-          { category: { contains: query, mode: 'insensitive' as const } }
-        ]
+  const archiveWhere = includeArchived
+    ? undefined
+    : {
+        OR: [{ aisle: null }, { aisle: { not: '__archived__' as const } }]
       }
-    : undefined
+
+  const queryTokens = query
+    ? query
+        .split(/\s+/)
+        .map(token => token.trim())
+        .filter(Boolean)
+    : []
+  const queryWhere =
+    queryTokens.length > 0
+      ? {
+          AND: queryTokens.map(token => ({
+            OR: [
+              { sku: { contains: token, mode: 'insensitive' as const } },
+              { productName: { contains: token, mode: 'insensitive' as const } },
+              { category: { contains: token, mode: 'insensitive' as const } }
+            ]
+          }))
+        }
+      : undefined
+
   const where = archiveWhere && queryWhere ? { AND: [archiveWhere, queryWhere] } : archiveWhere || queryWhere
 
   const prisma = await getPrisma()
