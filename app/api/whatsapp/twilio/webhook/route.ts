@@ -13,7 +13,9 @@ import {
 } from '@/src/lib/whatsapp/twilio'
 
 /**
- * Twilio WhatsApp webhook (demo-reply style).
+ * Twilio WhatsApp webhook (secondary / optional demo-reply style).
+ * Prefer Evolution API: POST /api/whatsapp/evolution/webhook
+ *
  * Configure in Twilio Console → WhatsApp Sandbox / Messaging → "When a message comes in":
  *   POST https://<your-host>/api/whatsapp/twilio/webhook
  *

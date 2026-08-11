@@ -1,6 +1,10 @@
 import { crmNormalizedMessageSchema, type CrmNormalizedMessage, type WebChatPayload } from '@/src/lib/crm/channel-schema'
 import { metaWebhookPayloadSchema, type MetaWebhookPayload } from '@/src/lib/crm/whatsapp-meta-schema'
 import {
+  normalizeEvolutionPhone,
+  type EvolutionInboundMessage
+} from '@/src/lib/whatsapp/evolution'
+import {
   normalizeTwilioWhatsAppPhone,
   type TwilioInboundMessage
 } from '@/src/lib/whatsapp/twilio'
@@ -47,6 +51,38 @@ export const normalizeTwilioWebhookMessage = (inbound: TwilioInboundMessage): No
   return {
     message: normalizedMessage,
     sourceMessageId: inbound.messageSid,
+    sourcePhone,
+    sourceProfileName: inbound.profileName
+  }
+}
+
+export const normalizeEvolutionWebhookMessage = (
+  inbound: EvolutionInboundMessage
+): NormalizedWhatsAppInbound => {
+  const sourcePhone = normalizeEvolutionPhone(inbound.from)
+  const sessionId = `wa-evolution-${sourcePhone}`
+
+  const normalizedMessage = crmNormalizedMessageSchema.parse({
+    channel: 'whatsapp',
+    customerId: sourcePhone,
+    sessionId,
+    message: inbound.body,
+    locale: 'es-MX',
+    metadata: {
+      sourceMessageId: inbound.messageId,
+      customerPhone: sourcePhone,
+      customerName: inbound.profileName,
+      rawPayload: {
+        provider: 'evolution',
+        instance: inbound.instance,
+        remoteJid: inbound.remoteJid
+      }
+    }
+  })
+
+  return {
+    message: normalizedMessage,
+    sourceMessageId: inbound.messageId,
     sourcePhone,
     sourceProfileName: inbound.profileName
   }

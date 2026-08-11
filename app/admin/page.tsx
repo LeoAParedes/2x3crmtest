@@ -215,15 +215,25 @@ export default function AdminPage() {
           </fieldset>
 
           <div className='rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600'>
-            <p className='font-medium text-slate-800'>Webhooks WhatsApp</p>
+            <p className='font-medium text-slate-800'>Canales WhatsApp (DavinciAi)</p>
             <ul className='mt-2 list-disc space-y-1 pl-4'>
+              <li>
+                Evolution API (recomendado):{' '}
+                <code className='font-mono'>/api/whatsapp/evolution/webhook</code>
+              </li>
               <li>
                 Meta Cloud API: <code className='font-mono'>/api/whatsapp/webhook</code>
               </li>
               <li>
-                Twilio (TwiML demo-reply): <code className='font-mono'>/api/whatsapp/twilio/webhook</code>
+                Twilio (secundario / TwiML): <code className='font-mono'>/api/whatsapp/twilio/webhook</code>
               </li>
             </ul>
+            <p className='mt-2 text-slate-500'>
+              No se requiere Twilio. Configura{' '}
+              <code className='font-mono'>EVOLUTION_API_URL</code>,{' '}
+              <code className='font-mono'>EVOLUTION_API_KEY</code> y{' '}
+              <code className='font-mono'>EVOLUTION_INSTANCE</code>.
+            </p>
           </div>
 
           <button

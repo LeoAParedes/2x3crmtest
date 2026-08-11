@@ -11,6 +11,10 @@ type RequiredConfig = {
   metaApiVersion: string
   twilioAuthToken?: string
   twilioAccountSid?: string
+  evolutionApiUrl?: string
+  evolutionApiKey?: string
+  evolutionInstance?: string
+  evolutionWebhookSecret?: string
   redisUrl?: string
 }
 
@@ -71,10 +75,17 @@ export const env: RequiredConfig = {
   metaApiVersion: process.env.META_API_VERSION?.trim() || 'v21.0',
   twilioAuthToken: toOptional(process.env.TWILIO_AUTH_TOKEN),
   twilioAccountSid: toOptional(process.env.TWILIO_ACCOUNT_SID),
+  evolutionApiUrl: toOptional(process.env.EVOLUTION_API_URL),
+  evolutionApiKey: toOptional(process.env.EVOLUTION_API_KEY),
+  evolutionInstance: toOptional(process.env.EVOLUTION_INSTANCE),
+  evolutionWebhookSecret: toOptional(process.env.EVOLUTION_WEBHOOK_SECRET),
   redisUrl: toOptional(process.env.REDIS_URL)
 }
 
 export const hasMetaProviderConfig =
   Boolean(env.metaAccessToken) && Boolean(env.metaPhoneNumberId) && Boolean(env.metaWebhookVerifyToken)
+
+export const hasEvolutionProviderConfig =
+  Boolean(env.evolutionApiUrl) && Boolean(env.evolutionApiKey) && Boolean(env.evolutionInstance)
 
 export const hasLlmProviderConfig = Boolean(env.openAiApiKey || env.anthropicApiKey)
