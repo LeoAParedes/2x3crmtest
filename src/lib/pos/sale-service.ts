@@ -222,6 +222,8 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         total: totals.total,
         paymentMethod: input.paymentMethod,
         amountReceived: normalizedAmountReceived,
+        creditCustomerName: input.paymentMethod === 'credit' ? input.creditCustomerName || null : null,
+        creditCustomerPhone: input.paymentMethod === 'credit' ? input.creditCustomerPhone || null : null,
         status: 'completed',
         items: {
           create: lines.map(line => ({
@@ -256,7 +258,9 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         salesCount: { increment: 1 },
         ...(input.paymentMethod === 'cash'
           ? { cashSalesTotal: { increment: money } }
-          : { cardSalesTotal: { increment: money } })
+          : input.paymentMethod === 'credit'
+            ? { creditSalesTotal: { increment: money } }
+            : { cardSalesTotal: { increment: money } })
       }
     })
 

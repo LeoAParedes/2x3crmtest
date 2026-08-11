@@ -62,7 +62,7 @@ type SaleResponse = {
     total: number
     subtotal: number
     tax: number
-    paymentMethod: 'cash' | 'card'
+    paymentMethod: 'cash' | 'card' | 'credit'
     amountReceived: number | null
     changeDue: number
     createdAt: string
@@ -90,10 +90,14 @@ export const resolveSaleErrorMessage = (data: Pick<SaleResponse, 'message' | 'er
   return 'No fue posible registrar la venta'
 }
 
+type PaymentMethod = 'cash' | 'card' | 'credit'
+
 type PosDraft = {
   cart: CartItem[]
-  paymentMethod: 'cash' | 'card'
+  paymentMethod: PaymentMethod
   amountReceived: number | null
+  creditCustomerName?: string
+  creditCustomerPhone?: string
 }
 
 const POS_DRAFT_COOKIE = 'pos_draft'
@@ -216,8 +220,10 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash')
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash')
   const [amountReceived, setAmountReceived] = useState<string>('')
+  const [creditCustomerName, setCreditCustomerName] = useState<string>('')
+  const [creditCustomerPhone, setCreditCustomerPhone] = useState<string>('')
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [submittingSale, setSubmittingSale] = useState(false)
   const [ticket, setTicket] = useState<SaleResponse['sale'] | null>(null)
@@ -379,6 +385,8 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         setCart(sanitizeCartItems(cookieDraft.cart))
         setPaymentMethod(cookieDraft.paymentMethod)
         setAmountReceived(cookieDraft.amountReceived !== null ? String(cookieDraft.amountReceived) : '')
+        setCreditCustomerName(cookieDraft.creditCustomerName ?? '')
+        setCreditCustomerPhone(cookieDraft.creditCustomerPhone ?? '')
       }
 
       try {
@@ -388,6 +396,8 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
           setCart(sanitizeCartItems(data.draft.cart))
           setPaymentMethod(data.draft.paymentMethod)
           setAmountReceived(data.draft.amountReceived !== null ? String(data.draft.amountReceived) : '')
+          setCreditCustomerName(data.draft.creditCustomerName ?? '')
+          setCreditCustomerPhone(data.draft.creditCustomerPhone ?? '')
         }
       } catch {}
 
@@ -409,13 +419,15 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       void persistDraft({
         cart,
         paymentMethod,
-        amountReceived: parsedAmountReceived
+        amountReceived: parsedAmountReceived,
+        creditCustomerName: creditCustomerName.trim() || undefined,
+        creditCustomerPhone: creditCustomerPhone.trim() || undefined
       })
     }, 300)
     return () => {
       window.clearTimeout(timeoutId)
     }
-  }, [cart, paymentMethod, parsedAmountReceived, draftLoaded])
+  }, [cart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, draftLoaded])
 
   const handleAddToCart = (product: Product) => {
     setMessage(null)
@@ -497,6 +509,13 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       return
     }
 
+    const trimmedCreditName = creditCustomerName.trim()
+    const trimmedCreditPhone = creditCustomerPhone.trim()
+    if (paymentMethod === 'credit' && (trimmedCreditName.length < 2 || trimmedCreditPhone.length < 7)) {
+      setMessage('Nombre y teléfono del cliente son requeridos para venta a crédito')
+      return
+    }
+
     setSubmittingSale(true)
     setMessage(null)
     setTicket(null)
@@ -504,7 +523,13 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       const payload = {
         items,
         paymentMethod,
-        amountReceived: paymentMethod === 'cash' ? parsedAmountReceived || undefined : undefined
+        amountReceived: paymentMethod === 'cash' ? parsedAmountReceived || undefined : undefined,
+        ...(paymentMethod === 'credit'
+          ? {
+              creditCustomerName: trimmedCreditName,
+              creditCustomerPhone: trimmedCreditPhone
+            }
+          : {})
       }
       const response = await fetch('/api/pos/sales', {
         method: 'POST',
@@ -519,10 +544,14 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       setIsTicketModalOpen(true)
       setCart([])
       setAmountReceived('')
+      setCreditCustomerName('')
+      setCreditCustomerPhone('')
       await persistDraft({
         cart: [],
         paymentMethod,
-        amountReceived: null
+        amountReceived: null,
+        creditCustomerName: undefined,
+        creditCustomerPhone: undefined
       })
       setReloadToken(current => current + 1)
     } catch (error) {
@@ -539,10 +568,14 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     })
   }
 
+  const trimmedCreditName = creditCustomerName.trim()
+  const trimmedCreditPhone = creditCustomerPhone.trim()
   const canCheckout =
     cart.length > 0 &&
     !hasInvalidQuantities &&
-    (paymentMethod === 'card' || (parsedAmountReceived !== null && parsedAmountReceived >= total))
+    (paymentMethod === 'card' ||
+      (paymentMethod === 'credit' && trimmedCreditName.length >= 2 && trimmedCreditPhone.length >= 7) ||
+      (paymentMethod === 'cash' && parsedAmountReceived !== null && parsedAmountReceived >= total))
   const distinctProductCount = useMemo(() => {
     const productIds = new Set(cart.map(item => item.inventoryItemId))
     return productIds.size
@@ -732,14 +765,16 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         <select
           value={paymentMethod}
           onChange={event => {
-            const nextMethod = event.target.value as 'cash' | 'card'
+            const nextMethod = event.target.value as PaymentMethod
             setPaymentMethod(nextMethod)
-            if (nextMethod === 'card') setAmountReceived('')
+            if (nextMethod !== 'cash') setAmountReceived('')
           }}
+          aria-label='Método de pago'
           className='h-9 rounded-md border border-slate-300 px-2.5 text-sm'
         >
           <option value='cash'>Efectivo</option>
           <option value='card'>Tarjeta</option>
+          <option value='credit'>Crédito</option>
         </select>
         {paymentMethod === 'cash' ? (
           <>
@@ -749,9 +784,29 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                 setAmountReceived(event.target.value)
               }}
               placeholder='Monto recibido'
+              aria-label='Monto recibido en efectivo'
               className='h-9 rounded-md border border-slate-300 px-2.5 text-sm'
             />
             <p className={`text-sm ${change < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>Cambio: {formatMxnCurrency(change)}</p>
+          </>
+        ) : null}
+        {paymentMethod === 'credit' ? (
+          <>
+            <input
+              value={creditCustomerName}
+              onChange={event => setCreditCustomerName(event.target.value)}
+              placeholder='Nombre del cliente'
+              aria-label='Nombre del cliente para crédito'
+              className='h-9 rounded-md border border-slate-300 px-2.5 text-sm'
+            />
+            <input
+              value={creditCustomerPhone}
+              onChange={event => setCreditCustomerPhone(event.target.value)}
+              placeholder='Teléfono del cliente'
+              aria-label='Teléfono del cliente para crédito'
+              inputMode='tel'
+              className='h-9 rounded-md border border-slate-300 px-2.5 text-sm'
+            />
           </>
         ) : null}
       </div>

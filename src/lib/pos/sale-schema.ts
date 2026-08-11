@@ -12,10 +12,21 @@ export const createSaleSchema = z
       )
       .min(1)
       .max(100),
-    paymentMethod: z.enum(['cash', 'card']),
-    amountReceived: z.number().nonnegative().optional()
+    paymentMethod: z.enum(['cash', 'card', 'credit']),
+    amountReceived: z.number().nonnegative().optional(),
+    creditCustomerName: z.string().trim().min(2).max(120).optional(),
+    creditCustomerPhone: z.string().trim().min(7).max(40).optional()
   })
   .strict()
+  .superRefine((value, ctx) => {
+    if (value.paymentMethod !== 'credit') return
+    if (!value.creditCustomerName) {
+      ctx.addIssue({ code: 'custom', message: 'CREDIT_NAME_REQUIRED', path: ['creditCustomerName'] })
+    }
+    if (!value.creditCustomerPhone) {
+      ctx.addIssue({ code: 'custom', message: 'CREDIT_PHONE_REQUIRED', path: ['creditCustomerPhone'] })
+    }
+  })
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>
 

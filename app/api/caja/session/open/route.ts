@@ -18,6 +18,12 @@ export async function POST(request: Request) {
     if (message === 'CASH_SESSION_MUST_LOGOUT') {
       return jsonError('Debes cerrar sesión después del corte antes de abrir otro turno', 409, { code: message })
     }
+    if (message === 'CASH_SESSION_OUTSIDE_SHIFT_HOURS') {
+      return jsonError('Fuera de horario de turno (06:00–14:00 o 14:00–22:00)', 409, { code: message })
+    }
+    if (message === 'CASH_SESSION_SLOT_ALREADY_CLOSED') {
+      return jsonError('Este turno del día ya fue cerrado. Solo un corte por turno.', 409, { code: message })
+    }
     return jsonError('No fue posible abrir el turno', 400, { details: message })
   }
 }

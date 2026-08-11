@@ -5,6 +5,11 @@ import {
   type CloseCashSessionInput,
   type OpenCashSessionInput
 } from '@/src/lib/caja/cash-session-schema'
+import {
+  getShiftSlotBounds,
+  resolveCashShiftSlot,
+  toBusinessDayKey
+} from '@/src/lib/caja/shift-windows'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 
 const toMoney = (value: number) => Number(value.toFixed(2))
@@ -13,11 +18,13 @@ const mapSession = (session: {
   id: string
   cashierUsername: string
   status: string
+  shiftSlot?: string | null
   openingFloat: { toString(): string } | number
   openedAt: Date
   closedAt: Date | null
   cashSalesTotal: { toString(): string } | number
   cardSalesTotal: { toString(): string } | number
+  creditSalesTotal?: { toString(): string } | number | null
   salesCount: number
   expectedCash: { toString(): string } | number | null
   countedCash: { toString(): string } | number | null
@@ -27,11 +34,13 @@ const mapSession = (session: {
   id: session.id,
   cashierUsername: session.cashierUsername,
   status: session.status as 'open' | 'closed',
+  shiftSlot: (session.shiftSlot as 'morning' | 'afternoon' | null | undefined) || null,
   openingFloat: toMoney(Number(session.openingFloat)),
   openedAt: session.openedAt.toISOString(),
   closedAt: session.closedAt?.toISOString() ?? null,
   cashSalesTotal: toMoney(Number(session.cashSalesTotal)),
   cardSalesTotal: toMoney(Number(session.cardSalesTotal)),
+  creditSalesTotal: toMoney(Number(session.creditSalesTotal || 0)),
   salesCount: session.salesCount,
   expectedCash: session.expectedCash === null || session.expectedCash === undefined ? null : toMoney(Number(session.expectedCash)),
   countedCash: session.countedCash === null || session.countedCash === undefined ? null : toMoney(Number(session.countedCash)),
@@ -54,22 +63,43 @@ export const getCashierRuntimeState = async (actor: AuthenticatedActor) => {
   })
 
   const gate = (profile?.cashierGate || 'ready') as 'ready' | 'on_shift' | 'must_logout'
+  const currentSlot = resolveCashShiftSlot()
 
   return {
     gate: actor.role === 'admin' ? (openSession ? 'on_shift' : 'ready') : gate,
-    openSession: openSession ? mapSession(openSession) : null
+    openSession: openSession ? mapSession(openSession) : null,
+    currentShiftSlot: currentSlot,
+    outsideShiftHours: currentSlot === null
   }
 }
 
 export const openCashSession = async (rawInput: unknown, actor: AuthenticatedActor) => {
   const input: OpenCashSessionInput = openCashSessionSchema.parse(rawInput)
   const prisma = await getPrisma()
+  const now = new Date()
+  const shiftSlot = resolveCashShiftSlot(now)
+  if (!shiftSlot) {
+    throw new Error('CASH_SESSION_OUTSIDE_SHIFT_HOURS')
+  }
 
   const existing = await prisma.cashSession.findFirst({
     where: { cashierAuthUserId: actor.userId, status: 'open' }
   })
   if (existing) {
     throw new Error('CASH_SESSION_ALREADY_OPEN')
+  }
+
+  const bounds = getShiftSlotBounds(shiftSlot, now)
+  const alreadyClosedSameSlot = await prisma.cashSession.findFirst({
+    where: {
+      cashierAuthUserId: actor.userId,
+      status: 'closed',
+      shiftSlot,
+      openedAt: { gte: bounds.start, lte: bounds.end }
+    }
+  })
+  if (alreadyClosedSameSlot) {
+    throw new Error('CASH_SESSION_SLOT_ALREADY_CLOSED')
   }
 
   if (actor.role === 'cashier') {
@@ -86,6 +116,7 @@ export const openCashSession = async (rawInput: unknown, actor: AuthenticatedAct
         cashierAuthUserId: actor.userId,
         cashierUsername: actor.username,
         status: 'open',
+        shiftSlot,
         openingFloat: toMoney(input.openingFloat)
       }
     })
@@ -107,7 +138,9 @@ export const openCashSession = async (rawInput: unknown, actor: AuthenticatedAct
         entityId: created.id,
         status: 'success',
         metadata: {
-          openingFloat: toMoney(input.openingFloat)
+          openingFloat: toMoney(input.openingFloat),
+          shiftSlot,
+          businessDay: toBusinessDayKey(now)
         }
       }
     })
@@ -219,7 +252,7 @@ export const requireOpenCashSessionId = async (actor: AuthenticatedActor) => {
 
 export const applySaleToCashSession = async (
   sessionId: string,
-  paymentMethod: 'cash' | 'card',
+  paymentMethod: 'cash' | 'card' | 'credit',
   total: number
 ) => {
   const prisma = await getPrisma()
@@ -230,7 +263,9 @@ export const applySaleToCashSession = async (
       salesCount: { increment: 1 },
       ...(paymentMethod === 'cash'
         ? { cashSalesTotal: { increment: money } }
-        : { cardSalesTotal: { increment: money } })
+        : paymentMethod === 'credit'
+          ? { creditSalesTotal: { increment: money } }
+          : { cardSalesTotal: { increment: money } })
     }
   })
 }

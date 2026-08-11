@@ -15,8 +15,10 @@ const draftItemSchema = z.object({
 
 const draftPayloadSchema = z.object({
   cart: z.array(draftItemSchema).max(200),
-  paymentMethod: z.enum(['cash', 'card']),
-  amountReceived: z.number().nonnegative().nullable()
+  paymentMethod: z.enum(['cash', 'card', 'credit']),
+  amountReceived: z.number().nonnegative().nullable(),
+  creditCustomerName: z.string().max(120).optional(),
+  creditCustomerPhone: z.string().max(40).optional()
 })
 
 export async function GET(request: Request) {
