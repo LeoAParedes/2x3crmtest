@@ -262,15 +262,20 @@ export const PromocionesClient = () => {
     return null
   }
 
+  const canAttemptSave = name.trim().length >= 2 && value.trim().length > 0 && !saving
+
   const handleCreatePromotion = async () => {
     if (saving) return
     setSaving(true)
     setError(null)
     setMessage(null)
 
+    const trimmedName = name.trim()
+    const trimmedDescription = description.trim()
     const parsedValue = Number(value.replace(',', '.'))
     const parsedMinPurchase = Number(minPurchase.replace(',', '.'))
-    if (!name.trim() || name.trim().length < 2) {
+
+    if (!trimmedName || trimmedName.length < 2) {
       setError('El nombre debe tener al menos 2 caracteres')
       setSaving(false)
       return
@@ -285,8 +290,8 @@ export const PromocionesClient = () => {
       setSaving(false)
       return
     }
-    if (!description.trim() || description.trim().length < 2) {
-      setError('La descripción debe tener al menos 2 caracteres')
+    if (startsAt && expiresAt && startsAt > expiresAt) {
+      setError('La fecha de inicio no puede ser posterior a la de expiración')
       setSaving(false)
       return
     }
@@ -313,11 +318,11 @@ export const PromocionesClient = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(),
+          name: trimmedName,
           type: promoType,
           value: parsedValue,
           minPurchase: Number.isFinite(parsedMinPurchase) ? parsedMinPurchase : 0,
-          description: description.trim(),
+          description: trimmedDescription || trimmedName,
           active,
           startsAt: startsAt ? new Date(`${startsAt}T00:00:00`).toISOString() : null,
           expiresAt: expiresAt ? new Date(`${expiresAt}T23:59:59`).toISOString() : null,
@@ -469,12 +474,12 @@ export const PromocionesClient = () => {
               />
             </label>
             <label className='grid gap-1 text-sm text-slate-700 sm:col-span-2'>
-              Descripción
+              Descripción (opcional)
               <input
                 type='text'
                 value={description}
                 onChange={event => setDescription(event.target.value)}
-                placeholder='Descripción corta para el cajero'
+                placeholder='Si se omite, se usa el nombre de la promoción'
                 aria-label='Descripción de la promoción'
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               />
@@ -527,10 +532,16 @@ export const PromocionesClient = () => {
               Activa al crear
             </label>
           </div>
-          <div className='mt-4 flex gap-3'>
+          <div className='mt-4 flex flex-col gap-2'>
+            {!canAttemptSave && !saving ? (
+              <p className='text-sm text-amber-700' role='status'>
+                Completa el nombre (mín. 2 caracteres) y el valor para guardar.
+              </p>
+            ) : null}
+            <div className='flex gap-3'>
             <button
               type='button'
-              disabled={saving || !name.trim() || !value || !description.trim()}
+              disabled={!canAttemptSave}
               onClick={() => void handleCreatePromotion()}
               aria-label='Guardar promoción'
               className='h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
@@ -548,7 +559,13 @@ export const PromocionesClient = () => {
             >
               Cancelar
             </button>
+            </div>
           </div>
+          {error ? (
+            <p role='alert' className='mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
+              {error}
+            </p>
+          ) : null}
         </section>
       ) : null}
 
@@ -744,7 +761,7 @@ export const PromocionesClient = () => {
           {message}
         </p>
       ) : null}
-      {error ? (
+      {!showForm && error ? (
         <p role='alert' className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
           {error}
         </p>

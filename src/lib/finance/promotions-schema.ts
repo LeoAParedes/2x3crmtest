@@ -16,7 +16,8 @@ export const createPromotionSchema = z
     type: z.enum(PROMO_TYPES),
     value: z.number().nonnegative().max(100_000),
     minPurchase: z.number().nonnegative().max(1_000_000).default(0),
-    description: z.string().trim().min(2).max(240),
+    // Optional for cashiers; empty values default to the promotion name
+    description: z.string().trim().max(240).optional().default(''),
     active: z.boolean().default(true),
     startsAt: z.string().datetime({ offset: true }).optional().nullable(),
     expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
@@ -33,6 +34,18 @@ export const createPromotionSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (value.startsAt && value.expiresAt) {
+      const startsAtMs = Date.parse(value.startsAt)
+      const expiresAtMs = Date.parse(value.expiresAt)
+      if (Number.isFinite(startsAtMs) && Number.isFinite(expiresAtMs) && startsAtMs > expiresAtMs) {
+        ctx.addIssue({
+          code: 'custom',
+          message: 'PROMO_STARTS_AFTER_EXPIRES',
+          path: ['expiresAt']
+        })
+      }
+    }
+
     if (value.type === 'bundle') {
       if (value.bundleItems.length < 2) {
         ctx.addIssue({
@@ -59,6 +72,10 @@ export const createPromotionSchema = z
       })
     }
   })
+  .transform(value => ({
+    ...value,
+    description: value.description.trim() || value.name
+  }))
 
 export const updatePromotionSchema = z
   .object({
@@ -66,7 +83,7 @@ export const updatePromotionSchema = z
     type: z.enum(PROMO_TYPES).optional(),
     value: z.number().nonnegative().max(100_000).optional(),
     minPurchase: z.number().nonnegative().max(1_000_000).optional(),
-    description: z.string().trim().min(2).max(240).optional(),
+    description: z.string().trim().max(240).optional(),
     active: z.boolean().optional(),
     startsAt: z.string().datetime({ offset: true }).optional().nullable(),
     expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
