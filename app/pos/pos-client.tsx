@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
@@ -124,15 +124,6 @@ export const parseCurrencyInput = (input: string) => {
 export const calculateCashChange = (amountReceived: number | null, total: number) => {
   if (amountReceived === null) return Number((0 - total).toFixed(2))
   return Number((amountReceived - total).toFixed(2))
-}
-
-const quantityToDisplay = (item: CartItem) => {
-  if (item.unitMode === 'weight') {
-    const kilos = Number(item.quantityInput.replace(',', '.'))
-    return Number.isFinite(kilos) ? kilos : 0
-  }
-  const pieces = Number(item.quantityInput)
-  return Number.isFinite(pieces) ? pieces : 0
 }
 
 const quantityStepByMode: Record<CartItem['unitMode'], number> = {
@@ -298,7 +289,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const saleTotals = useMemo(
     () =>
       calculateSaleTotals(
-        cart.map((item, index) => {
+        cart.map(item => {
           const quantity =
             item.unitMode === 'weight'
               ? parseWeightQuantity(item.quantityInput)
