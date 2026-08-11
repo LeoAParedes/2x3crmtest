@@ -38,6 +38,12 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # CI has no production DB; migrate deploy is skipped by scripts/prisma-migrate-deploy.mjs
+          DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+          SUPABASE_SERVICE_ROLE_KEY: sb_service_role_ci_placeholder
 
       - name: Security audit
         run: npm run security:audit
