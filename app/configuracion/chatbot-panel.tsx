@@ -24,6 +24,14 @@ type SettingsResponse = {
 }
 
 type MetaStatusResponse = {
+  ai?: {
+    openAiKeyFormatValid?: boolean
+    openAiKeyPresent?: boolean
+  }
+  blockers?: {
+    openAiKeyInvalid?: boolean
+    recipientNotInAllowedList?: boolean
+  }
   metaSubscription?: {
     ok: boolean
     tokenAppId: string | null
@@ -42,7 +50,8 @@ type MetaStatusResponse = {
     hints: string[]
   }
   webhookDebug?: {
-    lastHit: { stage: string; at: string } | null
+    lastHit: { stage: string; at: string; reason?: string; outboundSent?: boolean } | null
+    lastOutbound?: { stage: string; at: string; reason?: string; outboundSent?: boolean } | null
   }
   hints?: string[]
 }
@@ -352,9 +361,22 @@ export const ChatbotPanel = () => {
       <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-sm text-slate-700'>
         <h3 className='text-base font-semibold text-slate-900'>Meta WhatsApp Cloud — diagnóstico</h3>
         <p className='mt-2'>
-          Si en Meta ves Messaging en verde pero el bot no responde, casi siempre el WABA está ligado a la app
-          interna de Meta (<span className='font-mono text-xs'>WA DevX…</span>) y no a la tuya.
+          El webhook ya puede recibir mensajes. Si no te llega respuesta, revisa estos 2 bloqueos confirmados en
+          producción: <strong>OPENAI_API_KEY inválida</strong> y <strong>número no permitido en Meta (#131030)</strong>.
         </p>
+        {metaStatus?.blockers ? (
+          <ul className='mt-3 list-disc space-y-1 pl-5 text-xs'>
+            <li className={metaStatus.blockers.openAiKeyInvalid ? 'text-rose-700' : 'text-emerald-700'}>
+              OPENAI_API_KEY formato sk-: {metaStatus.blockers.openAiKeyInvalid ? 'No (corrige en Vercel + Redeploy)' : 'Sí'}
+            </li>
+            <li className={metaStatus.blockers.recipientNotInAllowedList ? 'text-rose-700' : 'text-slate-600'}>
+              Destinatario en lista To de Meta:{' '}
+              {metaStatus.blockers.recipientNotInAllowedList
+                ? 'No (#131030) — agrégalo en API Setup'
+                : 'sin fallo reciente en esta instancia'}
+            </li>
+          </ul>
+        ) : null}
         <code className='mt-3 block break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800'>
           Webhook: {metaWebhook}
         </code>
@@ -422,15 +444,17 @@ export const ChatbotPanel = () => {
           </div>
         ) : null}
         <ol className='mt-4 list-decimal space-y-2 pl-5 text-slate-600'>
-          <li>Pulsa <strong>Suscribir app al WABA</strong> (requiere sesión admin).</li>
-          <li>Pulsa <strong>Comprobar estado Meta</strong> hasta ver “Suscrita al WABA: Sí”.</li>
           <li>
-            En Meta Developers, asegúrate de estar en <strong>la misma app</strong> del token (no en el playground
-            DevX). Ruta típica: App → WhatsApp → API Setup / Configuration → Webhook callback = la URL de arriba,
-            campo <code className='font-mono text-xs'>messages</code> marcado.
+            En Vercel → Environment Variables, pon <code className='font-mono text-xs'>OPENAI_API_KEY</code> con una
+            key real que empiece por <code className='font-mono text-xs'>sk-</code> (no pegues texto de ayuda) y haz
+            Redeploy.
           </li>
           <li>
-            Escribe a <strong>+1 555-204-7381</strong> desde tu número de prueba.
+            En Meta Developers → app <strong>crmtest</strong> → WhatsApp → API Setup → lista <strong>To</strong>,
+            agrega tu WhatsApp y confírmalo.
+          </li>
+          <li>
+            Escribe a <strong>+1 555-204-7381</strong> y pulsa <strong>Comprobar estado Meta</strong>.
           </li>
         </ol>
       </section>

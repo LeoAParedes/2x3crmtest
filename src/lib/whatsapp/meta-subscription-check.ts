@@ -136,19 +136,23 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
     }
   }
 
-  if (tokenAppId) {
-    const subs = await graphGet<{
+  if (tokenAppId && env.metaAppSecret) {
+    const appAccessToken = `${tokenAppId}|${env.metaAppSecret}`
+    const subsUrl = `https://graph.facebook.com/${env.metaApiVersion}/${tokenAppId}/subscriptions?access_token=${encodeURIComponent(appAccessToken)}`
+    const subsResponse = await fetch(subsUrl, { cache: 'no-store' })
+    const subsPayload = (await subsResponse.json()) as {
       data?: Array<{
         object?: string
         callback_url?: string
         active?: boolean
         fields?: Array<{ name?: string } | string>
       }>
-    }>(`/${tokenAppId}/subscriptions`)
-    if (subs.error) {
-      graphErrors.push(`app_subscriptions: ${subs.error}`)
+      error?: { message?: string }
+    }
+    if (!subsResponse.ok) {
+      graphErrors.push(`app_subscriptions: ${subsPayload.error?.message || `Graph HTTP ${subsResponse.status}`}`)
     } else {
-      appWebhookSubscriptions = (subs.data?.data || []).map(row => ({
+      appWebhookSubscriptions = (subsPayload.data || []).map(row => ({
         object: row.object,
         callbackUrl: row.callback_url,
         active: row.active,

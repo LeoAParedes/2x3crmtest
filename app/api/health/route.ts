@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
 
-import { env, hasLlmProviderConfig, hasMetaProviderConfig } from '@/src/lib/config/env'
+import {
+  env,
+  hasLlmProviderConfig,
+  hasMetaProviderConfig,
+  isOpenAiApiKeyFormatValid
+} from '@/src/lib/config/env'
 
 export async function GET() {
   return NextResponse.json({
@@ -14,7 +19,9 @@ export async function GET() {
     },
     ai: {
       mastraConfigured: true,
-      llmProviderConfigured: hasLlmProviderConfig
+      llmProviderConfigured: hasLlmProviderConfig,
+      openAiKeyPresent: Boolean(env.openAiApiKey),
+      openAiKeyFormatValid: isOpenAiApiKeyFormatValid()
     },
     dataMode: env.dataMode
   })

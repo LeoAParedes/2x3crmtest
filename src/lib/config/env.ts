@@ -88,4 +88,13 @@ export const hasMetaProviderConfig =
 export const hasEvolutionProviderConfig =
   Boolean(env.evolutionApiUrl) && Boolean(env.evolutionApiKey) && Boolean(env.evolutionInstance)
 
-export const hasLlmProviderConfig = Boolean(env.openAiApiKey || env.anthropicApiKey)
+/** Reject placeholder text accidentally pasted into OPENAI_API_KEY (e.g. UI hint copy). */
+export const isOpenAiApiKeyFormatValid = (value = env.openAiApiKey) => {
+  if (!value) return false
+  const trimmed = value.trim()
+  if (!trimmed.startsWith('sk-')) return false
+  if (/falta|openai_api_key|redespliega|placeholder/i.test(trimmed)) return false
+  return trimmed.length >= 20
+}
+
+export const hasLlmProviderConfig = Boolean(isOpenAiApiKeyFormatValid() || env.anthropicApiKey)
