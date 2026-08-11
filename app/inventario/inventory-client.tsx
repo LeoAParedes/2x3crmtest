@@ -182,7 +182,26 @@ type BulkOperation =
 type RowAdjustmentPayload = Extract<AdjustmentPayload, { operation: RowAdjustmentOperation }>
 type SortDirection = 'asc' | 'desc'
 type InventorySortField = 'productName' | 'sku' | 'category' | 'stock' | 'unitPrice'
+type InventorySearchField = 'category' | 'unitPrice' | 'sku' | 'productName' | 'unit' | 'stock'
 type AdjustmentSortField = 'sku' | 'productName' | 'category' | 'stock' | 'unitPrice' | 'operation' | 'reason'
+
+const inventorySearchFieldOptions: Array<{ value: InventorySearchField; label: string }> = [
+  { value: 'productName', label: 'Producto' },
+  { value: 'sku', label: 'SKU' },
+  { value: 'category', label: 'Categorías' },
+  { value: 'unitPrice', label: 'Precios en pesos ($)' },
+  { value: 'unit', label: 'Unidad' },
+  { value: 'stock', label: 'Stock' }
+]
+
+const getInventorySearchPlaceholder = (searchField: InventorySearchField) => {
+  if (searchField === 'sku') return 'Buscar por SKU'
+  if (searchField === 'category') return 'Buscar por categoría'
+  if (searchField === 'unitPrice') return 'Buscar precio (ej. 12.50 o >10)'
+  if (searchField === 'unit') return 'Buscar unidad (pz, kg, pieza, peso…)'
+  if (searchField === 'stock') return 'Buscar stock (ej. 20 o >10)'
+  return 'Buscar por producto'
+}
 
 type RowAdjustmentPreview = {
   payload: RowAdjustmentPayload
@@ -307,6 +326,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const shouldOpenAdjustmentsByShortcut = shortcut === 'ajuste'
   const [items, setItems] = useState<InventoryItem[]>([])
   const [query, setQuery] = useState('')
+  const [searchField, setSearchField] = useState<InventorySearchField>('productName')
   const [sortBy, setSortBy] = useState<InventorySortField>('productName')
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
   const [page, setPage] = useState(1)
@@ -430,6 +450,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       try {
         const params = new URLSearchParams({
           q: query,
+          searchField,
           sortBy,
           sortDirection,
           page: String(page),
@@ -447,6 +468,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
           returnedTotalPages: payload.pagination.totalPages,
           totalItems: payload.pagination.total,
           queryLength: query.length,
+          searchField,
           sortBy,
           sortDirection
         })
@@ -478,7 +500,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     return () => {
       cancelled = true
     }
-  }, [query, sortBy, sortDirection, page, refreshSeed, showArchivedCodes])
+  }, [query, searchField, sortBy, sortDirection, page, refreshSeed, showArchivedCodes])
 
   useEffect(() => {
     let cancelled = false
@@ -1516,14 +1538,34 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
 
         {activePanel === 'inventory' ? (
           <div className='w-full min-w-0 space-y-4'>
-            <div className='grid w-full gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
+            <div className='grid w-full gap-3 md:grid-cols-[auto_minmax(0,1fr)_auto]'>
+              <label className='sr-only' htmlFor='inventory-search-field'>
+                Campo de búsqueda
+              </label>
+              <select
+                id='inventory-search-field'
+                value={searchField}
+                onChange={event => {
+                  setPage(1)
+                  setSearchField(event.target.value as InventorySearchField)
+                }}
+                aria-label='Campo de búsqueda de inventario'
+                className='h-10 w-full min-w-[11rem] rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700 md:w-auto'
+              >
+                {inventorySearchFieldOptions.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               <input
                 value={query}
                 onChange={event => {
                   setPage(1)
                   setQuery(event.target.value)
                 }}
-                placeholder='Buscar SKU o producto'
+                placeholder={getInventorySearchPlaceholder(searchField)}
+                aria-label={`Buscar inventario por ${inventorySearchFieldOptions.find(option => option.value === searchField)?.label || 'campo'}`}
                 className='h-10 w-full min-w-0 rounded-lg border border-slate-300 px-3 text-sm'
               />
               <p className='self-center text-xs text-slate-600'>

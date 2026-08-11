@@ -2,6 +2,7 @@ import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { compareLowStockUrgency } from '@/src/lib/inventory/low-stock'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
+import { buildInventorySearchWhere } from '@/src/lib/inventory/search-filter'
 import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import { ensureCanonicalWeightStocks } from '@/src/lib/inventory/normalize-weight-stock'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const query = searchParams.get('q')?.trim()
+  const searchField = searchParams.get('searchField')?.trim() || null
   const sortBy = (searchParams.get('sortBy') || 'productName') as keyof typeof sortFieldMap
   const sortDirection = searchParams.get('sortDirection') === 'desc' ? 'desc' : 'asc'
   const includeArchived = searchParams.get('includeArchived') === 'true'
@@ -54,25 +56,7 @@ export async function GET(request: Request) {
         OR: [{ aisle: null }, { aisle: { not: '__archived__' as const } }]
       }
 
-  const queryTokens = query
-    ? query
-        .split(/\s+/)
-        .map(token => token.trim())
-        .filter(Boolean)
-    : []
-  const queryWhere =
-    queryTokens.length > 0
-      ? {
-          AND: queryTokens.map(token => ({
-            OR: [
-              { sku: { contains: token, mode: 'insensitive' as const } },
-              { productName: { contains: token, mode: 'insensitive' as const } },
-              { category: { contains: token, mode: 'insensitive' as const } }
-            ]
-          }))
-        }
-      : undefined
-
+  const queryWhere = buildInventorySearchWhere(query, searchField)
   const where = archiveWhere && queryWhere ? { AND: [archiveWhere, queryWhere] } : archiveWhere || queryWhere
 
   try {
@@ -162,6 +146,7 @@ export async function GET(request: Request) {
     // #endregion
     logInventoryPaginationDebug(runId, 'H1', 'inventory pagination response', {
       query: query || null,
+      searchField,
       sortBy,
       sortDirection,
       page,
