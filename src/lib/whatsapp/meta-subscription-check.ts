@@ -31,6 +31,13 @@ export type MetaSubscriptionCheck = {
   tokenAppIsSubscribed: boolean | null
   subscribedApps: Array<{ id: string; name: string; isMetaInternalTestApp: boolean }>
   hasOnlyMetaInternalTestApp: boolean
+  appWebhookSubscriptions: Array<{
+    object?: string
+    callbackUrl?: string
+    active?: boolean
+    fields: string[]
+  }>
+  messagesFieldSubscribed: boolean | null
   messagesFieldLikelyActive: boolean | null
   graphErrors: string[]
   hints: string[]
@@ -115,6 +122,7 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
   let tokenAppId: string | null = null
   let tokenAppName: string | null = null
   let subscribedApps: MetaSubscriptionCheck['subscribedApps'] = []
+  let appWebhookSubscriptions: MetaSubscriptionCheck['appWebhookSubscriptions'] = []
 
   if (!env.metaAccessToken) {
     hints.push('Falta META_ACCESS_TOKEN para inspeccionar suscripciones en Graph API.')
@@ -125,6 +133,27 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
     } else {
       tokenAppId = appInfo.data?.id || null
       tokenAppName = appInfo.data?.name || null
+    }
+  }
+
+  if (tokenAppId) {
+    const subs = await graphGet<{
+      data?: Array<{
+        object?: string
+        callback_url?: string
+        active?: boolean
+        fields?: Array<{ name?: string } | string>
+      }>
+    }>(`/${tokenAppId}/subscriptions`)
+    if (subs.error) {
+      graphErrors.push(`app_subscriptions: ${subs.error}`)
+    } else {
+      appWebhookSubscriptions = (subs.data?.data || []).map(row => ({
+        object: row.object,
+        callbackUrl: row.callback_url,
+        active: row.active,
+        fields: (row.fields || []).map(field => (typeof field === 'string' ? field : field.name || '')).filter(Boolean)
+      }))
     }
   }
 
@@ -160,9 +189,25 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
   const tokenAppIsSubscribed = tokenAppId
     ? subscribedApps.some(app => app.id === tokenAppId)
     : null
+  const waSubscription = appWebhookSubscriptions.find(sub => sub.object === 'whatsapp_business_account')
+  const messagesFieldSubscribed = waSubscription
+    ? waSubscription.fields.includes('messages')
+    : appWebhookSubscriptions.length > 0
+      ? false
+      : null
 
   if (tokenAppId && tokenAppName) {
     hints.push(`Tu META_ACCESS_TOKEN pertenece a la app "${tokenAppName}" (id ${tokenAppId}).`)
+  }
+
+  if (messagesFieldSubscribed === false) {
+    hints.push(
+      'La app no tiene el campo webhook "messages" suscrito. En Meta → App crmtest → WhatsApp → Configuration, marca messages. O pulsa otra vez Suscribir app al WABA (ahora también intenta suscribir el campo).'
+    )
+  }
+
+  if (waSubscription?.callbackUrl && !waSubscription.callbackUrl.includes('/api/whatsapp/webhook')) {
+    hints.push(`Callback de la app apunta a ${waSubscription.callbackUrl}, no a /api/whatsapp/webhook.`)
   }
 
   if (subscribedApps.length === 0) {
@@ -183,7 +228,7 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
 
   return {
     checkedAt: new Date().toISOString(),
-    ok: graphErrors.length === 0 && Boolean(tokenAppIsSubscribed),
+    ok: graphErrors.length === 0 && Boolean(tokenAppIsSubscribed) && messagesFieldSubscribed !== false,
     phoneNumberId,
     businessAccountId,
     phoneDisplayNumber,
@@ -193,10 +238,22 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
     tokenAppIsSubscribed,
     subscribedApps,
     hasOnlyMetaInternalTestApp,
-    messagesFieldLikelyActive: Boolean(tokenAppIsSubscribed),
+    appWebhookSubscriptions,
+    messagesFieldSubscribed,
+    messagesFieldLikelyActive: Boolean(tokenAppIsSubscribed) && messagesFieldSubscribed !== false,
     graphErrors,
     hints
   }
+}
+
+const resolveWebhookCallbackUri = () => {
+  const configuredBase = env.appBaseUrl.replace(/\/$/, '')
+  const productionFallback = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.trim()}`
+    : 'https://2x3crmtest.vercel.app'
+  const baseUrl =
+    !configuredBase || configuredBase.includes('localhost') ? productionFallback : configuredBase
+  return `${baseUrl}/api/whatsapp/webhook`
 }
 
 export const subscribeCurrentAppToWaba = async () => {
@@ -206,15 +263,11 @@ export const subscribeCurrentAppToWaba = async () => {
   if (!env.metaWebhookVerifyToken) {
     return { ok: false as const, error: 'META_WEBHOOK_VERIFY_TOKEN missing' }
   }
+  if (!env.metaAppSecret) {
+    return { ok: false as const, error: 'META_APP_SECRET missing' }
+  }
 
-  const configuredBase = env.appBaseUrl.replace(/\/$/, '')
-  const productionFallback =
-    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
-      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.trim()}`
-      : 'https://2x3crmtest.vercel.app'
-  const baseUrl =
-    !configuredBase || configuredBase.includes('localhost') ? productionFallback : configuredBase
-  const callbackUri = `${baseUrl}/api/whatsapp/webhook`
+  const callbackUri = resolveWebhookCallbackUri()
   // Meta verifies this callback with GET hub.challenge using verify_token.
   // Without override_callback_uri, WABA can stay on Meta DevX and never POST to Vercel.
   const result = await graphPost<{ success?: boolean }>(`/${env.metaBusinessAccountId}/subscribed_apps`, {
@@ -228,10 +281,39 @@ export const subscribeCurrentAppToWaba = async () => {
     }
   }
 
+  const appInfo = await graphGet<{ id?: string }>('/app?fields=id')
+  const appId = appInfo.data?.id
+  let fieldSubscription: { ok: boolean; error?: string; data?: unknown } = {
+    ok: false,
+    error: 'app id unavailable'
+  }
+  if (appId) {
+    // App-level webhook field subscription (messages). Uses app access token form.
+    const appAccessToken = `${appId}|${env.metaAppSecret}`
+    const url = `https://graph.facebook.com/${env.metaApiVersion}/${appId}/subscriptions`
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        object: 'whatsapp_business_account',
+        callback_url: callbackUri,
+        verify_token: env.metaWebhookVerifyToken,
+        fields: 'messages',
+        access_token: appAccessToken
+      }),
+      cache: 'no-store'
+    })
+    const payload = (await response.json()) as { success?: boolean; error?: { message?: string } }
+    fieldSubscription = response.ok
+      ? { ok: true, data: payload }
+      : { ok: false, error: payload.error?.message || `Graph HTTP ${response.status}` }
+  }
+
   const check = await checkMetaWhatsAppSubscription()
   return {
     ok: true as const,
     graph: result.data,
+    fieldSubscription,
     callbackUri,
     subscription: check
   }

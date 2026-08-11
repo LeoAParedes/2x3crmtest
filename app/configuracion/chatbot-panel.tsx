@@ -29,9 +29,16 @@ type MetaStatusResponse = {
     tokenAppId: string | null
     tokenAppName: string | null
     tokenAppIsSubscribed: boolean | null
+    messagesFieldSubscribed: boolean | null
     hasOnlyMetaInternalTestApp: boolean
     phoneDisplayNumber: string | null
     subscribedApps: Array<{ id: string; name: string; isMetaInternalTestApp: boolean }>
+    appWebhookSubscriptions?: Array<{
+      object?: string
+      callbackUrl?: string
+      active?: boolean
+      fields: string[]
+    }>
     hints: string[]
   }
   webhookDebug?: {
@@ -383,6 +390,20 @@ export const ChatbotPanel = () => {
               Suscrita al WABA:{' '}
               <strong className={metaSub.tokenAppIsSubscribed ? 'text-emerald-700' : 'text-rose-700'}>
                 {metaSub.tokenAppIsSubscribed ? 'Sí' : 'No'}
+              </strong>
+            </p>
+            <p>
+              Campo webhook messages:{' '}
+              <strong
+                className={
+                  metaSub.messagesFieldSubscribed ? 'text-emerald-700' : 'text-rose-700'
+                }
+              >
+                {metaSub.messagesFieldSubscribed == null
+                  ? 'desconocido'
+                  : metaSub.messagesFieldSubscribed
+                    ? 'Sí'
+                    : 'No'}
               </strong>
             </p>
             <p>Número Business: {metaSub.phoneDisplayNumber || '—'}</p>
