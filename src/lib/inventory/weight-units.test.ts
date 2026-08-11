@@ -16,6 +16,14 @@ describe('weight inventory units', () => {
     expect(inferWeightSupport('Carnes y Pescados', null)).toBe(true)
     expect(inferWeightSupport('Bebidas', null)).toBe(false)
     expect(inferWeightSupport('Perecederos', null, 'Salmón fresco')).toBe(true)
+    expect(inferWeightSupport('Carnes', null, 'Carne de res molida')).toBe(true)
+  })
+
+  it('treats bottled refreshments as pieces, not weight', () => {
+    expect(inferWeightSupport('Bebidas', null, 'Refresco de cola 2.5 L')).toBe(false)
+    expect(inferWeightSupport('Bebidas', null, 'Refresco de cola 600 ml')).toBe(false)
+    expect(inferWeightSupport('Bebidas', null, 'Agua purificada garrafón 20 L')).toBe(false)
+    expect(inferWeightSupport('Bebidas', null, 'Jugo de naranja 1 L')).toBe(false)
   })
 
   it('converts CSV kilogram stock to grams and leaves piece stock alone', () => {

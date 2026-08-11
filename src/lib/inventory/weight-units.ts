@@ -7,7 +7,8 @@ export const inferWeightSupport = (
   productName = ''
 ) => {
   const fingerprint = `${category} ${aisle || ''} ${productName}`.toLowerCase()
-  return /(granel|peso|kg|fruta|verdura|vegetal|carn|res|pollo|cerdo|pesc|marisc|legumbr|ra[ií]z|tub[eé]rc|salm[oó]n|filete|at[uú]n)/.test(
+  // `\bres\b` = beef as a whole word. Bare `res` falsely matched "refresco" (BEB-004).
+  return /(granel|\bpeso\b|\bkg\b|fruta|verdura|vegetal|carn|\bres\b|pollo|cerdo|pesc|marisc|legumbr|ra[ií]z|tub[eé]rc|salm[oó]n|filete|at[uú]n)/.test(
     fingerprint
   )
 }
