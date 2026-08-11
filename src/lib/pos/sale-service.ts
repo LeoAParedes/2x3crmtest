@@ -8,9 +8,11 @@ import {
   type CreateSaleInput
 } from '@/src/lib/pos/sale-schema'
 import { getPrisma } from '@/src/lib/db/prisma'
+import { summarizeSaleQuantities } from '@/src/lib/inventory/logbook-quantity'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { ensureCanonicalWeightStocks } from '@/src/lib/inventory/normalize-weight-stock'
 import { hasSufficientStock, inferWeightSupport } from '@/src/lib/inventory/weight-units'
+import type { TicketSale } from '@/src/lib/pos/ticket-format'
 
 export const normalizeSaleItems = (items: CreateSaleInput['items']) => {
   const quantities = new Map<string, { inventoryItemId: string; quantity: number; unitMode: 'piece' | 'weight' }>()
@@ -172,6 +174,16 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         reason: sale.saleNumber
       }))
     })
+    const quantitySummary = summarizeSaleQuantities(lines)
+    const ticketItems = lines.map(line => ({
+      sku: line.sku,
+      productName: line.productName,
+      quantity: line.quantity,
+      unitMode: line.unitMode,
+      unitPrice: line.unitPrice,
+      lineTotal: line.lineTotal
+    }))
+
     await transaction.systemActionLog.create({
       data: {
         actorAuthUserId: actor.userId,
@@ -182,9 +194,20 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         entityId: sale.id,
         status: 'success',
         metadata: {
+          saleId: sale.id,
           saleNumber: sale.saleNumber,
           itemCount: sale.items.length,
-          paymentMethod: sale.paymentMethod
+          pieceCount: quantitySummary.pieceCount,
+          weightGrams: quantitySummary.weightGrams,
+          paymentMethod: sale.paymentMethod,
+          subtotal: Number(sale.subtotal),
+          tax: Number(sale.tax),
+          total: Number(sale.total),
+          amountReceived: normalizedAmountReceived,
+          changeDue,
+          cashierUsername: sale.cashierUsername,
+          createdAt: sale.createdAt.toISOString(),
+          items: ticketItems
         }
       }
     })
@@ -200,14 +223,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
       amountReceived: sale.amountReceived === null ? null : Number(sale.amountReceived),
       changeDue,
       createdAt: sale.createdAt.toISOString(),
-      items: lines.map(line => ({
-        sku: line.sku,
-        productName: line.productName,
-        quantity: line.quantity,
-        unitMode: line.unitMode,
-        unitPrice: line.unitPrice,
-        lineTotal: line.lineTotal
-      }))
+      items: ticketItems
     }
   })
 }
@@ -227,4 +243,57 @@ export const listSales = async (actor: AuthenticatedActor) => {
     paymentMethod: sale.paymentMethod,
     createdAt: sale.createdAt.toISOString()
   }))
+}
+
+export const getSaleTicket = async (saleId: string, actor: AuthenticatedActor): Promise<TicketSale | null> => {
+  const prisma = await getPrisma()
+  const sale = await prisma.sale.findFirst({
+    where: {
+      id: saleId,
+      ...(actor.role === 'cashier' ? { cashierAuthUserId: actor.userId } : {})
+    },
+    include: {
+      items: {
+        include: {
+          inventoryItem: {
+            select: {
+              category: true,
+              aisle: true
+            }
+          }
+        }
+      }
+    }
+  })
+
+  if (!sale) return null
+
+  const amountReceived = sale.amountReceived === null ? null : Number(sale.amountReceived)
+  const total = Number(sale.total)
+  const changeDue =
+    sale.paymentMethod === 'cash' && amountReceived !== null
+      ? Number((amountReceived - total).toFixed(2))
+      : 0
+
+  return {
+    saleNumber: sale.saleNumber,
+    createdAt: sale.createdAt.toISOString(),
+    cashierUsername: sale.cashierUsername,
+    items: sale.items.map(item => {
+      const supportsWeight = inferWeightSupport(item.inventoryItem.category, item.inventoryItem.aisle)
+      return {
+        sku: item.sku,
+        productName: item.productName,
+        quantity: item.quantity,
+        unitMode: supportsWeight ? 'weight' : 'piece',
+        lineTotal: Number(item.lineTotal)
+      }
+    }),
+    subtotal: Number(sale.subtotal),
+    tax: Number(sale.tax),
+    total,
+    paymentMethod: sale.paymentMethod === 'card' ? 'card' : 'cash',
+    amountReceived,
+    changeDue
+  }
 }

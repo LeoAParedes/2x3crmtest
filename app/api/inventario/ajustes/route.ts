@@ -4,6 +4,7 @@ import { getPrisma } from '@/src/lib/db/prisma'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { buildFifoLotsFromMovements, calculateWeightedAveragePrice, consumeFifoLots } from '@/src/lib/inventory/valuation'
+import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
 const addProductSchema = z.object({
@@ -364,7 +365,8 @@ export async function POST(request: Request) {
                 unitCost,
                 totalCost,
                 reason: `Salida automática previa a eliminación: ${payload.reason}`,
-                automatic: true
+                automatic: true,
+                supportsWeight: inferWeightSupport(item.category, item.aisle)
               }
             }
           })
@@ -407,7 +409,8 @@ export async function POST(request: Request) {
               reason: payload.reason,
               clearedStock: item.stock,
               mode: linkedSalesCount > 0 ? 'archived' : 'deleted',
-              linkedSalesCount
+              linkedSalesCount,
+              supportsWeight: inferWeightSupport(item.category, item.aisle)
             }
           }
         })
@@ -545,7 +548,8 @@ export async function POST(request: Request) {
               quantity: payload.quantity,
               unitCost: payload.unitCost,
               reason: payload.reason,
-              nextUnitPrice
+              nextUnitPrice,
+              supportsWeight: inferWeightSupport(item.category, item.aisle)
             }
           }
         })
@@ -644,7 +648,8 @@ export async function POST(request: Request) {
             unitCost,
             totalCost,
             reason: payload.reason,
-            nextUnitPrice
+            nextUnitPrice,
+            supportsWeight: inferWeightSupport(item.category, item.aisle)
           }
         }
       })

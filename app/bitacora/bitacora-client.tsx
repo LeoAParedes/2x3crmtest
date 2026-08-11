@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 
+import { printTicketText } from '@/src/lib/pos/print-ticket'
+import { buildSaleTicketText, type TicketSale } from '@/src/lib/pos/ticket-format'
+
 type LogbookCategory = 'sales' | 'inventory' | 'pos' | 'crm' | 'system'
 
 type LogbookItem = {
@@ -14,6 +17,10 @@ type LogbookItem = {
   actorRole: string
   createdAt: string
   details: string
+  entityType: string | null
+  entityId: string | null
+  saleId: string | null
+  canViewTicket: boolean
 }
 
 type LogbookResponse = {
@@ -80,6 +87,10 @@ export const BitacoraClient = () => {
   const [loadingLogbook, setLoadingLogbook] = useState(false)
   const [refreshSeed, setRefreshSeed] = useState(0)
   const [toasts, setToasts] = useState<ToastItem[]>([])
+  const [ticketModalOpen, setTicketModalOpen] = useState(false)
+  const [ticketLoadingSaleId, setTicketLoadingSaleId] = useState<string | null>(null)
+  const [activeTicket, setActiveTicket] = useState<TicketSale | null>(null)
+  const [ticketUnavailableMessage, setTicketUnavailableMessage] = useState<string | null>(null)
 
   const pushToast = (text: string, kind: ToastItem['kind'] = 'info') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -165,6 +176,14 @@ export const BitacoraClient = () => {
     return indexedItems.map(entry => entry.item)
   }, [logbookItems, logbookSortBy, logbookSortDirection])
 
+  const ticketText = useMemo(() => {
+    if (!activeTicket) return null
+    return buildSaleTicketText(activeTicket, {
+      printerWidth: '80mm',
+      storeHeader: ['2x3 CRM TEST', 'Ticket de venta']
+    })
+  }, [activeTicket])
+
   const handleLogbookHeaderSort = (field: LogbookSortField) => {
     if (logbookSortBy === field) {
       setLogbookSortDirection(current => (current === 'asc' ? 'desc' : 'asc'))
@@ -176,6 +195,53 @@ export const BitacoraClient = () => {
 
   const handleRefreshLogbook = () => {
     setRefreshSeed(current => current + 1)
+  }
+
+  const handleCloseTicketModal = () => {
+    setTicketModalOpen(false)
+    setActiveTicket(null)
+    setTicketUnavailableMessage(null)
+    setTicketLoadingSaleId(null)
+  }
+
+  const handleViewTicket = async (item: LogbookItem) => {
+    if (!item.saleId) {
+      setTicketModalOpen(true)
+      setActiveTicket(null)
+      setTicketUnavailableMessage('Este registro no tiene una venta asociada para mostrar ticket.')
+      return
+    }
+
+    setTicketModalOpen(true)
+    setTicketUnavailableMessage(null)
+    setActiveTicket(null)
+    setTicketLoadingSaleId(item.saleId)
+
+    try {
+      const response = await fetch(`/api/pos/sales/${item.saleId}`)
+      const payload = (await response.json()) as {
+        success?: boolean
+        ticket?: TicketSale
+        error?: { message?: string }
+      }
+      if (!response.ok || !payload.success || !payload.ticket) {
+        throw new Error(payload.error?.message || 'No se encontró el ticket de esta venta')
+      }
+      setActiveTicket(payload.ticket)
+    } catch (error) {
+      setTicketUnavailableMessage(
+        error instanceof Error
+          ? error.message
+          : 'No fue posible reconstruir el ticket de esta venta antigua.'
+      )
+    } finally {
+      setTicketLoadingSaleId(null)
+    }
+  }
+
+  const handlePrintTicket = () => {
+    if (!ticketText) return
+    printTicketText(ticketText)
   }
 
   return (
@@ -353,6 +419,9 @@ export const BitacoraClient = () => {
                       </span>
                     </button>
                   </th>
+                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    Acciones
+                  </th>
                 </tr>
               </thead>
               <tbody className='divide-y divide-slate-100 bg-white'>
@@ -384,6 +453,21 @@ export const BitacoraClient = () => {
                         {item.status}
                       </span>
                     </td>
+                    <td className='px-3 py-2 text-sm text-slate-700'>
+                      {item.canViewTicket ? (
+                        <button
+                          type='button'
+                          onClick={() => void handleViewTicket(item)}
+                          disabled={ticketLoadingSaleId === item.saleId}
+                          aria-label={`Ver ticket de la venta ${item.details}`}
+                          className='rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60'
+                        >
+                          {ticketLoadingSaleId === item.saleId ? 'Cargando...' : 'Ver ticket'}
+                        </button>
+                      ) : (
+                        <span className='text-xs text-slate-400'>—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -394,6 +478,68 @@ export const BitacoraClient = () => {
           </div>
         </div>
       </section>
+
+      {ticketModalOpen ? (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4'
+          role='presentation'
+          onClick={handleCloseTicketModal}
+          onKeyDown={event => {
+            if (event.key === 'Escape') handleCloseTicketModal()
+          }}
+        >
+          <div
+            role='dialog'
+            aria-modal='true'
+            aria-label='Ticket de venta'
+            tabIndex={0}
+            className='max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-xl'
+            onClick={event => event.stopPropagation()}
+            onKeyDown={event => event.stopPropagation()}
+          >
+            <div className='flex items-start justify-between gap-3'>
+              <div>
+                <h2 className='text-lg font-semibold text-slate-950'>Ticket de venta</h2>
+                <p className='mt-1 text-sm text-slate-600'>Vista del comprobante registrado en bitácora.</p>
+              </div>
+              <button
+                type='button'
+                onClick={handleCloseTicketModal}
+                aria-label='Cerrar ticket'
+                className='rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm text-slate-700 hover:bg-slate-50'
+              >
+                Cerrar
+              </button>
+            </div>
+
+            {ticketLoadingSaleId ? <p className='mt-4 text-sm text-slate-500'>Cargando ticket...</p> : null}
+
+            {!ticketLoadingSaleId && ticketUnavailableMessage ? (
+              <p className='mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900'>
+                {ticketUnavailableMessage}
+              </p>
+            ) : null}
+
+            {!ticketLoadingSaleId && ticketText ? (
+              <>
+                <pre className='mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs leading-5 text-slate-800'>
+                  {ticketText}
+                </pre>
+                <div className='mt-4 flex justify-end'>
+                  <button
+                    type='button'
+                    onClick={handlePrintTicket}
+                    aria-label='Imprimir ticket de venta'
+                    className='rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800'
+                  >
+                    Imprimir
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {toasts.length ? (
         <div className='fixed bottom-4 right-4 z-50 flex w-full max-w-sm flex-col gap-2' aria-live='polite'>

@@ -48,8 +48,17 @@ const movementOperationCatalog: Record<
       const values = metadata as Record<string, unknown>
       const saleNumber = typeof values.saleNumber === 'string' ? values.saleNumber : 'N/A'
       const paymentMethod = typeof values.paymentMethod === 'string' ? values.paymentMethod : 'N/A'
+      const pieceCount = typeof values.pieceCount === 'number' ? values.pieceCount : null
+      const weightGrams = typeof values.weightGrams === 'number' ? values.weightGrams : null
+      if (pieceCount !== null && weightGrams !== null) {
+        const parts: string[] = []
+        if (pieceCount > 0) parts.push(`${pieceCount} pz`)
+        if (weightGrams > 0) parts.push(`${(weightGrams / 1000).toFixed(3)} kg`)
+        const quantityLabel = parts.length ? parts.join(' | ') : '0 pz'
+        return `Venta ${saleNumber} | Pago: ${paymentMethod} | ${quantityLabel}`
+      }
       const itemCount = typeof values.itemCount === 'number' ? values.itemCount : null
-      return `Venta ${saleNumber} | Pago: ${paymentMethod}${itemCount === null ? '' : ` | Ítems: ${itemCount}`}`
+      return `Venta ${saleNumber} | Pago: ${paymentMethod}${itemCount === null ? '' : ` | Líneas: ${itemCount}`}`
     }
   },
   'inventory.import.csv': {
