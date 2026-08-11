@@ -43,7 +43,7 @@ type AuthenticationDependencies = {
 export const authenticateCredentials = async (
   input: unknown,
   dependencies: AuthenticationDependencies
-): Promise<{ error: string } | { destination: '/admin' | '/pos' }> => {
+): Promise<{ error: string } | { destination: '/admin' | '/pos' | '/caja' }> => {
   const parsed = loginSchema.safeParse(input)
   if (!parsed.success) {
     return { error: 'Usuario o contraseña incorrectos' }
@@ -63,7 +63,7 @@ export const authenticateCredentials = async (
     return { error: 'Usuario o contraseña incorrectos' }
   }
 
-  return { destination: role === 'admin' ? '/admin' : '/pos' }
+  return { destination: role === 'admin' ? '/admin' : '/caja' }
 }
 
 export const loginAction = async (_previousState: LoginState, formData: FormData): Promise<LoginState> => {

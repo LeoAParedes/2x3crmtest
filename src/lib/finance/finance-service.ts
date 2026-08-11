@@ -119,7 +119,9 @@ const formatQuantityDisplay = (quantity: number, unitMode: 'piece' | 'weight') =
   return `${quantity} pz`
 }
 
-const buildTopProducts = async (start: Date, end: Date, limit = 8) => {
+const DAY_LABELS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+
+const buildTopProducts = async (start: Date, end: Date, limit = 10) => {
   const prisma = await getPrisma()
   const items = await prisma.saleItem.findMany({
     where: {
@@ -133,6 +135,7 @@ const buildTopProducts = async (start: Date, end: Date, limit = 8) => {
       productName: true,
       quantity: true,
       lineTotal: true,
+      sale: { select: { createdAt: true } },
       inventoryItem: {
         select: {
           category: true,
@@ -148,6 +151,8 @@ const buildTopProducts = async (start: Date, end: Date, limit = 8) => {
     quantity: number
     revenue: number
     unitMode: 'piece' | 'weight'
+    hourCounts: number[]
+    dayCounts: number[]
   }
 
   const bySku = new Map<string, Acc>()
@@ -156,34 +161,62 @@ const buildTopProducts = async (start: Date, end: Date, limit = 8) => {
     const unitMode = inferWeightSupport(item.inventoryItem.category, item.inventoryItem.aisle)
       ? 'weight'
       : 'piece'
+    const createdAt = item.sale.createdAt
+    const hour = createdAt.getHours()
+    const day = createdAt.getDay()
     const current = bySku.get(item.sku)
     if (!current) {
+      const hourCounts = Array.from({ length: 24 }, () => 0)
+      const dayCounts = Array.from({ length: 7 }, () => 0)
+      hourCounts[hour] += item.quantity
+      dayCounts[day] += item.quantity
       bySku.set(item.sku, {
         sku: item.sku,
         productName: item.productName,
         quantity: item.quantity,
         revenue: Number(item.lineTotal),
-        unitMode
+        unitMode,
+        hourCounts,
+        dayCounts
       })
       continue
     }
 
     current.quantity += item.quantity
     current.revenue = toMoney(current.revenue + Number(item.lineTotal))
+    current.hourCounts[hour] += item.quantity
+    current.dayCounts[day] += item.quantity
+  }
+
+  const peakIndex = (counts: number[]) => {
+    let best = 0
+    for (let index = 1; index < counts.length; index += 1) {
+      if (counts[index] > counts[best]) best = index
+    }
+    return best
   }
 
   return Array.from(bySku.values())
-    .sort((left, right) => right.revenue - left.revenue || right.quantity - left.quantity)
+    .sort((left, right) => right.quantity - left.quantity || right.revenue - left.revenue)
     .slice(0, limit)
-    .map((row, index) => ({
-      rank: index + 1,
-      sku: row.sku,
-      productName: row.productName,
-      quantity: row.quantity,
-      quantityDisplay: formatQuantityDisplay(row.quantity, row.unitMode),
-      unitMode: row.unitMode,
-      revenue: toMoney(row.revenue)
-    }))
+    .map((row, index) => {
+      const peakHour = peakIndex(row.hourCounts)
+      const peakDay = peakIndex(row.dayCounts)
+      return {
+        rank: index + 1,
+        sku: row.sku,
+        productName: row.productName,
+        quantity: row.quantity,
+        quantityDisplay: formatQuantityDisplay(row.quantity, row.unitMode),
+        unitMode: row.unitMode,
+        revenue: toMoney(row.revenue),
+        peakHour,
+        peakHourLabel: `${String(peakHour).padStart(2, '0')}:00`,
+        peakDay,
+        peakDayLabel: DAY_LABELS[peakDay],
+        insight: `Pico ${String(peakHour).padStart(2, '0')}:00 · ${DAY_LABELS[peakDay]}`
+      }
+    })
 }
 
 export const getFinanceDashboard = async (period: FinancePeriod) => {
@@ -203,6 +236,9 @@ export const getFinanceDashboard = async (period: FinancePeriod) => {
       buildTopProducts(selected.start, selected.end)
     ])
 
+  const averageTicket =
+    periodIncome.count > 0 ? toMoney(periodIncome.total / periodIncome.count) : 0
+
   return {
     period,
     generatedAt: now.toISOString(),
@@ -220,7 +256,8 @@ export const getFinanceDashboard = async (period: FinancePeriod) => {
       egresos: periodExpenses.total,
       neto: toMoney(periodIncome.total - periodExpenses.total),
       salesCount: periodIncome.count,
-      expenseCount: periodExpenses.count
+      expenseCount: periodExpenses.count,
+      averageTicket
     },
     salesSeries,
     cashFlowSeries,
@@ -246,6 +283,7 @@ export const listExpenses = async (period: FinancePeriod) => {
     category: expense.category,
     description: expense.description,
     amount: Number(expense.amount),
+    kind: expense.kind,
     spentAt: expense.spentAt.toISOString(),
     createdByUsername: expense.createdByUsername,
     createdAt: expense.createdAt.toISOString()
@@ -262,6 +300,7 @@ export const createExpense = async (rawInput: unknown, actor: AuthenticatedActor
       category: input.category,
       description: input.description,
       amount: input.amount,
+      kind: input.kind,
       spentAt,
       createdByProfileId: actor.profileId,
       createdByUsername: actor.username
@@ -279,6 +318,7 @@ export const createExpense = async (rawInput: unknown, actor: AuthenticatedActor
       status: 'success',
       metadata: {
         category: expense.category,
+        kind: expense.kind,
         amount: Number(expense.amount),
         spentAt: expense.spentAt.toISOString()
       }
@@ -290,6 +330,7 @@ export const createExpense = async (rawInput: unknown, actor: AuthenticatedActor
     category: expense.category,
     description: expense.description,
     amount: Number(expense.amount),
+    kind: expense.kind,
     spentAt: expense.spentAt.toISOString(),
     createdByUsername: expense.createdByUsername,
     createdAt: expense.createdAt.toISOString()

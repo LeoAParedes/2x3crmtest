@@ -31,8 +31,24 @@ export const createExpenseSchema = z
     category: z.enum(EXPENSE_CATEGORIES),
     description: z.string().trim().min(2).max(240),
     amount: z.number().positive().max(1_000_000),
+    kind: z.enum(['fixed', 'operating']).default('operating'),
     spentAt: z.string().datetime({ offset: true }).optional()
   })
   .strict()
+
+export const EXPENSE_TEMPLATES: Array<{
+  category: ExpenseCategory
+  kind: 'fixed' | 'operating'
+  description: string
+}> = [
+  { category: 'renta', kind: 'fixed', description: 'Renta del local' },
+  { category: 'luz', kind: 'fixed', description: 'Servicio de luz' },
+  { category: 'agua', kind: 'fixed', description: 'Servicio de agua' },
+  { category: 'gas', kind: 'operating', description: 'Gas / combustible' },
+  { category: 'proveedores', kind: 'operating', description: 'Compra a proveedores' },
+  { category: 'nomina', kind: 'fixed', description: 'Nómina del periodo' },
+  { category: 'mantenimiento', kind: 'operating', description: 'Mantenimiento' },
+  { category: 'transporte', kind: 'operating', description: 'Transporte / logística' }
+]
 
 export type CreateExpenseInput = z.infer<typeof createExpenseSchema>

@@ -40,6 +40,12 @@ export async function POST(request: Request) {
       })
     }
     const code = error instanceof Error ? error.message : 'SALE_CREATE_FAILED'
+    if (code === 'CASH_SESSION_REQUIRED') {
+      return jsonError('Debes abrir un turno de caja antes de cobrar', 409, {
+        code,
+        requestId: access.context.requestId
+      })
+    }
     const status = code === 'INSUFFICIENT_PAYMENT' ? 409 : 503
     const messageByCode: Record<string, string> = {
       INSUFFICIENT_PAYMENT: 'El monto recibido es insuficiente para el total de la venta',

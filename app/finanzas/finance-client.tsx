@@ -17,6 +17,7 @@ import {
 
 import {
   EXPENSE_CATEGORIES,
+  EXPENSE_TEMPLATES,
   expenseCategoryLabels,
   type ExpenseCategory
 } from '@/src/lib/finance/expense-schema'
@@ -32,11 +33,15 @@ type TopProduct = {
   productName: string
   quantityDisplay: string
   revenue: number
+  peakHourLabel?: string
+  peakDayLabel?: string
+  insight?: string
 }
 
 type SummaryResponse = {
   success: boolean
   period: FinancePeriod
+  generatedAt?: string
   salesTotals: {
     day: { total: number; count: number }
     week: { total: number; count: number }
@@ -48,6 +53,7 @@ type SummaryResponse = {
     neto: number
     salesCount: number
     expenseCount: number
+    averageTicket?: number
   }
   salesSeries: SalesBucket[]
   cashFlowSeries: CashFlowBucket[]
@@ -60,6 +66,7 @@ type ExpenseRow = {
   category: string
   description: string
   amount: number
+  kind?: string
   spentAt: string
   createdByUsername: string
 }
@@ -107,11 +114,13 @@ export const FinanceClient = () => {
   const [category, setCategory] = useState<ExpenseCategory>('proveedores')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
+  const [expenseKind, setExpenseKind] = useState<'fixed' | 'operating'>('operating')
 
   useEffect(() => {
     let cancelled = false
 
-    const load = async () => {
+    const load = async (soft = false) => {
+      if (!soft) setLoading(true)
       try {
         const [summaryResponse, expensesResponse] = await Promise.all([
           fetch(`/api/finanzas/summary?period=${period}`),
@@ -142,10 +151,20 @@ export const FinanceClient = () => {
       }
     }
 
-    void load()
+    void load(false)
+    const intervalId = window.setInterval(() => {
+      void load(true)
+    }, 15000)
+
+    const handleFocus = () => {
+      void load(true)
+    }
+    window.addEventListener('focus', handleFocus)
 
     return () => {
       cancelled = true
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
     }
   }, [period, refreshKey])
 
@@ -182,7 +201,8 @@ export const FinanceClient = () => {
         body: JSON.stringify({
           category,
           description: description.trim(),
-          amount: parsedAmount
+          amount: parsedAmount,
+          kind: expenseKind
         })
       })
       const payload = (await response.json()) as { success?: boolean; message?: string }
@@ -212,7 +232,8 @@ export const FinanceClient = () => {
     egresos: 0,
     neto: 0,
     salesCount: 0,
-    expenseCount: 0
+    expenseCount: 0,
+    averageTicket: 0
   }
   const topProducts = summary?.topProducts || []
   const salesSeries = summary?.salesSeries || []
@@ -225,7 +246,13 @@ export const FinanceClient = () => {
         <div>
           <h1 className='text-2xl font-semibold text-slate-950'>Finanzas</h1>
           <p className='mt-1 text-sm text-slate-600'>
-            Ventas, flujo de caja, gastos y productos más vendidos.
+            Ventas, flujo de caja, gastos y leaderboard de productos para dirección.
+          </p>
+          <p className='mt-1 text-xs text-emerald-700'>
+            En vivo · actualiza cada 15s
+            {summary?.generatedAt
+              ? ` · ${new Date(summary.generatedAt).toLocaleTimeString('es-MX')}`
+              : ''}
           </p>
         </div>
         <div
@@ -273,7 +300,7 @@ export const FinanceClient = () => {
         ))}
       </section>
 
-      <section className='mt-4 grid gap-3 sm:grid-cols-3' aria-label='Flujo de caja'>
+      <section className='mt-4 grid gap-3 sm:grid-cols-4' aria-label='Flujo de caja'>
         <article className='border border-slate-200 bg-white px-4 py-3'>
           <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Ingresos (periodo)</p>
           <p className='mt-2 text-xl font-semibold tabular-nums text-emerald-800'>
@@ -298,6 +325,13 @@ export const FinanceClient = () => {
             {formatMxnCurrency(cashFlow.neto)}
           </p>
           <p className='mt-1 text-xs text-slate-500'>Ingresos menos egresos</p>
+        </article>
+        <article className='border border-slate-200 bg-white px-4 py-3'>
+          <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Ticket promedio</p>
+          <p className='mt-2 text-xl font-semibold tabular-nums text-slate-950'>
+            {formatMxnCurrency(cashFlow.averageTicket || 0)}
+          </p>
+          <p className='mt-1 text-xs text-slate-500'>Ingreso ÷ ventas del periodo</p>
         </article>
       </section>
 
@@ -374,8 +408,8 @@ export const FinanceClient = () => {
 
       <section className='mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]'>
         <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Top productos más vendidos</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Ordenados por ingreso en el periodo</p>
+          <h2 className='text-sm font-semibold text-slate-900'>Leaderboard por cantidad</h2>
+          <p className='mt-0.5 text-xs text-slate-500'>Top productos + hora pico y día más fuerte</p>
           <div className='mt-3 h-72'>
             {topProducts.length ? (
               <ResponsiveContainer width='100%' height='100%'>
@@ -427,6 +461,9 @@ export const FinanceClient = () => {
                       Cantidad
                     </th>
                     <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                      Pico
+                    </th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
                       Ingreso
                     </th>
                   </tr>
@@ -440,6 +477,9 @@ export const FinanceClient = () => {
                         <span className='ml-2 text-xs text-slate-500'>{product.sku}</span>
                       </td>
                       <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>{product.quantityDisplay}</td>
+                      <td className='px-3 py-2 text-xs text-slate-600'>
+                        {product.insight || `${product.peakHourLabel || '—'} · ${product.peakDayLabel || '—'}`}
+                      </td>
                       <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
                         {formatMxnCurrency(product.revenue)}
                       </td>
@@ -489,8 +529,39 @@ export const FinanceClient = () => {
       <section className='mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]'>
         <article className='border border-slate-200 bg-white p-4'>
           <h2 className='text-sm font-semibold text-slate-900'>Registrar gasto</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Renta, luz, proveedores y otros egresos</p>
+          <p className='mt-0.5 text-xs text-slate-500'>Plantillas rápidas para fijos y corrientes</p>
+          <div className='mt-3 flex flex-wrap gap-2'>
+            {EXPENSE_TEMPLATES.map(template => (
+              <button
+                key={`${template.category}-${template.description}`}
+                type='button'
+                onClick={() => {
+                  setCategory(template.category)
+                  setDescription(template.description)
+                  setExpenseKind(template.kind)
+                }}
+                aria-label={`Usar plantilla ${template.description}`}
+                className='rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50'
+              >
+                {template.description}
+              </button>
+            ))}
+          </div>
           <form className='mt-4 space-y-3' onSubmit={handleCreateExpense}>
+            <div>
+              <label htmlFor='expense-kind' className='text-xs font-medium text-slate-600'>
+                Tipo
+              </label>
+              <select
+                id='expense-kind'
+                value={expenseKind}
+                onChange={event => setExpenseKind(event.target.value as 'fixed' | 'operating')}
+                className='mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm'
+              >
+                <option value='fixed'>Fijo / producción</option>
+                <option value='operating'>Corriente</option>
+              </select>
+            </div>
             <div>
               <label htmlFor='expense-category' className='text-xs font-medium text-slate-600'>
                 Categoría

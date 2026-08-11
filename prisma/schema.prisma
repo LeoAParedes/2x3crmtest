@@ -12,14 +12,17 @@ enum UserRole {
 }
 
 model UserProfile {
-  id         String   @id @default(cuid())
-  authUserId String   @unique @db.Uuid
-  username   String   @unique
-  role       UserRole
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  sales      Sale[]
+  id          String        @id @default(cuid())
+  authUserId  String        @unique @db.Uuid
+  username    String        @unique
+  role        UserRole
+  isActive    Boolean       @default(true)
+  /// ready = can open shift | on_shift = POS allowed | must_logout = post cash-cut lock
+  cashierGate String        @default("ready")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  sales       Sale[]
+  cashSessions CashSession[]
 }
 
 model Customer {
@@ -218,23 +221,49 @@ model PaymentPromise {
   @@index([customerId, status])
 }
 
-model Sale {
+model CashSession {
   id                String      @id @default(cuid())
-  saleNumber        String      @unique
   cashierProfileId  String
   cashierAuthUserId String      @db.Uuid
   cashierUsername   String
-  subtotal          Decimal     @db.Decimal(10, 2)
-  tax               Decimal     @db.Decimal(10, 2)
-  total             Decimal     @db.Decimal(10, 2)
-  paymentMethod     String
-  amountReceived    Decimal?    @db.Decimal(10, 2)
-  status            String      @default("completed")
-  createdAt         DateTime    @default(now())
+  status            String      @default("open")
+  openingFloat      Decimal     @db.Decimal(10, 2)
+  openedAt          DateTime    @default(now())
+  closedAt          DateTime?
+  cashSalesTotal    Decimal     @db.Decimal(10, 2) @default(0)
+  cardSalesTotal    Decimal     @db.Decimal(10, 2) @default(0)
+  salesCount        Int         @default(0)
+  expectedCash      Decimal?    @db.Decimal(10, 2)
+  countedCash       Decimal?    @db.Decimal(10, 2)
+  variance          Decimal?    @db.Decimal(10, 2)
+  notes             String?
   cashierProfile    UserProfile @relation(fields: [cashierProfileId], references: [id], onDelete: Restrict)
+  sales             Sale[]
+
+  @@index([cashierAuthUserId, status])
+  @@index([status, openedAt])
+}
+
+model Sale {
+  id                String       @id @default(cuid())
+  saleNumber        String       @unique
+  cashierProfileId  String
+  cashierAuthUserId String       @db.Uuid
+  cashierUsername   String
+  cashSessionId     String?
+  subtotal          Decimal      @db.Decimal(10, 2)
+  tax               Decimal      @db.Decimal(10, 2)
+  total             Decimal      @db.Decimal(10, 2)
+  paymentMethod     String
+  amountReceived    Decimal?     @db.Decimal(10, 2)
+  status            String       @default("completed")
+  createdAt         DateTime     @default(now())
+  cashierProfile    UserProfile  @relation(fields: [cashierProfileId], references: [id], onDelete: Restrict)
+  cashSession       CashSession? @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
   items             SaleItem[]
 
   @@index([cashierAuthUserId, createdAt])
+  @@index([cashSessionId])
 }
 
 model SaleItem {
@@ -258,6 +287,8 @@ model Expense {
   category           String
   description        String
   amount             Decimal  @db.Decimal(10, 2)
+  /// fixed = recurrente/producción base | operating = corriente
+  kind               String   @default("operating")
   spentAt            DateTime @default(now())
   createdByProfileId String?
   createdByUsername  String
@@ -266,6 +297,7 @@ model Expense {
 
   @@index([spentAt])
   @@index([category, spentAt])
+  @@index([kind, spentAt])
 }
 
 model SystemActionLog {

@@ -2,7 +2,7 @@
 
 import Image from 'next/image'
 import Link from 'next/link'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 
 import type { CrmRole } from '@/src/lib/security/rbac'
@@ -16,7 +16,7 @@ type WorkspaceShellProps = {
 type NavItem = {
   href: string
   label: string
-  section: 'pos' | 'operations' | 'inventory' | 'finance'
+  section: 'pos' | 'operations' | 'inventory' | 'finance' | 'caja'
   iconSrc: string
   adminOnly?: boolean
 }
@@ -27,8 +27,10 @@ type ParsedNavHref = {
 }
 
 const navItems: NavItem[] = [
+  { href: '/caja', label: 'Turno / Corte', section: 'caja', iconSrc: '/icons/nav/pos.png' },
   { href: '/pos', label: 'Punto de venta', section: 'pos', iconSrc: '/icons/nav/pos.png' },
   { href: '/admin', label: 'Dashboard operativo', section: 'operations', iconSrc: '/icons/nav/dashboard.png' },
+  { href: '/admin/cajeros', label: 'Cajeros', section: 'operations', iconSrc: '/icons/nav/adjust.png', adminOnly: true },
   { href: '/operaciones', label: 'Operaciones', section: 'operations', iconSrc: '/icons/nav/operations.png' },
   { href: '/inventario', label: 'Inventarios', section: 'inventory', iconSrc: '/icons/nav/inventory.png' },
   { href: '/inventario?shortcut=ajuste', label: 'Ajuste rápido', section: 'inventory', iconSrc: '/icons/nav/adjust.png' },
@@ -37,6 +39,7 @@ const navItems: NavItem[] = [
 ]
 
 const sectionTitle: Record<NavItem['section'], string> = {
+  caja: 'Caja',
   pos: 'POS',
   operations: 'Operaciones',
   inventory: 'Inventarios',
@@ -116,12 +119,20 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
   const [expanded, setExpanded] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mobileOpenRouteKey, setMobileOpenRouteKey] = useState<string | null>(null)
+  const [cashierGate, setCashierGate] = useState<'ready' | 'on_shift' | 'must_logout' | null>(
+    role === 'cashier' ? null : 'ready'
+  )
   const pathname = usePathname()
+  const router = useRouter()
   const searchParams = useSearchParams()
   const routeKey = `${pathname}?${searchParams.toString()}`
+  const postCutLock = role === 'cashier' && cashierGate === 'must_logout'
   const visibleItems = navItems.filter(item => {
+    if (postCutLock) return false
     if (item.adminOnly && role !== 'admin') return false
-    if (role === 'cashier' && (item.section === 'finance' || item.href === '/admin')) return false
+    if (role === 'cashier' && (item.section === 'finance' || item.href === '/admin' || item.href === '/admin/cajeros')) {
+      return false
+    }
     return true
   })
   const activeItemHref = useMemo(
@@ -129,10 +140,36 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
     [visibleItems, pathname, searchParams]
   )
   const currentModule = visibleItems.find(item => item.href === activeItemHref)?.label || 'Sistema'
-  const canAccessPos = role === 'admin' || role === 'cashier'
+  const canAccessPos = (role === 'admin' || role === 'cashier') && !postCutLock
   const [universalCartCount, setUniversalCartCount] = useState(0)
   const isMobileDrawerOpen = mobileOpen && mobileOpenRouteKey === routeKey
   const isSidebarExpanded = isMobileDrawerOpen || expanded
+
+  useEffect(() => {
+    if (role !== 'cashier') return
+    let cancelled = false
+    const loadGate = async () => {
+      try {
+        const response = await fetch('/api/caja/session')
+        const payload = (await response.json()) as { gate?: 'ready' | 'on_shift' | 'must_logout' }
+        if (!cancelled) {
+          setCashierGate(payload.gate || 'ready')
+        }
+      } catch {
+        if (!cancelled) setCashierGate('ready')
+      }
+    }
+    void loadGate()
+    return () => {
+      cancelled = true
+    }
+  }, [role, pathname])
+
+  useEffect(() => {
+    if (postCutLock && pathname !== '/caja') {
+      router.replace('/caja')
+    }
+  }, [postCutLock, pathname, router])
 
   useEffect(() => {
     const syncFromCookie = () => {

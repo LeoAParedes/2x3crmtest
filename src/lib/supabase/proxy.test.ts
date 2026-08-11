@@ -7,8 +7,8 @@ describe('getAuthenticatedHomePath', () => {
     expect(getAuthenticatedHomePath('admin')).toBe('/admin')
   })
 
-  it('routes cashier claims to the POS', () => {
-    expect(getAuthenticatedHomePath('cashier')).toBe('/pos')
+  it('routes cashier claims to the cash drawer module', () => {
+    expect(getAuthenticatedHomePath('cashier')).toBe('/caja')
   })
 
   it('rejects legacy and unknown role claims', () => {

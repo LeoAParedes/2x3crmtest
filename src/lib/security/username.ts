@@ -1,12 +1,15 @@
 import { z } from 'zod'
 
-const allowedUsernameSchema = z.enum(['admin', 'cajero'])
+const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z][a-z0-9_]{2,31}$/, 'Usuario inválido')
 
-export type LoginUsername = z.infer<typeof allowedUsernameSchema>
+export type LoginUsername = string
 
 export const parseLoginUsername = (username: unknown): LoginUsername => {
-  const normalized = typeof username === 'string' ? username.trim().toLowerCase() : username
-  const parsed = allowedUsernameSchema.safeParse(normalized)
+  const parsed = usernameSchema.safeParse(typeof username === 'string' ? username : username)
   if (!parsed.success) {
     throw new Error('Usuario inválido')
   }

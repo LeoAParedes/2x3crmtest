@@ -12,6 +12,7 @@ import { summarizeSaleQuantities } from '@/src/lib/inventory/logbook-quantity'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { ensureCanonicalWeightStocks } from '@/src/lib/inventory/normalize-weight-stock'
 import { hasSufficientStock, inferWeightSupport } from '@/src/lib/inventory/weight-units'
+import { requireOpenCashSessionId } from '@/src/lib/caja/cash-session-service'
 import type { TicketSale } from '@/src/lib/pos/ticket-format'
 
 export const normalizeSaleItems = (items: CreateSaleInput['items']) => {
@@ -80,6 +81,7 @@ export const assertStockAvailability = (
 export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) => {
   const input = createSaleSchema.parse(rawInput)
   const items = normalizeSaleItems(input.items)
+  const cashSessionId = await requireOpenCashSessionId(actor)
   const prisma = await getPrisma()
   await applyDueScheduledPrices(prisma)
   await ensureCanonicalWeightStocks(prisma, {
@@ -147,6 +149,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         cashierProfileId: actor.profileId,
         cashierAuthUserId: actor.userId,
         cashierUsername: actor.username,
+        cashSessionId,
         subtotal: totals.subtotal,
         tax: totals.tax,
         total: totals.total,
@@ -174,6 +177,18 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         reason: sale.saleNumber
       }))
     })
+
+    const money = Number(Number(sale.total).toFixed(2))
+    await transaction.cashSession.update({
+      where: { id: cashSessionId },
+      data: {
+        salesCount: { increment: 1 },
+        ...(input.paymentMethod === 'cash'
+          ? { cashSalesTotal: { increment: money } }
+          : { cardSalesTotal: { increment: money } })
+      }
+    })
+
     const quantitySummary = summarizeSaleQuantities(lines)
     const ticketItems = lines.map(line => ({
       sku: line.sku,
@@ -196,6 +211,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         metadata: {
           saleId: sale.id,
           saleNumber: sale.saleNumber,
+          cashSessionId,
           itemCount: sale.items.length,
           pieceCount: quantitySummary.pieceCount,
           weightGrams: quantitySummary.weightGrams,

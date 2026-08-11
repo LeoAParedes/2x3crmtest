@@ -4,15 +4,15 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { getPublicSupabaseEnv } from '@/src/lib/config/env'
 import { parseCrmRole } from '@/src/lib/security/rbac'
 
-const protectedPaths = ['/admin', '/pos', '/inventario']
+const protectedPaths = ['/admin', '/pos', '/inventario', '/caja', '/finanzas', '/bitacora', '/operaciones']
 
-export const getAuthenticatedHomePath = (roleClaim: unknown): '/admin' | '/pos' | null => {
+export const getAuthenticatedHomePath = (roleClaim: unknown): '/admin' | '/pos' | '/caja' | null => {
   const role = parseCrmRole(typeof roleClaim === 'string' ? roleClaim : undefined)
   if (role === 'admin') {
     return '/admin'
   }
   if (role === 'cashier') {
-    return '/pos'
+    return '/caja'
   }
   return null
 }
