@@ -1230,16 +1230,16 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
               aria-checked={isCobroMode}
               aria-label='Activar modo cobro'
               onClick={handleToggleCobroMode}
-              className={`inline-flex min-h-12 items-center gap-3 rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+              className={`inline-flex min-h-12 items-center gap-3 rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f5870a] ${
                 isCobroMode
-                  ? 'border-emerald-600 bg-emerald-600 text-white'
-                  : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                  ? 'border-[#c85604] bg-[#fa6b05] text-[#321501]'
+                  : 'border-[#fdc49b] bg-[#fef0e6] text-[#642b02] hover:bg-[#fee1cd]'
               }`}
             >
               <span
                 aria-hidden='true'
                 className={`relative h-6 w-11 rounded-full transition ${
-                  isCobroMode ? 'bg-emerald-300' : 'bg-slate-300'
+                  isCobroMode ? 'bg-[#fde7ce]' : 'bg-[#eae1ae]'
                 }`}
               >
                 <span

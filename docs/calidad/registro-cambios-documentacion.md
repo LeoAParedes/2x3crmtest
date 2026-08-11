@@ -14,6 +14,7 @@ Cada fila es evidencia auditable de cambio. Completar **Validó** y **Aprobó** 
 
 | Fecha | Soft. | Doc. | ID DOC | Cambio (qué / por qué) | Redactó | Validó | Aprobó |
 |-------|-------|------|--------|------------------------|---------|--------|--------|
+| 2026-08-11 | 1.0.0 | 1.3.1-MU | DOC-MU-001 | Incluye commits `2f85879` (alertas sin archivados, badge Stock bajo Mínimo, campana sin caché) y `1daff02` (modo cobro multi-pestaña, modal auth limpio, cantidad merma por lote) | Equipo docs / asistente | Leonardo Antonio Paredes | Leonardo Antonio Paredes |
 | 2026-08-11 | 1.0.0 | 1.3.0-MU | DOC-MU-001 | Cobertura completa del sistema vs commits recientes: campana, inventario kg/pz y cajero solo lectura, merma FEFO con campos, compras/restock, promos 3x2/bundle, Hoy widgets, crédito no en /caja, config Turno/Chatbot, bitácora tabs | Equipo docs / asistente | Leonardo Antonio Paredes | Leonardo Antonio Paredes |
 | 2026-08-11 | 1.0.0 | 1.2.0-MU | DOC-MU-001 | Documenta implementación completa POS cajero (commit 5fde201): modo cobro, sesión exclusiva, sync borrador, auth admin al quitar línea, crédito, turnos, promos en ticket | Equipo docs / asistente | Leonardo Antonio Paredes | Leonardo Antonio Paredes |
 | 2026-08-11 | 1.0.0 | 1.1.0-MU | DOC-MU-001 | Regeneración completa: liga pública https://2x3crmtest.vercel.app, lotes/caducidad, promos POS, turnos 06–14/14–22, crédito, dashboard Hoy | Equipo docs / asistente | _Pendiente_ | _Pendiente_ |

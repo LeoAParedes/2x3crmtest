@@ -6,12 +6,13 @@
 | **Título** | Manual de usuario — ERP 2x3 Operaciones |
 | **Producto** | `2x3crmtest` · marca en pantalla **2x3 Operaciones** |
 | **Versión del software** | `1.0.0` |
-| **Versión del documento** | `1.3.0-MU` |
+| **Versión del documento** | `1.3.1-MU` |
 | **Fecha** | 11 de agosto de 2026 |
 | **Fabricante** | Leo A. Paredes / proyecto 2x3crmtest |
 | **Liga de servicio** | [https://2x3crmtest.vercel.app](https://2x3crmtest.vercel.app) |
 | **Login** | [https://2x3crmtest.vercel.app/login](https://2x3crmtest.vercel.app/login) |
-| **Commits cubiertos** | `9366f92` lotes · `9e9298f` promos · `831d936` turnos/crédito/Hoy · `5fde201` modo cobro · `d7aa8a1` kg/pz y archivados |
+| **Último commit incluido** | `1daff02` — *fix: resolve set-state-in-effect lint errors in POS and merma* |
+| **Commits cubiertos** | `9366f92` lotes · `9e9298f` promos · `831d936` turnos/crédito/Hoy · `5fde201` modo cobro · `d7aa8a1` kg/pz · `2f85879` alertas archivados / badge Mínimo · `1daff02` POS/merma estabilidad UI |
 | **Repositorio** | https://github.com/LeoAParedes/2x3crmtest |
 | **Normas** | ISO/IEC/IEEE 26514 · ISO/IEC 25000 · ISO/IEC 29110 |
 
@@ -73,7 +74,7 @@ Tras el corte, el cajero queda en `must_logout`: solo ve el resultado y **Cerrar
 
 ## 5. Campana de alertas (todos los roles con shell)
 
-En el encabezado, el ícono **🔔 Alertas** se actualiza cada ~60 s.
+En el encabezado, el ícono **🔔 Alertas** se actualiza cada ~60 s y **no usa caché** (siempre pide datos frescos al servidor).
 
 | Tipo | Etiqueta | Destino al hacer clic |
 |------|----------|------------------------|
@@ -81,7 +82,8 @@ En el encabezado, el ícono **🔔 Alertas** se actualiza cada ~60 s.
 | Stock | **Stock bajo** | `/inventario` |
 
 - Vacío: `Sin alertas de stock ni caducidad.`  
-- **No** incluye productos **archivados**.  
+- **No** incluye productos **archivados** (filtro en servidor y también en la campana): aisle `archived`, SKU/nombre con “archived”/“Archivado”.  
+- Al armar alertas el sistema **repara/cierra lotes** ligados a catálogo archivado para que no reaparezcan.  
 - Caducidad: solo **vencidos (hoy o antes)** o **exactamente mañana** (zona del negocio).  
 - Cantidades de caducidad se muestran en **kg** o **pz**; stock bajo puede verse con el número interno de existencias.
 
@@ -132,7 +134,7 @@ El borrador guarda carrito, pago, monto recibido y datos de crédito en el servi
 
 ### 6.5 Modo cobro
 
-1. Active el interruptor **Modo cobro** (se recuerda en el navegador).  
+1. Active el interruptor **Modo cobro** (preferencia en el navegador; se sincroniza entre pestañas del mismo equipo).  
 2. Use F11 para pantalla completa.  
 3. **Búsqueda por código / SKU** + Enter o **+**.  
 4. **Recibo en vivo** con − / + / **Quitar**.  
@@ -152,6 +154,7 @@ El borrador guarda carrito, pago, monto recibido y datos de crédito en el servi
 
 - Admin: quita directo.  
 - Cajero: modal **Autorización requerida** → **Usuario administrador** + **Clave de administrador** → **Autorizar**.  
+- Cada vez que se abre el modal arranca limpio (`admin` + clave vacía); Escape o clic fuera cancela.  
 - Solo **quitar** la línea pide clave; − / + no.
 
 ### 6.8 Promociones en el ticket
@@ -192,7 +195,8 @@ Atajo admin en Configuración → pestaña **Turno / Corte** → **Ir a Turno / 
 - Título operativo de inventario; búsqueda por Producto, SKU, Categorías, Precios, Unidad, Stock.  
 - Columnas incluyen **Tipo** = `Peso` | `Pieza`.  
 - Stock visible como **`X.XXX kg`** o **`N pz`** (la UI no habla en gramos).  
-- Badge **Stock bajo (umbral …)**.  
+- Badge **Stock bajo (Mínimo …)** — el mínimo es el umbral configurado del SKU.  
+- En listados de alerta local: `Stock {actual} / Mínimo {umbral}`.  
 - Engranaje: **Ver códigos archivados** → badge **Archivado**.  
 - Campana local de stock bajo además de la campana global.
 
@@ -222,10 +226,10 @@ El tipo peso/pieza puede inferirse por categoría/pasillo/nombre (granel, frutas
 
 1. Revise **Alertas (1 día antes y vencidos)** con etiquetas **Vencido** / **Caduca mañana** y botón **Seleccionar lote**.  
 2. En **Dar salida por merma (lote)** elija **Lote**.  
-3. **Cantidad a sacar (kg|pz)** — default `0.100` kg o `1` pz.  
+3. **Cantidad a sacar (kg|pz)** — al cambiar de lote se propone sola `0.100` kg o `1` pz; si edita la cantidad, se conserva mientras ese lote siga seleccionado.  
 4. **Motivo** (default `Merma por caducidad`).  
 5. **Registrar salida del lote**.  
-6. Éxito ejemplo: `Salida registrada del lote {sku} · {qty} · caduca {fecha}`.
+6. Éxito ejemplo: `Salida registrada del lote {sku} · {qty} · caduca {fecha}` (luego la cantidad vuelve al default del lote).
 
 Deep link desde la campana: `?lotId=…` preselecciona el lote.  
 Baja el restante del lote y el stock del SKU (sale primero lo que caduca antes / vencido).
@@ -371,7 +375,8 @@ flowchart TB
 | No puede quitar línea | Autorice con clave admin |
 | Error al sincronizar borrador | Revise red; no cierre si aún no cobró |
 | Promo no aplica | Vigencia, productos y cantidades (2×1/3×2/bundle) |
-| Sin caducidad en campana | Debe existir lote creado en Compras; archivados no alertan |
+| Sin caducidad / stock archivado en campana | Normal: archivados se excluyen y la campana no cachea; refresque o espere ~60 s |
+| Badge dice Mínimo y no “umbral” | Es el umbral de stock bajo del producto (texto actual de la UI) |
 | Merma rechazada | Elija lote y cantidad ≤ restante (kg/pz) |
 | No ve Ajustes / Finanzas | Rol cajero (normal) |
 | Crédito no aparece en `/caja` | Normal; véalo en Dashboard Hoy |
@@ -407,7 +412,8 @@ Reporte: fecha/hora, usuario, URL, pasos, mensaje, modo cobro sí/no, ID venta o
 | Corte ciego | Contado sin ver esperado antes |
 | Autorización admin | Clave para quitar líneas del carrito |
 | Crédito POS | Venta con nombre y teléfono |
-| Archivado | SKU fuera de alertas y operación normal |
+| Archivado | SKU fuera de alertas (detección ampliada: aisle/SKU/nombre con archived/Archivado) |
+| Mínimo | Umbral de stock bajo mostrado en badges `Stock bajo (Mínimo …)` |
 | DavinciAi | Asistente web/WhatsApp |
 | must_logout | Bloqueo post-corte |
 
@@ -449,8 +455,8 @@ Reporte: fecha/hora, usuario, URL, pasos, mensaje, modo cobro sí/no, ID venta o
 
 | Rol | Nombre | Fecha | Evidencia |
 |-----|--------|-------|-----------|
-| Redacción | Leonardo Antonio Paredes | 2026-08-11 | `1.3.0-MU` cobertura total vs commits lotes/promos/POS/Hoy/kg-pz |
+| Redacción | Leonardo Antonio Paredes | 2026-08-11 | `1.3.1-MU` incluye `2f85879` + `1daff02` |
 | Validación técnica | Leonardo Antonio Paredes | — | https://2x3crmtest.vercel.app |
 | Aprobación clientes | Leonardo Antonio Paredes | — | registro de cambios |
 
-Software `1.0.0` · documento **`1.3.0-MU`** · estado completo del sistema operable en la liga de servicio.
+Software `1.0.0` · documento **`1.3.1-MU`** · último commit `1daff02` · liga de servicio https://2x3crmtest.vercel.app
