@@ -4,454 +4,453 @@
 |-------|--------|
 | **ID** | `DOC-MU-001` |
 | **Título** | Manual de usuario — ERP 2x3 Operaciones |
-| **Producto** | `2x3crmtest` (marca en pantalla: **2x3 Operaciones**) |
+| **Producto** | `2x3crmtest` · marca en pantalla **2x3 Operaciones** |
 | **Versión del software** | `1.0.0` |
-| **Versión del documento** | `1.2.0-MU` |
-| **Fecha de publicación** | 11 de agosto de 2026 |
-| **Fabricante / responsable** | Leo A. Paredes / proyecto 2x3crmtest |
-| **Liga de servicio (producción)** | [https://2x3crmtest.vercel.app](https://2x3crmtest.vercel.app) |
-| **Portal de acceso** | [https://2x3crmtest.vercel.app/login](https://2x3crmtest.vercel.app/login) |
-| **POS (cajero)** | [https://2x3crmtest.vercel.app/pos](https://2x3crmtest.vercel.app/pos) |
-| **Turno / Corte** | [https://2x3crmtest.vercel.app/caja](https://2x3crmtest.vercel.app/caja) |
-| **Commit de referencia POS** | `5fde201` — *feat(pos): add cobro mode and harden cashier operations* |
+| **Versión del documento** | `1.3.0-MU` |
+| **Fecha** | 11 de agosto de 2026 |
+| **Fabricante** | Leo A. Paredes / proyecto 2x3crmtest |
+| **Liga de servicio** | [https://2x3crmtest.vercel.app](https://2x3crmtest.vercel.app) |
+| **Login** | [https://2x3crmtest.vercel.app/login](https://2x3crmtest.vercel.app/login) |
+| **Commits cubiertos** | `9366f92` lotes · `9e9298f` promos · `831d936` turnos/crédito/Hoy · `5fde201` modo cobro · `d7aa8a1` kg/pz y archivados |
 | **Repositorio** | https://github.com/LeoAParedes/2x3crmtest |
 | **Normas** | ISO/IEC/IEEE 26514 · ISO/IEC 25000 · ISO/IEC 29110 |
-| **Idioma** | Español (México) |
 
-> **Control de cambios:** [`docs/calidad/registro-cambios-documentacion.md`](../calidad/registro-cambios-documentacion.md)
+> Control de cambios: [`docs/calidad/registro-cambios-documentacion.md`](../calidad/registro-cambios-documentacion.md)
 
 ---
 
 ## 1. Para quién es este manual
 
-| Audiencia | Uso principal |
-|-----------|---------------|
-| **Cajero** | Operar el **módulo POS completo**: turno, venta, modo cobro, crédito, promociones, corte y bitácora |
-| **Administrador** | Supervisar caja, autorizar quitar líneas del carrito, finanzas, compras/lotes, promociones, configuración |
-| **Desarrolladores** | [Manual técnico](../manual-tecnico/manual-tecnico-erp-supermercado.md) |
+| Audiencia | Qué cubre |
+|-----------|-----------|
+| **Cajero** | Login, turno, POS (catálogo + modo cobro), crédito, promos auto, quitar línea con clave admin, corte, bitácora propia, consulta de inventario, merma por lote, campana de alertas |
+| **Administrador** | Todo lo del cajero + Dashboard Hoy, finanzas, compras con lotes, promociones, ajustes de inventario, configuración (IVA, cajeros, chatbot/WhatsApp) |
+| **Desarrollador** | Use el [manual técnico](../manual-tecnico/manual-tecnico-erp-supermercado.md) |
 
 **Roles reales:** `admin` y `cashier`.
 
 ---
 
-## 2. Requisitos previos (cajero)
+## 2. Requisitos previos
 
-- Navegador actualizado (Chrome, Edge o Firefox).
-- Cuenta `cashier` creada por el administrador.
-- Acceso a **https://2x3crmtest.vercel.app**
-- Conocer el **fondo de apertura** autorizado.
-- Estar en **horario de turno** (ver §5.2).
-- Si va a imprimir tickets: permitir ventanas emergentes del sitio.
-- Para tablet/caja: preferir **Modo cobro** a pantalla completa (F11 del navegador).
+- Navegador actualizado; acceso a **https://2x3crmtest.vercel.app**
+- Cuenta entregada por el administrador
+- Para vender: fondo de caja y **horario de turno** (06:00–14:00 o 14:00–22:00, zona del negocio)
+- Pop-ups permitidos si imprime tickets
+- Tablet/caja: recomendado **Modo cobro** + F11 a pantalla completa
 
 ---
 
-## 3. Inicio rápido — primera venta del cajero
+## 3. Inicio rápido
 
-1. Abra https://2x3crmtest.vercel.app → **Entrar al sistema**.  
-2. Inicie sesión → el sistema lo lleva a **https://2x3crmtest.vercel.app/pos**.  
-3. Si no hay otro cajero con turno abierto y está en horario, capture **Fondo de apertura (MXN)** (default `500`) → **Abrir turno y vender**.  
-4. Active **Modo cobro** (recomendado) o use el catálogo + **Carrito**.  
-5. Agregue productos, elija **Efectivo / Tarjeta / Crédito** y cobre.  
-6. Al terminar el turno: **Turno / Corte** → un solo corte → **Cerrar sesión**.
+1. Abra la liga de servicio → **Entrar al sistema**.  
+2. Inicie sesión (cajero → `/pos`; admin → `/admin` **Hoy**).  
+3. Cajero: abra turno con fondo → venda → un corte por franja → **Cerrar sesión**.  
+4. Admin: cree cajeros, compras con caducidad de lote y promociones antes del día de venta.
 
 ```mermaid
 flowchart LR
-  A[Login cajero] --> B[Abrir turno]
-  B --> C[POS / Modo cobro]
-  C --> D[Cobrar]
-  D --> E[Corte único]
-  E --> F[Cerrar sesión]
+  A[Liga pública] --> B[Login]
+  B --> C[Abrir turno]
+  C --> D[POS / Modo cobro]
+  D --> E[Corte]
+  E --> F[Salir]
 ```
 
-*Texto alternativo: Login → Abrir turno → POS o modo cobro → Cobrar → Corte → Cerrar sesión.*
+*Texto alternativo: Liga pública → Login → Abrir turno → POS → Corte → Salir.*
 
 ---
 
 ## 4. Cómo iniciar y cerrar sesión
 
-1. Vaya a https://2x3crmtest.vercel.app/login  
-2. Capture **Usuario** y **Contraseña** → **Iniciar sesión**.  
-3. Destino del cajero: **POS** (`/pos`).  
-4. **Salir** desde el menú lateral (cuando no esté bloqueado post-corte).
+1. https://2x3crmtest.vercel.app/login  
+2. **Usuario** + **Contraseña** → **Iniciar sesión**  
+3. **Salir** en el menú (cuando no esté bloqueado post-corte)
 
-**Después del corte:** el cajero queda en estado `must_logout`. El menú desaparece; solo puede ver el resultado del corte y pulsar **Cerrar sesión**. No puede abrir otro turno hasta cerrar sesión.
-
----
-
-## 5. Módulo POS para cajeros (implementación completa)
-
-Esta sección describe **todo** el flujo operativo del POS según la actualización actual en `main` (modo cobro, sesión exclusiva, borrador en servidor, autorización admin para quitar líneas, crédito y promociones en ticket).
-
-### 5.1 Qué ve el cajero en el menú
-
-| Visible para cajero | No visible / no usable |
-|---------------------|-------------------------|
-| **POS** | Dashboard Hoy |
-| **Bitácora** (solo lo suyo) | Finanzas y submódulos |
-| **Inventarios** (consulta) | Configuración / Cajeros |
-| **Merma y Caducidad** | **Ajuste rápido** (solo admin) |
-| **Turno / Corte** (`/caja`) | Crear promociones, compras, IVA |
-
-El ícono de **Carrito** del encabezado abre `/pos?openCart=1` (salvo bloqueo post-corte).
+Tras el corte, el cajero queda en `must_logout`: solo ve el resultado y **Cerrar sesión**.
 
 ---
 
-### 5.2 Reglas de turno (obligatorias antes de vender)
+## 5. Campana de alertas (todos los roles con shell)
 
-| Regla | Comportamiento real |
-|-------|---------------------|
-| Horario mañana | **06:00–14:00** (zona del negocio) |
-| Horario tarde | **14:00–22:00** |
-| Fuera de horario | No abre turno. Mensaje: `Fuera de horario de turno (06:00–14:00 o 14:00–22:00)` |
-| Un corte por franja | Si ya cerró el turno mañana, **no** puede reabrir mañana el mismo día. Mensaje: `Este turno del día ya fue cerrado. Solo un corte por turno.` |
-| Sesión exclusiva de cajero | **Solo un cajero** puede tener turno abierto a la vez. Si otro opera, verá: `Solo puede haber un cajero en turno. Ahora opera: {usuario}…` |
-| Excepción admin | El administrador **sí** puede abrir turno aunque haya un cajero activo |
-| Post-corte | Debe **cerrar sesión** antes de intentar abrir otro turno |
+En el encabezado, el ícono **🔔 Alertas** se actualiza cada ~60 s.
 
-Sin turno abierto no hay cobro. Mensaje al intentar vender: equivalente a *debe abrir turno de caja*.
+| Tipo | Etiqueta | Destino al hacer clic |
+|------|----------|------------------------|
+| Caducidad | **Vencido** o **Caduca mañana** | `/inventario/merma-caducidad?lotId=…` |
+| Stock | **Stock bajo** | `/inventario` |
 
----
-
-### 5.3 Cómo abrir el turno
-
-**Desde POS** (pantalla **Abre tu turno para vender**):
-
-1. Revise que no aparezca el aviso de otro cajero ocupando la caja.  
-2. Capture **Fondo de apertura (MXN)** (mínimo 0; default `500`).  
-3. Pulse **Abrir turno y vender**.  
-4. Debe ver **Caja activa: {su usuario}**.
-
-**Desde Turno / Corte** (`/caja`):
-
-1. Capture **Fondo inicial (efectivo)**.  
-2. Pulse **Abrir turno**.  
-3. Use **Ir al POS**.
-
-Errores frecuentes al abrir:
-
-| Mensaje | Qué hacer |
-|---------|-----------|
-| `Fuera de horario de turno…` | Espere la franja 06–14 o 14–22 |
-| `Solo puede haber un cajero en turno…` | Espere a que el otro cajero corte y cierre sesión, o pida apoyo al admin |
-| `Ya tienes un turno abierto` | Vaya directo a vender en POS |
-| `Este turno del día ya fue cerrado…` | Espere la siguiente franja (mañana↔tarde) o el día siguiente |
-| `Debes cerrar sesión después del corte…` | Pulse **Cerrar sesión** e inicie de nuevo |
+- Vacío: `Sin alertas de stock ni caducidad.`  
+- **No** incluye productos **archivados**.  
+- Caducidad: solo **vencidos (hoy o antes)** o **exactamente mañana** (zona del negocio).  
+- Cantidades de caducidad se muestran en **kg** o **pz**; stock bajo puede verse con el número interno de existencias.
 
 ---
 
-### 5.4 Vista normal del POS (catálogo + carrito)
+## 6. Módulo POS (cajero y admin en caja)
 
 **Ruta:** https://2x3crmtest.vercel.app/pos
 
-1. Busque en **Buscar SKU o producto**.  
-2. Ordene por nombre, SKU, stock o precio (ascendente/descendente).  
-3. En cada fila pulse **Agregar**.  
-4. Ajuste cantidades:
-   - **pz** (pieza): mínimo 1  
-   - **kg** (peso): mínimo 0.25, pasos de 0.25; productos de peso quedan fijos en `kg`  
-5. Abra **Carrito** para ver líneas, totales y cobro.  
-6. Reloj del turno visible en el encabezado del POS.
+### 6.1 Menú del cajero
 
-**Estado del borrador** (siempre visible en el panel de cobro):
+| Ve | No ve / no usa |
+|----|----------------|
+| POS, Bitácora, Inventarios, Merma y Caducidad, Turno/Corte, Carrito, Campana | Dashboard Hoy, Finanzas, Configuración, **Ajuste rápido** |
 
-| Indicador | Significado |
-|-----------|------------|
-| `Sincronizando con servidor…` | Guardando el carrito en tiempo real |
-| `Guardado en servidor` | Borrador seguro en servidor (+ cookie local) |
-| `Error al sincronizar` | Revise red; el carrito puede seguir en pantalla |
-| `Sin cambios pendientes` | Nada nuevo por guardar |
+### 6.2 Reglas de turno
 
-El borrador guarda carrito, método de pago, monto recibido y datos de crédito. Si recarga o cambia de equipo con la misma sesión, puede recuperar la venta en curso.
+| Regla | Comportamiento |
+|-------|----------------|
+| Mañana | 06:00–14:00 |
+| Tarde | 14:00–22:00 |
+| Fuera de horario | `Fuera de horario de turno (06:00–14:00 o 14:00–22:00)` |
+| Un corte por franja | `Este turno del día ya fue cerrado. Solo un corte por turno.` |
+| Un solo cajero en turno | `Solo puede haber un cajero en turno. Ahora opera: {usuario}…` |
+| Admin exento | Puede abrir aunque haya cajero activo |
+| Post-corte | Debe cerrar sesión antes de reabrir |
 
----
+Sin turno no se cobra.
 
-### 5.5 Modo cobro (tablet / caja a pantalla completa)
+### 6.3 Abrir turno
 
-Pensado para operación rápida con escáner o teclado.
+**POS — Abre tu turno para vender**
 
-**Cómo activarlo**
+1. Si otro cajero opera, verá el aviso de sesión exclusiva.  
+2. **Fondo de apertura (MXN)** (default `500`) → **Abrir turno y vender**.  
+3. Encabezado: **Caja activa: {usuario}** + reloj.
 
-1. En POS, active el interruptor **Modo cobro**.  
-2. La preferencia se recuerda en el navegador.  
-3. Para pantalla completa use **F11** del navegador (recomendado en la propia UI).  
-4. Para salir: **Salir modo cobro** (o desactivar el interruptor al volver a la vista normal).
+También desde `/caja` → **Fondo inicial** → **Abrir turno** → **Ir al POS**.
 
-**Qué hace el modo cobro**
+### 6.4 Vista catálogo + carrito
 
-| Zona | Uso |
-|------|-----|
-| **Búsqueda por código / SKU** | Escriba o escanee y pulse **Enter** o **+** |
-| **Recibo en vivo** | Lista de líneas con precio y descuento por línea |
-| **− / +** | Baja o sube cantidad |
-| **Quitar** | Quita la línea (si es cajero, pide autorización admin — §5.7) |
-| **Centro de pago** | Subtotal, descuentos (nombre de promo), IVA/impuesto, total |
-| **Efectivo / Tarjeta / Crédito** | Medio de pago |
-| **Monto recibido** | Solo efectivo; muestra **Cambio** |
-| **Nombre / Teléfono** | Obligatorios en crédito |
-| **Cobrar** | Confirma la venta (`Procesando…` mientras corre) |
-| Indicador de sync | Mismo borrador en servidor que la vista normal |
+1. **Buscar SKU o producto**; ordenar por nombre/SKU/stock/precio.  
+2. **Agregar**; ajustar **pz** (mín. 1) o **kg** (mín. 0.25, pasos 0.25; peso fijo en kg).  
+3. Abrir **Carrito**.  
+4. Indicadores de borrador: `Sincronizando con servidor…` · `Guardado en servidor` · `Error al sincronizar` · `Sin cambios pendientes`.
 
-Pantalla vacía: *Escanea un código para comenzar el ticket*.
+El borrador guarda carrito, pago, monto recibido y datos de crédito en el servidor (y cookie local).
 
----
+### 6.5 Modo cobro
 
-### 5.6 Medios de pago
+1. Active el interruptor **Modo cobro** (se recuerda en el navegador).  
+2. Use F11 para pantalla completa.  
+3. **Búsqueda por código / SKU** + Enter o **+**.  
+4. **Recibo en vivo** con − / + / **Quitar**.  
+5. **Centro de pago:** subtotal, **Descuentos · {promo}**, IVA/impuesto, total.  
+6. **Efectivo / Tarjeta / Crédito** → **Cobrar**.  
+7. **Salir modo cobro** para volver al catálogo.
 
-| Medio | Qué captura el cajero | Regla |
-|-------|------------------------|-------|
-| **Efectivo** | **Monto recibido** | Debe ser ≥ total; si no: `Monto recibido insuficiente…` |
-| **Tarjeta** | Nada extra | Se registra como venta tarjeta en el turno |
-| **Crédito** | **Nombre del cliente** (≥ 2 caracteres) y **Teléfono** (≥ 7) | Si faltan: `Nombre y teléfono del cliente son requeridos para venta a crédito` |
+### 6.6 Medios de pago
 
-Los tres medios alimentan el resumen del turno y el dashboard **Hoy** del administrador.
+| Medio | Campos | Regla |
+|-------|--------|-------|
+| Efectivo | Monto recibido | ≥ total |
+| Tarjeta | — | Suma a ventas tarjeta del turno |
+| Crédito | Nombre (≥2) y Teléfono (≥7) | Obligatorios |
 
----
+### 6.7 Quitar línea del carrito
 
-### 5.7 Quitar un producto del carrito (autorización admin)
+- Admin: quita directo.  
+- Cajero: modal **Autorización requerida** → **Usuario administrador** + **Clave de administrador** → **Autorizar**.  
+- Solo **quitar** la línea pide clave; − / + no.
 
-- **Administrador** en POS: puede quitar líneas sin clave extra.  
-- **Cajero:** al pulsar **Quitar** / eliminar línea aparece **Autorización requerida**.
+### 6.8 Promociones en el ticket
 
-Modal:
+El POS carga promos activas. Se aplica sola la de **mayor ahorro** (2×1, 3×2, %, monto fijo, bundle). El ticket muestra subtotal, descuento y total.
 
-1. Título: **Autorización requerida**  
-2. Texto: *Para quitar un producto ya registrado en el carrito se necesita la clave del administrador.*  
-3. Campos: **Usuario administrador** (default `admin`) y **Clave de administrador**  
-4. Botones: **Cancelar** / **Autorizar** (`Validando…`)
+### 6.9 Cobrar
 
-Si la clave es incorrecta: `Clave de administrador inválida` (o mensaje equivalente).  
-Subir o bajar cantidad con **+ / −** **no** pide clave; solo **quitar** la línea completa.
+Vista normal: **Cobrar y emitir ticket**. Modo cobro: **Cobrar**.  
+Modal **Recibo de venta** → **Mostrar impresión** / **Cerrar**.
+
+Al cobrar: baja stock/lotes, actualiza turno, bitácora y descuentos.
 
 ---
 
-### 5.8 Promociones en el cobro
+## 7. Corte de caja
 
-- El POS carga promociones activas desde el servidor (`/api/pos/promos`).  
-- Si el carrito cumple una promo (2x1, 3x2, porcentaje, monto fijo o bundle), el descuento se aplica **solo**.  
-- Si varias aplican, gana la de **mayor ahorro**.  
-- En totales verá **Descuentos · {nombre de la promo}**.  
-- El ticket refleja subtotal, descuento y total.
+**Ruta:** https://2x3crmtest.vercel.app/caja · título **Turno y corte de caja**
 
-El cajero **no crea** promociones; eso lo hace el admin en Finanzas. Si no baja el precio: la promo no está vigente, no incluye esos SKU o faltan cantidades (2x1/3x2/bundle).
+1. Revise resumen del turno abierto: **Inicio**, **Fondo inicial**, **Ventas efectivo**, **Ventas tarjeta**, **Tickets**.  
+   > En esta pantalla **no** se listan “Ventas crédito”; el crédito del día se ve en el Dashboard **Hoy** (admin).  
+2. Conteo **ciego**: capture **Efectivo contado** (+ **Notas** opcionales).  
+3. **Confirmar corte** (una vez por franja).  
+4. Revise Esperado / Contado / Diferencia.  
+5. Cajero: **Cerrar sesión**.
 
----
-
-### 5.9 Cobrar y emitir ticket
-
-1. Revise cantidades (sin vacíos, ceros ni negativos).  
-2. Confirme medio de pago y datos de crédito si aplica.  
-3. Vista normal: **Cobrar y emitir ticket**. Modo cobro: **Cobrar**.  
-4. Modal **Recibo de venta** → **Mostrar impresión** o **Cerrar**.  
-5. Puede reabrir el último ticket con **Ver ticket**.
-
-**Al cobrar el sistema:**
-
-1. Descuenta stock (y lotes según reglas de inventario).  
-2. Suma la venta al turno (efectivo / tarjeta / crédito).  
-3. Registra la operación en **Bitácora**.  
-4. Aplica y contabiliza descuentos de promoción.  
-5. Limpia el carrito y sincroniza borrador vacío.
-
-Errores típicos al cobrar:
-
-| Mensaje | Acción |
-|---------|--------|
-| Debe abrir turno / sesión de caja | Abra turno (§5.3) |
-| Stock insuficiente… | Quite o reduzca el producto |
-| Monto recibido insuficiente… | Ajuste el efectivo recibido |
-| Nombre y teléfono… crédito | Complete ambos campos |
-| Productos ya no disponibles | Recargue catálogo y arme de nuevo |
-| Pop-ups bloqueados | Permita ventanas emergentes para imprimir |
+Admin: historial de cortes en la misma pantalla y en **Finanzas → Fondos activo**.  
+Atajo admin en Configuración → pestaña **Turno / Corte** → **Ir a Turno / Corte**.
 
 ---
 
-### 5.10 Cómo hacer el corte de caja (cajero)
+## 8. Inventario
 
-1. Abra **Turno / Corte** → https://2x3crmtest.vercel.app/caja  
-2. Revise resumen: inicio, fondo, ventas efectivo/tarjeta/(crédito), tickets.  
-3. El conteo es **ciego**: no ve el esperado hasta confirmar.  
-4. Capture **Efectivo contado** y, si desea, **Notas**.  
-5. **Confirmar corte** (una sola vez por franja de turno).  
-6. Revise Esperado / Contado / Diferencia.  
-7. Pulse **Cerrar sesión** (obligatorio).
+**Ruta:** https://2x3crmtest.vercel.app/inventario
+
+### 8.1 Lectura común (admin y cajero)
+
+- Título operativo de inventario; búsqueda por Producto, SKU, Categorías, Precios, Unidad, Stock.  
+- Columnas incluyen **Tipo** = `Peso` | `Pieza`.  
+- Stock visible como **`X.XXX kg`** o **`N pz`** (la UI no habla en gramos).  
+- Badge **Stock bajo (umbral …)**.  
+- Engranaje: **Ver códigos archivados** → badge **Archivado**.  
+- Campana local de stock bajo además de la campana global.
+
+### 8.2 Solo cajero
+
+- Solo panel de consulta.  
+- **No** ve pestaña **Ajustes**, ni **Agregar producto nuevo**, ni **Importación**.  
+- El atajo de menú **Ajuste rápido** no aparece; si intenta ajustar: `Solo administradores pueden aplicar ajustes de inventario`.
+
+### 8.3 Solo administrador — Ajustes
+
+1. Pestaña **Ajustes** o menú **Ajuste rápido**.  
+2. Operaciones: corregir precio, programar precio, entrada, salida, umbral stock bajo, eliminar (fila o lote).  
+3. Entradas/salidas en **kg** o **pz** según el producto.  
+4. Valoración de salida: **FIFO** | **Promedio**.  
+5. **Agregar producto nuevo** (SKU, nombre, categoría, stock, precio, umbral, pasillo).  
+6. **Importación** CSV (`sku,producto,categoria,unidad,precio,stock`).
+
+El tipo peso/pieza puede inferirse por categoría/pasillo/nombre (granel, frutas, carnes, etc.).
 
 ---
 
-### 5.11 Bitácora del cajero (después de vender)
+## 9. Merma y caducidad (lotes FEFO)
 
-1. Abra **Bitácora**.  
-2. Filtre su actividad o revise **Ventas recientes**.  
-3. En ventas propias: **Ver ticket** → **Imprimir**.  
-4. Solo ve **sus** movimientos; no los de otros cajeros.
+**Ruta:** https://2x3crmtest.vercel.app/inventario/merma-caducidad  
+**Quién:** admin **y cajero** (ambos pueden registrar salida de lote).
 
----
+1. Revise **Alertas (1 día antes y vencidos)** con etiquetas **Vencido** / **Caduca mañana** y botón **Seleccionar lote**.  
+2. En **Dar salida por merma (lote)** elija **Lote**.  
+3. **Cantidad a sacar (kg|pz)** — default `0.100` kg o `1` pz.  
+4. **Motivo** (default `Merma por caducidad`).  
+5. **Registrar salida del lote**.  
+6. Éxito ejemplo: `Salida registrada del lote {sku} · {qty} · caduca {fecha}`.
 
-### 5.12 Inventario y alertas desde el rol cajero
-
-- Puede **consultar** inventario y stock.  
-- **Ajuste rápido** no aparece en su menú (solo admin).  
-- Merma por **lote** (FEFO) depende de permisos de escritura; si falla, solicite al administrador.  
-- La campana de alertas **no incluye SKUs archivados** (ya no ensucian stock bajo).  
-- Caducidad válida nace de **compras con lote** (admin), no de notas locales del navegador.
+Deep link desde la campana: `?lotId=…` preselecciona el lote.  
+Baja el restante del lote y el stock del SKU (sale primero lo que caduca antes / vencido).
 
 ---
 
-### 5.13 Resumen del ciclo POS del cajero
+## 10. Compras y proveedores (admin)
+
+**Ruta:** `/finanzas/compras`
+
+1. **Registrar entrada** → formulario **Nueva entrada**.  
+2. Buscar por **Nombre** o **SKU**; elija producto (muestra kg/pz y precio).  
+3. **Cantidad (kg)|(pz)**, **Costo unitario**.  
+4. **Caducidad del lote** (fecha **obligatoria**) — crea el lote en base de datos.  
+5. **Forma de pago:** `Contado (egreso en finanzas)` | `Crédito (cuenta por pagar)`.  
+6. **Proveedor existente** u **O crear proveedor**; **Vendido / entregado por**.  
+7. **Guardar entrada**.
+
+Tablas: **Proveedores · cuentas por pagar**, **Compras recientes**, **Alertas de restock** con botón **Entrada**.  
+Un SKU puede tener **varios lotes** (varias caducidades).
+
+---
+
+## 11. Promociones (admin → efecto en POS)
+
+**Ruta:** `/finanzas/promociones`
+
+1. **Nueva promoción**.  
+2. **Nombre**, **Tipo de descuento:** Porcentaje (%), Monto fijo ($), **2 × 1**, **3 × 2**, **Paquete / bundle**.  
+3. **Valor**, **Compra mínima (MXN)**, **Descripción**, **Inicia**, **Expira**.  
+4. **Seleccionar productos** (modal de búsqueda).  
+   - 2×1 / 3×2: al menos 1 producto.  
+   - Bundle: al menos 2 productos + **Cant.** requerida por SKU; valor de descuento fijo > 0.  
+5. **Activa al crear** → **Guardar**.  
+6. Lista: contadores activas/inactivas; **Activar** / **Desactivar** / **Eliminar**.
+
+En caja se aplica sola la de mayor ahorro (§6.8).
+
+---
+
+## 12. Finanzas (admin)
+
+**Ruta:** `/finanzas`
+
+- Periodos **Hoy / Semana / Mes** con refresh ~15 s.  
+- KPIs: Ingresos, Egresos, Ganancia, Ticket promedio.  
+- Si hubo promos: línea **Descuentos {MXN}**.  
+- Leaderboard y atajos a Periodos, Fondos, Pasivo, Compras, Promociones.
+
+| Submódulo | Uso |
+|-----------|-----|
+| Periodos | P&L por fechas + registrar gasto |
+| Fondos activo | Lectura de caja y cortes |
+| Pasivo | Gastos (renta, luz, nómina, etc.) |
+| Compras | §10 |
+| Promociones | §11 |
+
+---
+
+## 13. Dashboard Hoy (admin)
+
+**Ruta:** https://2x3crmtest.vercel.app/admin · título **Hoy**  
+Refresh manual + automático ~30 s. `/operaciones` redirige aquí.
+
+| Widget | Contenido |
+|--------|-----------|
+| Ventas hoy | Total, tickets; **Descuentos** si > 0 |
+| Caja / turno | Fuera de horario · Turno mañana · Turno tarde · Sin turno; sesión abierta o no; enlace a `/caja` |
+| Medios de pago | **Efectivo**, **Tarjeta**, **Crédito** |
+| Alertas | Contador stock bajo + caducidad; listas con enlaces |
+| Atajos | Cobrar en POS, Turno/Corte, Entrada de compra, Registrar gasto (y otros según API: merma/promos) |
+
+---
+
+## 14. Configuración (admin)
+
+**Ruta:** `/configuracion` · pestañas **General** | **Chatbot** | **Cajeros** | **Turno / Corte**
+
+| Pestaña | Qué hacer |
+|---------|-----------|
+| General | **Mostrar IVA en el precio final del recibo**; **Tasa de IVA predeterminada (%)** → Guardar |
+| Cajeros | Usuario + contraseña → **Crear cajero**; listado Activo/Inactivo/Gate |
+| Turno / Corte | Explica apertura y corte ciego; CTA **Ir a Turno / Corte** → `/caja` (el POS pide abrir turno sin sacar del módulo) |
+| Chatbot (DavinciAi) | **Agente activo**, **Modelo**, **Instrucciones**, **Acciones de escritura**, **Acciones financieras**, checkboxes de **Herramientas ERP** (ventas de hoy, stock, stock bajo, POS recientes, etc.), estado `OPENAI_API_KEY lista` / falta en Vercel, **Guardar**, enlace **Consola web** → `/crm`, sección **WhatsApp (Twilio)** con Webhook URL + **Copiar** |
+
+Canales Evolution/Meta se configuran fuera de esta pantalla (ver docs de integración).
+
+---
+
+## 15. Bitácora
+
+**Ruta:** `/bitacora`
+
+| Pestaña | Uso |
+|---------|-----|
+| **Actividad** | Filtros por tipo, categoría (Ventas/Inventario/POS/CRM/Sistema), estado, usuario; **Ver ticket** / Imprimir |
+| **Ventas recientes** | Listado de ventas (pago puede verse como `cash`/`card`/`credit`) |
+
+Cajero: solo **sus** registros. Admin: todos.
+
+---
+
+## 16. Consola CRM / agente
+
+**Ruta:** https://2x3crmtest.vercel.app/crm (desde Configuración → Consola web; **no** está en el menú lateral).
+
+Quick actions: Inventario, Pedidos, Finanzas, Devoluciones, Handoff humano.  
+Revise intent, run mode, handoff y Session ID al reportar fallos.  
+Es consola de prueba del asistente omnicanal (mismo cerebro que WhatsApp), no un CRM de contactos.
+
+---
+
+## 17. Mapa de módulos completo
 
 ```mermaid
-flowchart TD
-  L[Login cashier] --> H{¿Horario 06-14 o 14-22?}
-  H -->|No| X1[No abre turno]
-  H -->|Sí| E{¿Otro cajero en turno?}
-  E -->|Sí| X2[Esperar / avisar]
-  E -->|No| O[Abrir fondo]
-  O --> P[POS catálogo o Modo cobro]
-  P --> S[Borrador sync servidor]
-  P --> Pay[Efectivo / Tarjeta / Crédito]
-  Pay --> Promo[Descuento auto si aplica]
-  Promo --> Q{¿Quitar línea?}
-  Q -->|Cajero| A[Clave admin]
-  Q -->|No| C[Cobrar]
-  A --> C
-  C --> Stock[Baja stock + bitácora + caja]
-  Stock --> Cut[Corte único de la franja]
-  Cut --> Out[Cerrar sesión]
+flowchart TB
+  Login --> POS
+  Login --> Hoy[Dashboard Hoy admin]
+  POS --> Caja
+  POS --> Bitacora
+  Campana --> Merma
+  Campana --> Inventario
+  Compras --> Lotes --> Merma
+  Promos --> POS
+  Config --> Cajeros
+  Config --> Chatbot --> CRM
+  Hoy --> POS
+  Hoy --> Caja
+  Hoy --> Compras
 ```
 
-*Texto alternativo: el cajero solo vende dentro de horario, con un único turno de cajero abierto, borrador sincronizado, pagos con crédito opcional, autorización admin para quitar líneas, cobro con promos, corte único y logout obligatorio.*
+*Texto alternativo: el login reparte a POS o Hoy; compras crean lotes para merma; promos alimentan el POS; la campana lleva a inventario/merma; config alimenta cajeros y chatbot/CRM.*
 
 ---
 
-## 6. Tareas del administrador relacionadas con el POS
+## 18. Resolución de problemas
 
-(Resumen; el cajero no ejecuta estas pantallas.)
+| Síntoma | Qué hacer |
+|---------|-----------|
+| Fuera de horario / franja ya cerrada | Espere 06–14 o 14–22; un corte por franja |
+| Otro cajero en turno | Espere su corte/logout o pida al admin |
+| No cobra | Abra turno; en crédito complete nombre y teléfono |
+| No puede quitar línea | Autorice con clave admin |
+| Error al sincronizar borrador | Revise red; no cierre si aún no cobró |
+| Promo no aplica | Vigencia, productos y cantidades (2×1/3×2/bundle) |
+| Sin caducidad en campana | Debe existir lote creado en Compras; archivados no alertan |
+| Merma rechazada | Elija lote y cantidad ≤ restante (kg/pz) |
+| No ve Ajustes / Finanzas | Rol cajero (normal) |
+| Crédito no aparece en `/caja` | Normal; véalo en Dashboard Hoy |
+| Chatbot sin respuesta | Revise OPENAI_API_KEY y Session ID en `/crm` |
+| Impresión bloqueada | Permita pop-ups del sitio |
 
-| Tarea | Dónde |
-|-------|-------|
-| Ver ventas/caja/medios de hoy | Dashboard **Hoy** (`/admin`) |
-| Crear cajeros | Configuración → Cajeros |
-| IVA del recibo | Configuración |
-| Entradas con **fecha de caducidad del lote** | Finanzas → Compras |
-| Crear promociones / bundles | Finanzas → Descuentos y promociones |
-| Ajustes de inventario | Inventarios → Ajuste rápido |
-| Autorizar quitar línea en caja | Modal en el POS del cajero (clave admin) |
-| Abrir turno aunque haya cajero | POS / Caja (exento de sesión exclusiva) |
-
-`/operaciones` redirige al hub **Hoy** para no duplicar pantallas.
-
----
-
-## 7. Inventario, lotes y caducidad (contexto para la venta)
-
-1. Las compras del admin crean **lotes** con caducidad en base de datos.  
-2. Un mismo SKU puede tener varias caducidades (varias entradas).  
-3. Merma FEFO: se elige el **lote**, no solo el producto.  
-4. La campana avisa **1 día antes** y **vencidos**; no lista archivados.
+Reporte: fecha/hora, usuario, URL, pasos, mensaje, modo cobro sí/no, ID venta o Session ID.
 
 ---
 
-## 8. Promociones (alta admin → efecto en POS cajero)
+## 19. Buenas prácticas
 
-1. Admin crea promo vigente y asocia productos (modal).  
-2. Bundle: cantidades por SKU + descuento fijo.  
-3. En el POS del cajero se aplica sola la de mayor ahorro (§5.8).
-
----
-
-## 9. Finanzas y configuración (solo admin)
-
-- Finanzas: resumen, periodos, pasivo, fondos, compras.  
-- Configuración: IVA, cajeros, chatbot DavinciAi.  
-- Consola agente: `/crm` (fuera del menú).
+- Una cuenta por persona; cierre sesión tras el corte.  
+- Un cajero en turno; respete horarios.  
+- Caducidad solo vía **lotes de compra**, no notas locales.  
+- Prefiera modo cobro en caja física.  
+- No quite líneas sin autorización.  
+- Verifique **Guardado en servidor** en tickets largos.
 
 ---
 
-## 10. Resolución de problemas — POS cajero
-
-| Síntoma | Causa probable | Qué hacer |
-|---------|----------------|-----------|
-| No abre turno | Fuera de horario | Espere 06–14 o 14–22 |
-| No abre turno | Otro cajero activo | Espere su corte/logout o avise a admin |
-| No abre turno | Ya cortó esa franja hoy | Use la otra franja o el día siguiente |
-| No abre turno | Post-corte sin logout | **Cerrar sesión** e iniciar de nuevo |
-| No cobra | Sin turno | Abrir turno (§5.3) |
-| No cobra crédito | Faltan datos | Nombre (≥2) y teléfono (≥7) |
-| No puede quitar línea | Pedirá clave admin | Llame al administrador al modal |
-| `Error al sincronizar` | Red | Reintente; no cierre el navegador si aún no cobró |
-| Promo no aplica | Reglas de promo | Verifique vigencia/SKU/cantidades con admin |
-| No ve Ajuste rápido | Rol cajero | Normal; solo admin |
-| No ve Finanzas | Rol cajero | Normal |
-| Impresión falla | Pop-ups | Permita emergencias en el sitio |
-
-**Reporte de incidente:** fecha/hora, usuario cajero, URL (`/pos` o `/caja`), pasos, mensaje exacto, si usaba **Modo cobro**, medio de pago, ID de venta si existe.
-
----
-
-## 11. Buenas prácticas del cajero
-
-- Una sola persona por cuenta; no compartir contraseña.  
-- Respete horarios y el **un cajero en turno**.  
-- Prefiera **Modo cobro** + pantalla completa en caja física.  
-- No quite líneas sin autorización; pida al admin.  
-- Verifique el indicador **Guardado en servidor** en ventas largas.  
-- Un corte por franja; luego **Cerrar sesión** de inmediato.  
-- No deje la sesión abierta al alejarse de la caja.
-
----
-
-## 12. Glosario POS
+## 20. Glosario
 
 | Término | Significado |
 |---------|-------------|
-| **Liga de servicio** | https://2x3crmtest.vercel.app |
-| **Modo cobro** | Vista a pantalla completa orientada a escáner/tablet |
-| **Sesión exclusiva de cajero** | Solo un `cashier` con turno abierto a la vez |
-| **Franja / slot** | Turno mañana (06–14) o tarde (14–22) |
-| **Corte ciego** | Captura el contado sin ver el esperado antes |
-| **Borrador POS** | Carrito sincronizado en servidor en tiempo real |
-| **Autorización admin** | Clave de administrador para quitar líneas del carrito |
-| **Crédito (POS)** | Venta fiada con nombre y teléfono del cliente |
-| **Promo auto** | Descuento aplicado solo al armar el ticket |
-| **must_logout** | Bloqueo post-corte: solo cerrar sesión |
+| Liga de servicio | https://2x3crmtest.vercel.app |
+| kg / pz | Unidades en pantalla; peso en kg con 3 decimales |
+| Lote | Entrada de compra con una caducidad |
+| FEFO | Sale primero lo que caduca antes / vencido |
+| Modo cobro | POS a pantalla completa para escáner/tablet |
+| Sesión exclusiva | Solo un cajero con turno abierto |
+| Franja | Mañana 06–14 o tarde 14–22 |
+| Corte ciego | Contado sin ver esperado antes |
+| Autorización admin | Clave para quitar líneas del carrito |
+| Crédito POS | Venta con nombre y teléfono |
+| Archivado | SKU fuera de alertas y operación normal |
+| DavinciAi | Asistente web/WhatsApp |
+| must_logout | Bloqueo post-corte |
 
 ---
 
-## 13. Índice de tareas (cajero primero)
+## 21. Índice de tareas
 
-| Quiero… | Sección |
-|---------|---------|
+| Quiero… | § |
+|---------|---|
 | Entrar por la liga pública | 3 |
-| Entender horarios y un solo cajero | 5.2 |
-| Abrir turno | 5.3 |
-| Vender en catálogo + carrito | 5.4 |
-| Usar modo cobro / tablet | 5.5 |
-| Cobrar con crédito | 5.6 |
-| Quitar un producto (con admin) | 5.7 |
-| Entender descuentos en caja | 5.8 |
-| Emitir ticket | 5.9 |
-| Hacer corte y salir | 5.10 |
-| Reimprimir mi ticket | 5.11 |
-| Resolver un bloqueo de caja | 10 |
+| Ver alertas de stock/caducidad | 5 |
+| Abrir turno / modo cobro / crédito / quitar línea | 6 |
+| Hacer corte | 7 |
+| Consultar inventario kg/pz | 8 |
+| Registrar merma de lote | 9 |
+| Comprar con caducidad | 10 |
+| Crear 2×1 / 3×2 / bundle | 11 |
+| Ver descuentos en finanzas | 12 |
+| Usar Dashboard Hoy | 13 |
+| Configurar IVA / cajeros / WhatsApp | 14 |
+| Reimprimir ticket | 15 |
+| Probar el agente | 16 |
+| Resolver un error | 18 |
 
 ---
 
-## 14. Documentos relacionados
+## 22. Documentos relacionados
 
 | Documento | Uso |
 |-----------|-----|
-| [Manual técnico](../manual-tecnico/manual-tecnico-erp-supermercado.md) | APIs y despliegue |
-| [Control documental](../calidad/control-configuracion-documental.md) | Versiones y firmas |
-| [Registro de cambios](../calidad/registro-cambios-documentacion.md) | Trazabilidad 29110 |
+| [Índice KB](../README.md) | Portal documental |
+| [Manual técnico](../manual-tecnico/manual-tecnico-erp-supermercado.md) | APIs / deploy |
+| [Control documental](../calidad/control-configuracion-documental.md) | Versiones |
+| [Registro de cambios](../calidad/registro-cambios-documentacion.md) | Trazabilidad |
 
 ---
 
-## 15. Aprobación (ISO/IEC 29110)
+## 23. Aprobación
 
 | Rol | Nombre | Fecha | Evidencia |
 |-----|--------|-------|-----------|
-| Redacción | Leonardo Antonio Paredes | 2026-08-11 | Actualización POS cajero `1.2.0-MU` (commit `5fde201`) |
-| Validación técnica | Leonardo Antonio Paredes | — | Flujos en https://2x3crmtest.vercel.app/pos |
-| Aprobación clientes | Leonardo Antonio Paredes | — | `registro-cambios-documentacion.md` |
+| Redacción | Leonardo Antonio Paredes | 2026-08-11 | `1.3.0-MU` cobertura total vs commits lotes/promos/POS/Hoy/kg-pz |
+| Validación técnica | Leonardo Antonio Paredes | — | https://2x3crmtest.vercel.app |
+| Aprobación clientes | Leonardo Antonio Paredes | — | registro de cambios |
 
-Versión de trabajo alineada al software `1.0.0` · documento **`1.2.0-MU`** · foco: implementación completa del módulo POS para cajeros.
+Software `1.0.0` · documento **`1.3.0-MU`** · estado completo del sistema operable en la liga de servicio.

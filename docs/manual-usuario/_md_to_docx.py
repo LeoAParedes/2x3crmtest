@@ -4,7 +4,7 @@ from docx.shared import Pt, Inches, RGBColor
 import re
 
 src = Path(r'g:\Claude\2x3crmtest\docs\manual-usuario\manual-usuario-erp-supermercado.md')
-out = Path(r'g:\Claude\2x3crmtest\docs\manual-usuario\Manual-Usuario-2x3-Operaciones-v1.2.0.docx')
+out = Path(r'g:\Claude\2x3crmtest\docs\manual-usuario\Manual-Usuario-2x3-Operaciones-v1.3.0.docx')
 text = src.read_text(encoding='utf-8')
 
 doc = Document()

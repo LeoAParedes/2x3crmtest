@@ -6,7 +6,7 @@ Busque por **objetivo** (“cómo cobrar”, “cómo cortar caja”) o por tipo
 | Campo | Valor |
 |-------|--------|
 | **ID** | `DOC-KB-001` |
-| **Versión** | `1.1.0` |
+| **Versión** | `1.3.0` |
 | **Software alineado** | `1.0.0` |
 | **Sitio público** | https://2x3crmtest.vercel.app |
 | **Fecha** | 2026-08-11 |
@@ -19,7 +19,7 @@ Busque por **objetivo** (“cómo cobrar”, “cómo cortar caja”) o por tipo
 | Si usted es… | Empiece aquí |
 |--------------|--------------|
 | Operar el ERP en internet | https://2x3crmtest.vercel.app |
-| Cajero o administrador de tienda | [Manual de usuario `1.2.0-MU`](manual-usuario/manual-usuario-erp-supermercado.md) (POS cajero completo) |
+| Cajero o administrador de tienda | [Manual de usuario `1.3.0-MU`](manual-usuario/manual-usuario-erp-supermercado.md) (estado completo del sistema) |
 | Desarrollador o DevOps | [Manual técnico](manual-tecnico/manual-tecnico-erp-supermercado.md) |
 | Dirección / producto | [Revisión ejecutiva del estado actual](arquitectura/revision-ejecutiva-estado-actual.md) |
 | Quien mantiene la documentación | [Control de configuración](calidad/control-configuracion-documental.md) · [Guía de estilo](calidad/guia-estilo-documentacion.md) |
