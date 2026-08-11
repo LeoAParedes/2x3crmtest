@@ -184,6 +184,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         total: totals.total,
         paymentMethod: input.paymentMethod,
         amountReceived: normalizedAmountReceived,
+        status: 'completed',
         items: {
           create: lines.map(line => ({
             inventoryItemId: line.inventoryItemId,
@@ -243,6 +244,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
           saleId: sale.id,
           saleNumber: sale.saleNumber,
           cashSessionId,
+          status: 'completed',
           itemCount: sale.items.length,
           pieceCount: quantitySummary.pieceCount,
           weightGrams: quantitySummary.weightGrams,
@@ -258,6 +260,27 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         }
       }
     })
+
+    // #region agent log
+    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+      body: JSON.stringify({
+        sessionId: '449600',
+        runId: 'pos-sale',
+        hypothesisId: 'B',
+        location: 'src/lib/pos/sale-service.ts:createSale',
+        message: 'sale created with completed status',
+        data: {
+          saleId: sale.id,
+          saleNumber: sale.saleNumber,
+          saleStatus: sale.status,
+          metadataStatus: 'completed'
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {})
+    // #endregion
 
     return {
       id: sale.id,

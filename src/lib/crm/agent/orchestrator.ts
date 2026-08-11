@@ -4,6 +4,7 @@ import { Mastra } from '@mastra/core'
 import type { ChatReply, CrmNormalizedMessage } from '@/src/lib/crm/channel-schema'
 import { env, hasLlmProviderConfig } from '@/src/lib/config/env'
 import { runDavinciErpAgent } from '@/src/lib/ai/davinci-agent'
+import { isErpDataQuestion, runDeterministicErpDbReply } from '@/src/lib/ai/erp-db-harness'
 import { appLog } from '@/src/lib/observability/app-logger'
 import { getAccountBalance } from '@/src/lib/crm/services/finance-service'
 import { findInventoryByQuery } from '@/src/lib/crm/services/inventory-service'
@@ -267,12 +268,28 @@ export const runCrmAgent = async (message: CrmNormalizedMessage): Promise<ChatRe
     return applyReplyPolicy(fallback, settings)
   }
 
-  // DavinciAi: OpenAI + whitelisted ERP tools (never raw SQL / arbitrary DB)
+  const erpQuestion = isErpDataQuestion(message.message)
+
+  // DavinciAi: OpenAI + whitelisted ERP tools (DB-only facts). Never invent figures.
   if (env.openAiApiKey && settings.allowedErpTools.length > 0) {
     const davinciReply = await runDavinciErpAgent(message, settings)
     if (davinciReply) {
       return applyReplyPolicy(davinciReply, settings)
     }
+  }
+
+  // ERP metrics must never go through free-form Mastra. Use deterministic Prisma tools only.
+  if (erpQuestion && settings.allowedErpTools.length > 0) {
+    const deterministic = await runDeterministicErpDbReply(message.message, settings.allowedErpTools)
+    return applyReplyPolicy(
+      {
+        reply: deterministic.reply,
+        intent: 'erp_metrics',
+        actions: deterministic.usedTools.map(id => `erp.${id}`),
+        runMode: 'fallback'
+      },
+      settings
+    )
   }
 
   if (!hasLlmProviderConfig) {
@@ -289,6 +306,7 @@ Cliente: ${message.customerId || 'desconocido'}
 Mensaje del usuario: ${message.message}
 Locale preferido: ${settings.defaultLocale}
 Longitud maxima de respuesta: ${settings.maxReplyChars} caracteres
+IMPORTANTE: No inventes montos ni stock. Si la pregunta es operativa/ERP, indica que uses el canal DavinciAi/tools.
 Responde en JSON con campos: reply, intent, actions (array), handoff (opcional con required y reason)
     `
 

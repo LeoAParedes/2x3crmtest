@@ -7,6 +7,7 @@ import {
 } from '@/src/lib/finance/finance-service'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { FINANCE_TIME_ZONE } from '@/src/lib/finance/period'
+import { stampErpDbProvenance } from '@/src/lib/ai/erp-db-harness'
 import { isErpToolId, type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
 import { ERP_TOOL_REGISTRY, resolvePeriod } from '@/src/lib/ai/erp-tool-registry'
 
@@ -22,6 +23,13 @@ export type ErpToolFactResult = {
 
 const executeSalesTotalToday = async () => {
   const dashboard = await getFinanceDashboard('day')
+  const prisma = await getPrisma()
+  const lastCompleted = await prisma.sale.findFirst({
+    where: { status: 'completed' },
+    orderBy: { createdAt: 'desc' },
+    select: { createdAt: true, saleNumber: true, total: true }
+  })
+
   return {
     currency: 'MXN',
     timeZone: FINANCE_TIME_ZONE,
@@ -30,6 +38,17 @@ const executeSalesTotalToday = async () => {
     rangeEnd: dashboard.range.end,
     totalSales: dashboard.salesTotals.day.total,
     ticketCount: dashboard.salesTotals.day.count,
+    lastCompletedSale: lastCompleted
+      ? {
+          saleNumber: lastCompleted.saleNumber,
+          total: Number(lastCompleted.total),
+          createdAt: lastCompleted.createdAt.toISOString()
+        }
+      : null,
+    note:
+      dashboard.salesTotals.day.count === 0 && lastCompleted
+        ? 'No hay ventas completed en el día local actual; la última venta completed está fuera de este rango (revisa period=week).'
+        : undefined,
     source: 'Sale.status=completed'
   }
 }
@@ -232,7 +251,7 @@ export const executeErpTool = async (
   }
 
   try {
-    const facts = await executors[toolName](parsedArgs.data)
+    const facts = stampErpDbProvenance(await executors[toolName](parsedArgs.data))
     return { toolId: toolName, ok: true, facts }
   } catch (error) {
     return {

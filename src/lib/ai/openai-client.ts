@@ -56,11 +56,15 @@ export const createOpenAiChatCompletion = async (input: {
   model: string
   messages: OpenAiChatMessage[]
   tools?: OpenAiToolDefinition[]
+  toolChoice?: 'auto' | 'required' | 'none'
   temperature?: number
 }) => {
   if (!env.openAiApiKey) {
     throw new Error('OPENAI_API_KEY_MISSING')
   }
+
+  const hasTools = Boolean(input.tools && input.tools.length > 0)
+  const toolChoice = hasTools ? input.toolChoice || 'auto' : undefined
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -71,8 +75,8 @@ export const createOpenAiChatCompletion = async (input: {
     body: JSON.stringify({
       model: normalizeOpenAiModelId(input.model),
       messages: input.messages,
-      tools: input.tools && input.tools.length > 0 ? input.tools : undefined,
-      tool_choice: input.tools && input.tools.length > 0 ? 'auto' : undefined,
+      tools: hasTools ? input.tools : undefined,
+      tool_choice: toolChoice,
       temperature: input.temperature ?? 0.2
     })
   })

@@ -42,7 +42,7 @@ type BuildSystemLogbookOptions = {
 }
 
 const actionLabelMap: Record<string, string> = {
-  'sale.create': 'Venta registrada',
+  'sale.create': 'Venta completada',
   'inventory.import.csv': 'Importación de inventario',
   'pos.draft.saved': 'Borrador POS guardado',
   'inventory.product.create': 'Producto agregado',
@@ -109,10 +109,11 @@ const resolveSaleQuantitySummary = (metadata: Record<string, unknown>) => {
 
 const buildSaleDetails = (metadata: unknown) => {
   const values = asRecord(metadata)
-  if (!values) return 'Venta registrada'
+  if (!values) return 'Venta completada'
 
   const saleNumber = typeof values.saleNumber === 'string' ? values.saleNumber : 'N/A'
   const paymentMethod = typeof values.paymentMethod === 'string' ? values.paymentMethod : 'N/A'
+  const saleStatus = typeof values.status === 'string' ? values.status : 'completed'
   const quantitySummary = resolveSaleQuantitySummary(values)
   const quantityLabel = quantitySummary
     ? formatSaleQuantitySummary(quantitySummary.pieceCount, quantitySummary.weightGrams)
@@ -121,7 +122,7 @@ const buildSaleDetails = (metadata: unknown) => {
   const fallbackLines =
     quantityLabel === null && itemCount !== null ? ` | Líneas: ${itemCount}` : quantityLabel ? ` | ${quantityLabel}` : ''
 
-  return `Venta ${saleNumber} | Pago: ${paymentMethod}${fallbackLines}`
+  return `Venta ${saleNumber} | Estado: ${saleStatus} | Pago: ${paymentMethod}${fallbackLines}`
 }
 
 const buildInventoryImportDetails = (metadata: unknown) => {
