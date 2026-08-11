@@ -8,32 +8,74 @@ import { markEventProcessed, wasEventProcessed } from '@/src/lib/security/idempo
 import { consumeRateLimit } from '@/src/lib/security/rate-limit'
 import {
   buildTwilioMessagingTwiml,
+  diagnoseTwilioSignature,
   isValidTwilioSignature,
-  parseTwilioWebhookForm
+  parseTwilioWebhookForm,
+  resolveTwilioWebhookUrlCandidates
 } from '@/src/lib/whatsapp/twilio'
 
 /**
- * Twilio WhatsApp webhook (secondary / optional demo-reply style).
- * Prefer Evolution API: POST /api/whatsapp/evolution/webhook
- *
- * Configure in Twilio Console → WhatsApp Sandbox / Messaging → "When a message comes in":
+ * Twilio WhatsApp webhook.
+ * Configure in Twilio Console → WhatsApp Sender → "When a message comes in":
  *   POST https://<your-host>/api/whatsapp/twilio/webhook
  *
- * Returns TwiML `<Response><Message>...</Message></Response>` like the Twilio demo-reply pattern.
- * Meta Cloud API continues to use `/api/whatsapp/webhook`.
+ * Returns TwiML `<Response><Message>...</Message></Response>`.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text()
   const params = new URLSearchParams(rawBody)
   const signature = request.headers.get('x-twilio-signature')
+  const urlCandidates = resolveTwilioWebhookUrlCandidates(request)
+  const diagnosis = diagnoseTwilioSignature({
+    signature,
+    urlCandidates,
+    params
+  })
+
+  // #region agent log
+  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+    body: JSON.stringify({
+      sessionId: '449600',
+      runId: 'twilio-sig',
+      hypothesisId: 'A',
+      location: 'twilio/webhook/route.ts:POST',
+      message: 'Twilio signature diagnosis',
+      data: {
+        ...diagnosis,
+        requestUrl: request.url,
+        urlCandidates,
+        paramKeyCount: [...params.keys()].length,
+        hasBody: Boolean(params.get('Body')),
+        hasFrom: Boolean(params.get('From'))
+      },
+      timestamp: Date.now()
+    })
+  }).catch(() => {})
+  // #endregion
+
+  appLog('info', 'Twilio webhook signature check', {
+    authTokenConfigured: diagnosis.authTokenConfigured,
+    signaturePresent: diagnosis.signaturePresent,
+    matchedUrl: diagnosis.matchedUrl,
+    candidateCount: diagnosis.candidateCount,
+    requestUrl: request.url
+  })
 
   if (
     !isValidTwilioSignature({
       signature,
       url: request.url,
+      urlCandidates,
       params
     })
   ) {
+    appLog('error', 'Twilio webhook rejected: invalid signature', {
+      authTokenConfigured: diagnosis.authTokenConfigured,
+      signaturePresent: diagnosis.signaturePresent,
+      candidateCount: diagnosis.candidateCount
+    })
     return jsonError('Invalid Twilio signature', 401)
   }
 
@@ -65,6 +107,28 @@ export async function POST(request: Request) {
     }
 
     const reply = await runCrmAgent(normalized.message)
+
+    // #region agent log
+    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+      body: JSON.stringify({
+        sessionId: '449600',
+        runId: 'twilio-sig',
+        hypothesisId: 'C',
+        location: 'twilio/webhook/route.ts:agent',
+        message: 'Twilio agent reply ready',
+        data: {
+          intent: reply.intent,
+          runMode: reply.runMode,
+          replyLen: reply.reply?.length ?? 0,
+          matchedUrl: diagnosis.matchedUrl
+        },
+        timestamp: Date.now()
+      })
+    }).catch(() => {})
+    // #endregion
+
     await pushConversationAudit(normalized.message, reply)
     await safeRecordAgentAction({
       actionType: 'agent.reply.generated',
