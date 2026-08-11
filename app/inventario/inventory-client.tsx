@@ -418,30 +418,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     setToasts(current => [...current.slice(-2), toast])
   }
 
-  const logAdjustmentDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
-    const canSendDebugLog =
-      typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-    if (!canSendDebugLog) {
-      return
-    }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-      body: JSON.stringify({
-        sessionId: '449600',
-        runId,
-        hypothesisId,
-        location: 'app/inventario/inventory-client.tsx',
-        message,
-        data,
-        timestamp: Date.now()
-      })
-    }).catch(() => {})
-    // #endregion
-  }
-
   const dismissToast = (toastId: string) => {
     setToasts(current => current.filter(toast => toast.id !== toastId))
   }
@@ -466,16 +442,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         if (!response.ok || !payload.success) {
           throw new Error('No fue posible cargar inventario')
         }
-        logAdjustmentDebug(`inventory-page-${Date.now()}`, 'H3', 'inventory page payload loaded', {
-          requestedPage: page,
-          returnedItems: payload.items.length,
-          returnedTotalPages: payload.pagination.totalPages,
-          totalItems: payload.pagination.total,
-          queryLength: query.length,
-          searchField,
-          sortBy,
-          sortDirection
-        })
         if (cancelled) return
         setItems(
           payload.items.map(item => ({
@@ -694,15 +660,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     const node = inventoryTableContainerRef.current
     if (!node) return
 
-    logAdjustmentDebug(`inventory-layout-${Date.now()}`, 'H4', 'inventory table container metrics', {
-      page,
-      totalPages,
-      itemsCount: items.length,
-      viewportWidth: typeof window !== 'undefined' ? window.innerWidth : null,
-      containerClientWidth: node.clientWidth,
-      containerScrollWidth: node.scrollWidth,
-      overflowsHorizontally: node.scrollWidth > node.clientWidth
-    })
   }, [activePanel, items.length, page, totalPages])
 
   useEffect(() => {
@@ -739,10 +696,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
 
   const handleOpenImportModal = () => {
     if (role !== 'admin') return
-    logAdjustmentDebug(`import-open-${Date.now()}`, 'H5', 'import modal opened', {
-      viewportWidth: typeof window !== 'undefined' ? window.innerWidth : null,
-      viewportHeight: typeof window !== 'undefined' ? window.innerHeight : null
-    })
     setIsImportModalOpen(true)
     setValidationResult(null)
     setImportResult(null)
@@ -796,14 +749,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         body: JSON.stringify({ csv: importCsv, validateOnly: true })
       })
       const payload = (await response.json()) as ImportResponse
-      logAdjustmentDebug(`import-validate-${Date.now()}`, 'H1', 'import validation response', {
-        httpOk: response.ok,
-        success: payload.success,
-        canImport: payload.canImport ?? null,
-        previewRows: payload.preview?.rows.length ?? 0,
-        totalValidRows: payload.preview?.totalValidRows ?? 0,
-        errorsCount: payload.errors?.length ?? 0
-      })
       if (!response.ok || !payload.success) {
         throw new Error(payload.message || 'No fue posible validar el CSV')
       }
@@ -839,14 +784,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         body: JSON.stringify({ csv: csvToImport })
       })
       const payload = (await response.json()) as ImportResponse
-      logAdjustmentDebug(`import-submit-${Date.now()}`, 'H2', 'import submit response', {
-        httpOk: response.ok,
-        success: payload.success,
-        created: payload.summary?.created ?? null,
-        updated: payload.summary?.updated ?? null,
-        failed: payload.summary?.failed ?? null,
-        errorsCount: payload.errors?.length ?? 0
-      })
       if (!response.ok || !payload.success) {
         throw new Error(payload.message || 'No fue posible importar productos')
       }
@@ -867,15 +804,10 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }
 
   const submitAdjustment = async (payload: AdjustmentPayload): Promise<boolean> => {
-    const runId = `delete-ui-${Date.now()}`
     setSubmittingAdjustment(true)
     setAdjustmentResult(null)
     try {
       if (payload.operation === 'delete_product') {
-        logAdjustmentDebug(runId, 'H1', 'submit delete request start', {
-          inventoryItemId: payload.inventoryItemId,
-          itemsCountBeforeRequest: items.length
-        })
       }
       const response = await fetch('/api/inventario/ajustes', {
         method: 'POST',
@@ -884,11 +816,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       })
       const result = (await response.json()) as InventoryAdjustmentsResponse
       if (payload.operation === 'delete_product') {
-        logAdjustmentDebug(runId, 'H2', 'submit delete response received', {
-          httpOk: response.ok,
-          successFlag: Boolean(result?.success),
-          message: result?.message || null
-        })
       }
       if (!response.ok || !result.success) {
         throw new Error(normalizeAdjustmentErrorMessage(result.message || 'No fue posible aplicar el ajuste'))
@@ -914,11 +841,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       if (payload.operation === 'delete_product') {
         setItems(current => {
           const filtered = current.filter(item => item.id !== payload.inventoryItemId)
-          logAdjustmentDebug(runId, 'H3', 'local list filtered after delete success', {
-            removedInventoryItemId: payload.inventoryItemId,
-            beforeCount: current.length,
-            afterCount: filtered.length
-          })
           return filtered
         })
       }

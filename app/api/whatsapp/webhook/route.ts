@@ -3,7 +3,6 @@ import { runCrmAgent } from '@/src/lib/crm/agent/orchestrator'
 import { safeRecordAgentAction } from '@/src/lib/crm/agent-action-audit'
 import { normalizeMetaWebhookPayload } from '@/src/lib/crm/channel-normalizer'
 import { pushConversationAudit } from '@/src/lib/crm/audit-log'
-import { getMastraSettings } from '@/src/lib/crm/mastra-settings'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { appLog } from '@/src/lib/observability/app-logger'
 import { markEventProcessed, wasEventProcessed } from '@/src/lib/security/idempotency'
@@ -11,30 +10,6 @@ import { consumeRateLimit } from '@/src/lib/security/rate-limit'
 import { sendMetaTextMessage } from '@/src/lib/whatsapp/meta-client'
 import { isValidMetaSignature } from '@/src/lib/whatsapp/meta-signature'
 import { recordWebhookDebugHit } from '@/src/lib/whatsapp/webhook-debug-state'
-
-const debugWebhookLog = (
-  location: string,
-  message: string,
-  data: Record<string, unknown>,
-  hypothesisId: string
-) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-    body: JSON.stringify({
-      sessionId: '449600',
-      runId: 'whatsapp-webhook',
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: Date.now()
-    })
-  }).catch(() => {})
-  // #endregion
-  appLog('info', `[debug449600] ${message}`, { hypothesisId, ...data })
-}
 
 const challengeModeKey = 'hub.mode'
 const challengeTokenKey = 'hub.verify_token'
@@ -47,39 +22,6 @@ export async function GET(request: Request) {
   const challenge = searchParams.get(challengeResponseKey)
   const configuredToken = env.metaWebhookVerifyToken
   const tokenMatches = Boolean(token && configuredToken && token === configuredToken)
-
-  // #region agent log
-  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-    body: JSON.stringify({
-      sessionId: '449600',
-      runId: 'whatsapp-webhook',
-      hypothesisId: 'G',
-      location: 'webhook/route.ts:GET',
-      message: 'Meta webhook verification challenge',
-      data: {
-        mode,
-        hasToken: Boolean(token),
-        hasConfiguredToken: Boolean(configuredToken),
-        tokenMatches,
-        hasChallenge: Boolean(challenge),
-        tokenLength: token?.length || 0,
-        configuredTokenLength: configuredToken?.length || 0
-      },
-      timestamp: Date.now()
-    })
-  }).catch(() => {})
-  // #endregion
-  appLog('info', '[debug449600] Meta webhook verification challenge', {
-    mode,
-    hasToken: Boolean(token),
-    hasConfiguredToken: Boolean(configuredToken),
-    tokenMatches,
-    hasChallenge: Boolean(challenge),
-    tokenLength: token?.length || 0,
-    configuredTokenLength: configuredToken?.length || 0
-  })
   recordWebhookDebugHit({
     stage: tokenMatches ? 'received' : 'error',
     reason: tokenMatches
@@ -101,13 +43,6 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const rawBody = await request.text()
   const signatureHeader = request.headers.get('x-hub-signature-256')
-
-  debugWebhookLog('webhook/route.ts:POST', 'Meta webhook POST received', {
-    bodyBytes: rawBody.length,
-    hasSignatureHeader: Boolean(signatureHeader),
-    hasMetaAppSecret: Boolean(env.metaAppSecret),
-    hasMetaProviderConfig
-  }, 'A')
   recordWebhookDebugHit({
     stage: 'received',
     hasSignatureHeader: Boolean(signatureHeader)
@@ -125,10 +60,6 @@ export async function POST(request: Request) {
   })
 
   const signatureValid = isValidMetaSignature(rawBody, signatureHeader)
-  debugWebhookLog('webhook/route.ts:POST', 'Meta signature validation', {
-    signatureValid,
-    hasMetaAppSecret: Boolean(env.metaAppSecret)
-  }, 'B')
 
   if (!signatureValid) {
     recordWebhookDebugHit({
@@ -157,24 +88,11 @@ export async function POST(request: Request) {
   try {
     const body = JSON.parse(rawBody) as unknown
     const messages = normalizeMetaWebhookPayload(body as never)
-
-    debugWebhookLog('webhook/route.ts:POST', 'Meta payload normalized', {
-      messageCount: messages.length,
-      firstMessageType: messages[0]?.message.message?.slice(0, 40) || null
-    }, 'C')
     recordWebhookDebugHit({
       stage: 'normalized',
       signatureValid: true,
       messageCount: messages.length
     })
-
-    const agentSettings = await getMastraSettings()
-    debugWebhookLog('webhook/route.ts:POST', 'Agent settings loaded', {
-      enabled: agentSettings.enabled,
-      modelId: agentSettings.modelId,
-      allowedErpToolsCount: agentSettings.allowedErpTools.length,
-      hasOpenAiKey: Boolean(env.openAiApiKey)
-    }, 'D')
 
     for (const inbound of messages) {
       if (await wasEventProcessed(inbound.sourceMessageId)) {
@@ -193,12 +111,6 @@ export async function POST(request: Request) {
       }
 
       const reply = await runCrmAgent(inbound.message)
-
-      debugWebhookLog('webhook/route.ts:POST', 'Agent reply generated', {
-        runMode: reply.runMode,
-        intent: reply.intent,
-        replyChars: reply.reply.length
-      }, 'E')
       recordWebhookDebugHit({
         stage: 'agent_replied',
         signatureValid: true,
@@ -226,12 +138,6 @@ export async function POST(request: Request) {
         to: inbound.sourcePhone,
         message: reply.reply
       })
-
-      debugWebhookLog('webhook/route.ts:POST', 'Meta outbound send result', {
-        sent: outbound.sent,
-        reason: outbound.reason || null,
-        providerMessageId: outbound.providerMessageId || null
-      }, 'F')
       recordWebhookDebugHit({
         stage: 'outbound',
         signatureValid: true,
@@ -260,7 +166,6 @@ export async function POST(request: Request) {
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error'
     recordWebhookDebugHit({ stage: 'error', signatureValid: true, reason })
-    debugWebhookLog('webhook/route.ts:POST', 'Meta webhook processing error', { reason }, 'C')
     appLog('error', 'Meta webhook processing error', { reason })
     return jsonError('Webhook payload invalid', 400)
   }

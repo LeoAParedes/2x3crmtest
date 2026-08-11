@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
 import {
-  getRestockBillableQuantity,
   getRestockDeficit,
   getRestockEstimatedCost
 } from '@/src/lib/inventory/low-stock'
@@ -86,32 +85,6 @@ export const ComprasClient = () => {
           }
         })
         .sort((left, right) => right.deficit - left.deficit)
-      // #region agent log
-      fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-        body: JSON.stringify({
-          sessionId: '449600',
-          runId: 'restock-fix',
-          hypothesisId: 'H1',
-          location: 'compras-client.tsx:loadRestock',
-          message: 'restock rows computed',
-          data: {
-            count: lowStock.length,
-            sample: lowStock.slice(0, 3).map(item => ({
-              sku: item.sku,
-              stock: item.stock,
-              minStock: item.minStock,
-              supportsWeight: item.supportsWeight,
-              deficit: item.deficit,
-              billableQuantity: getRestockBillableQuantity(item.deficit, item.supportsWeight),
-              estimatedCost: item.estimatedCost
-            }))
-          },
-          timestamp: Date.now()
-        })
-      }).catch(() => {})
-      // #endregion
       setRestockItems(lowStock)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Error de carga')

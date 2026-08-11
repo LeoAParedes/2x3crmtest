@@ -65,29 +65,6 @@ export async function POST(request: Request) {
     const inbound = inboundMessages[0]
     const reply = await runCrmAgent(inbound.message)
 
-    // #region agent log
-    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-      body: JSON.stringify({
-        sessionId: '449600',
-        runId: 'whatsapp-self-test',
-        hypothesisId: 'E',
-        location: 'self-test/route.ts:POST',
-        message: 'WhatsApp self-test agent reply',
-        data: {
-          enabled: settings.enabled,
-          modelId: settings.modelId,
-          runMode: reply.runMode,
-          intent: reply.intent,
-          replyChars: reply.reply.length,
-          sendRequested: input.send
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {})
-    // #endregion
-
     let outbound: { sent: boolean; reason?: string; providerMessageId?: string } | null = null
     if (input.send) {
       outbound = await sendMetaTextMessage({
@@ -121,11 +98,6 @@ export async function POST(request: Request) {
         }
       })
     }
-
-    appLog('info', '[debug449600] WhatsApp self-test completed', {
-      runMode: reply.runMode,
-      sent: outbound?.sent ?? null
-    })
 
     return jsonOk({
       success: true,

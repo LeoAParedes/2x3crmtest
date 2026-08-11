@@ -21,23 +21,6 @@ type ParsedRow = {
 
 const PREVIEW_ROW_LIMIT = 12
 
-const logInventoryImportDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-    body: JSON.stringify({
-      sessionId: '449600',
-      runId,
-      hypothesisId,
-      location: 'app/api/inventario/importar/route.ts',
-      message,
-      data,
-      timestamp: Date.now()
-    })
-  }).catch(() => {})
-  // #endregion
-}
 
 const parseNumber = (value: string) => Number(value.replace(',', '.').trim())
 
@@ -197,31 +180,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const runId = `import-api-${Date.now()}`
     const payload = importPayloadSchema.parse(await request.json())
-    logInventoryImportDebug(runId, 'H1', 'import payload parsed', {
-      validateOnly: Boolean(payload.validateOnly),
-      csvLength: payload.csv.length
-    })
     const validation = buildImportValidationPreview(payload.csv)
-    // #region agent log
-    console.info('[H1] import validation summary', {
-      runId,
-      validateOnly: Boolean(payload.validateOnly),
-      canImport: validation.canImport,
-      validRows: validation.preview.totalValidRows,
-      previewRows: validation.preview.shownRows,
-      errorsCount: validation.errors.length,
-      firstErrors: validation.errors.slice(0, 3)
-    })
-    // #endregion
-    logInventoryImportDebug(runId, 'H1', 'import validation summary', {
-      canImport: validation.canImport,
-      validRows: validation.preview.totalValidRows,
-      previewRows: validation.preview.shownRows,
-      errorsCount: validation.errors.length,
-      firstErrors: validation.errors.slice(0, 3)
-    })
     if (payload.validateOnly) {
       return jsonOk({
         success: true,
@@ -296,12 +256,6 @@ export async function POST(request: Request) {
       errors
     })
   } catch (error) {
-    // #region agent log
-    console.error('[H2] import route failed', {
-      name: error instanceof Error ? error.name : 'unknown',
-      message: error instanceof Error ? error.message : 'unknown'
-    })
-    // #endregion
     const message =
       error instanceof Error && error.message.startsWith('CSV_HEADERS_MISSING:')
         ? `Cabecera CSV inválida. Usa exactamente: ${error.message.replace('CSV_HEADERS_MISSING:', '')}`

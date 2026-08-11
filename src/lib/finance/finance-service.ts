@@ -372,31 +372,6 @@ export const getPeriodosDashboard = async (input: PeriodosDashboardInput = {}) =
         ? 'Últimos 7 días'
         : 'Últimos 31 días'
 
-  // #region agent log
-  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-    body: JSON.stringify({
-      sessionId: '449600',
-      runId: 'rolling-days',
-      hypothesisId: 'R1',
-      location: 'finance-service.ts:getPeriodosDashboard',
-      message: 'Periodos rolling windows',
-      data: {
-        cashFlowDays,
-        salesStart: salesBounds.start.toISOString(),
-        salesEnd: salesBounds.end.toISOString(),
-        cashStart: cashFlowBounds.start.toISOString(),
-        cashEnd: cashFlowBounds.end.toISOString(),
-        leaderStart: leaderboardBounds.start.toISOString(),
-        leaderEnd: leaderboardBounds.end.toISOString(),
-        cashFlowSeriesLen: cashFlowSeries.length
-      },
-      timestamp: Date.now()
-    })
-  }).catch(() => {})
-  // #endregion
-
   return {
     mode: 'periodos' as const,
     timeZone: FINANCE_TIME_ZONE,

@@ -235,11 +235,6 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const [cartPanelUserOverride, setCartPanelUserOverride] = useState<boolean | null>(null)
   const isCartPanelOpen = cartPanelUserOverride ?? isDesktopViewport
 
-  useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'post-fix-418',hypothesisId:'H3',location:'pos-client.tsx:cartPanelMount',message:'cart panel open via sync external store',data:{isDesktopViewport,cartPanelUserOverride,isCartPanelOpen},timestamp:Date.now()})}).catch(()=>{})
-    // #endregion
-  }, [cartPanelUserOverride, isCartPanelOpen, isDesktopViewport])
 
   useEffect(() => {
     let cancelled = false
@@ -617,12 +612,6 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [isTicketModalOpen])
-
-  // #region agent log
-  useEffect(() => {
-    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'cart-compact',hypothesisId:'H1-H3',location:'pos-client.tsx:cartPanelContent',message:'cart panel render density',data:{layout:'compact-row',cartLines:cart.length,controlHeight:32,itemPadding:8,panelGap:8},timestamp:Date.now()})}).catch(()=>{})
-  }, [cart.length])
-  // #endregion
 
   const cartPanelContent = (
     <>

@@ -15,26 +15,8 @@ const sortFieldMap = {
   unitPrice: 'unitPrice'
 } as const
 
-const logInventoryPaginationDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-    body: JSON.stringify({
-      sessionId: '449600',
-      runId,
-      hypothesisId,
-      location: 'app/api/pos/inventory/route.ts',
-      message,
-      data,
-      timestamp: Date.now()
-    })
-  }).catch(() => {})
-  // #endregion
-}
 
 export async function GET(request: Request) {
-  const runId = `pos-inventory-${Date.now()}`
   const access = await requireApiAccess(request, { requiredPermission: 'inventory:view' })
   if (!access.ok) return access.response
 
@@ -98,13 +80,6 @@ export async function GET(request: Request) {
           supportsWeight: inferWeightSupport(item.category, item.aisle)
         }))
 
-      // #region agent log
-      logInventoryPaginationDebug(runId, 'H1', 'alertsOnly success', {
-        alertsOnly: true,
-        alertCount: alertItems.length
-      })
-      // #endregion
-
       return jsonOk({
         success: true,
         alertsOnly: true,
@@ -128,35 +103,6 @@ export async function GET(request: Request) {
       })
     ])
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
-    const requestedPageExceedsRange = page > totalPages
-    // #region agent log
-    console.info('[H3] inventory pagination response', {
-      runId,
-      query,
-      sortBy,
-      sortDirection,
-      page,
-      pageSize,
-      includeArchived,
-      total,
-      totalPages,
-      returnedItems: items.length,
-      requestedPageExceedsRange
-    })
-    // #endregion
-    logInventoryPaginationDebug(runId, 'H1', 'inventory pagination response', {
-      query: query || null,
-      searchField,
-      sortBy,
-      sortDirection,
-      page,
-      pageSize,
-      total,
-      totalPages,
-      returnedItems: items.length,
-      requestedPageExceedsRange,
-      hasMinStock: items.every(item => typeof item.minStock === 'number')
-    })
 
     return jsonOk({
       success: true,
@@ -183,14 +129,6 @@ export async function GET(request: Request) {
     const message = error instanceof Error ? error.message : 'inventory query failed'
     const code =
       error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
-    // #region agent log
-    logInventoryPaginationDebug(runId, 'H1', 'inventory query failed', {
-      alertsOnly,
-      message: message.slice(0, 240),
-      code,
-      mentionsMinStock: /minStock/i.test(message)
-    })
-    // #endregion
     return jsonError('No fue posible cargar inventario', 500, { code, message: message.slice(0, 240) })
   }
 }

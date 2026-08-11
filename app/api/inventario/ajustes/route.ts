@@ -82,23 +82,6 @@ const parseMovementMetadata = (reason: string | null) => {
   }
 }
 
-const logInventoryAdjustmentDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-    body: JSON.stringify({
-      sessionId: '449600',
-      runId,
-      hypothesisId,
-      location: 'app/api/inventario/ajustes/route.ts',
-      message,
-      data,
-      timestamp: Date.now()
-    })
-  }).catch(() => {})
-  // #endregion
-}
 
 export async function GET(request: Request) {
   const access = await requireApiAccess(request, { allowedRoles: ['admin'] })
@@ -165,44 +148,20 @@ export async function POST(request: Request) {
   if (!access.ok) return access.response
 
   try {
-    const runId = `delete-api-${Date.now()}`
     const rawBody = await request.text()
     let requestBody: unknown = null
     try {
       requestBody = JSON.parse(rawBody)
     } catch {
-      // #region agent log
-      console.error('[H7] inventory adjustment invalid json body', {
-        runId,
-        bodyLength: rawBody.length
-      })
-      // #endregion
       throw new Error('INVALID_JSON_BODY')
     }
 
     const parsedPayload = adjustmentPayloadSchema.safeParse(requestBody)
     if (!parsedPayload.success) {
-      // #region agent log
-      console.error('[H7] inventory adjustment payload validation failed', {
-        runId,
-        operation: typeof requestBody === 'object' && requestBody && 'operation' in requestBody ? requestBody.operation : null,
-        issues: parsedPayload.error.issues.map(issue => ({
-          path: issue.path.join('.'),
-          code: issue.code,
-          message: issue.message
-        }))
-      })
-      // #endregion
       throw new Error('ADJUSTMENT_PAYLOAD_INVALID')
     }
 
     const payload = parsedPayload.data
-    // #region agent log
-    console.info('[H8] inventory adjustment payload accepted', {
-      runId,
-      operation: payload.operation
-    })
-    // #endregion
     const prisma = await getPrisma()
     await applyDueScheduledPrices(prisma)
 
@@ -314,18 +273,11 @@ export async function POST(request: Request) {
     }
 
     if (payload.operation === 'delete_product') {
-      logInventoryAdjustmentDebug(runId, 'H4', 'delete operation received', {
-        inventoryItemId: payload.inventoryItemId
-      })
       const deleteResult = await prisma.$transaction(async transaction => {
         const item = await transaction.inventoryItem.findUnique({
           where: { id: payload.inventoryItemId }
         })
         if (!item) throw new Error('INVENTORY_ITEM_NOT_FOUND')
-        logInventoryAdjustmentDebug(runId, 'H5', 'delete target item loaded', {
-          inventoryItemId: item.id,
-          stock: item.stock
-        })
 
         const linkedSalesCount = await transaction.saleItem.count({
           where: { inventoryItemId: payload.inventoryItemId }
@@ -383,16 +335,9 @@ export async function POST(request: Request) {
               aisle: '__archived__'
             }
           })
-          logInventoryAdjustmentDebug(runId, 'H6', 'delete converted to archive due to sale links', {
-            inventoryItemId: payload.inventoryItemId,
-            linkedSalesCount
-          })
         } else {
           await transaction.inventoryItem.delete({
             where: { id: payload.inventoryItemId }
-          })
-          logInventoryAdjustmentDebug(runId, 'H6', 'delete transaction removed inventory item', {
-            inventoryItemId: payload.inventoryItemId
           })
         }
 
@@ -670,12 +615,6 @@ export async function POST(request: Request) {
       valuation: updated.valuation
     })
   } catch (error) {
-    // #region agent log
-    console.error('[H9] inventory adjustment failed in catch', {
-      name: error instanceof Error ? error.name : 'unknown',
-      message: error instanceof Error ? error.message : 'unknown'
-    })
-    // #endregion
     const message =
       error instanceof Error && error.message === 'INVENTORY_ITEM_NOT_FOUND'
         ? 'Producto no encontrado'
