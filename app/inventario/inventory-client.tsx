@@ -1532,10 +1532,10 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             </div>
 
             <div ref={inventoryTableContainerRef} className='w-full max-w-full min-w-0 overflow-x-auto rounded-xl border border-slate-200'>
-              <table className='w-full min-w-full table-fixed divide-y divide-slate-200 md:table-auto'>
+              <table className='w-full min-w-full table-fixed divide-y divide-slate-200 bg-white'>
                 <thead className='bg-slate-50'>
                   <tr>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    <th className='w-[14%] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
                       <button
                         type='button'
                         onClick={() => handleInventoryHeaderSort('sku')}
@@ -1545,7 +1545,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <span className='text-[10px]'>{getSortIndicator(sortBy === 'sku', sortDirection)}</span>
                       </button>
                     </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    <th className='w-[46%] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
                       <button
                         type='button'
                         onClick={() => handleInventoryHeaderSort('productName')}
@@ -1555,7 +1555,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <span className='text-[10px]'>{getSortIndicator(sortBy === 'productName', sortDirection)}</span>
                       </button>
                     </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    <th className='w-[14%] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
                       <button
                         type='button'
                         onClick={() => handleInventoryHeaderSort('stock')}
@@ -1565,7 +1565,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <span className='text-[10px]'>{getSortIndicator(sortBy === 'stock', sortDirection)}</span>
                       </button>
                     </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    <th className='w-[14%] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
                       <button
                         type='button'
                         onClick={() => handleInventoryHeaderSort('unitPrice')}
@@ -1575,7 +1575,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <span className='text-[10px]'>{getSortIndicator(sortBy === 'unitPrice', sortDirection)}</span>
                       </button>
                     </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    <th className='w-[12%] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
                       <button
                         type='button'
                         onClick={() => handleInventoryHeaderSort('category')}
