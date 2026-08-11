@@ -10,6 +10,10 @@ export default async function BitacoraPage() {
     redirect('/login')
   }
 
+  if (actor.role !== 'admin') {
+    redirect('/pos')
+  }
+
   return (
     <WorkspaceShell username={actor.username} role={actor.role}>
       <BitacoraClient />

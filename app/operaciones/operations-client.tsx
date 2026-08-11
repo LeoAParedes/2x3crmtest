@@ -50,7 +50,7 @@ const quickCards: QuickCard[] = [
     href: '/bitacora',
     title: 'Revisar bitácora',
     description: 'Audita operaciones del sistema por tipo y estado.',
-    roles: ['admin', 'cashier']
+    roles: ['admin']
   },
   {
     href: '/inventario?shortcut=ajuste',
@@ -113,7 +113,7 @@ export const OperationsClient = ({ role }: OperationsClientProps) => {
     <main className='mx-auto max-w-7xl px-4 py-8 md:px-8'>
       <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
         <h1 className='text-2xl font-semibold text-slate-950'>Operaciones del día</h1>
-        <p className='mt-2 text-sm text-slate-600'>Accesos rápidos para caja, inventario y seguimiento de la bitácora operativa.</p>
+        <p className='mt-2 text-sm text-slate-600'>Accesos rápidos para caja, inventario y control operativo del día.</p>
       </section>
 
       <section className='mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4'>

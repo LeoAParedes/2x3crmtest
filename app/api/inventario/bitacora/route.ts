@@ -58,7 +58,7 @@ const writeAgentDebugLog = (payload: {
 // #endregion
 
 export async function GET(request: Request) {
-  const access = await requireApiAccess(request, { allowedRoles: ['admin', 'cashier'] })
+  const access = await requireApiAccess(request, { allowedRoles: ['admin'] })
   if (!access.ok) {
     return access.response
   }
@@ -119,7 +119,6 @@ export async function GET(request: Request) {
 
     const where = {
       action: actionFilter,
-      ...(access.context.actor.role === 'cashier' ? { actorAuthUserId: access.context.actor.userId } : {}),
       ...(parsedQuery.data.status !== 'all' ? { status: parsedQuery.data.status } : {}),
       ...(parsedQuery.data.actor
         ? { actorUsername: { contains: parsedQuery.data.actor, mode: 'insensitive' as const } }
@@ -134,8 +133,7 @@ export async function GET(request: Request) {
       }),
       prisma.systemActionLog.findMany({
         where: {
-          action: { notIn: [...BITACORA_HIDDEN_ACTIONS] },
-          ...(access.context.actor.role === 'cashier' ? { actorAuthUserId: access.context.actor.userId } : {})
+          action: { notIn: [...BITACORA_HIDDEN_ACTIONS] }
         },
         select: { action: true },
         distinct: ['action'],

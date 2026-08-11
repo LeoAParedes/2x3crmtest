@@ -50,7 +50,8 @@ const navTree: NavGroup[] = [
     id: 'bitacora',
     label: 'Bitácora',
     href: '/bitacora',
-    iconSrc: '/icons/nav/bitacora.png'
+    iconSrc: '/icons/nav/bitacora.png',
+    adminOnly: true
   },
   {
     id: 'inventarios',

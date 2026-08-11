@@ -19,7 +19,7 @@ export default async function OperacionesPage() {
       <main className='mx-auto max-w-3xl px-4 py-10'>
         <h1 className='text-2xl font-semibold text-slate-950'>Operaciones</h1>
         <p className='mt-2 text-sm text-slate-600'>
-          Usa POS, Inventarios, Bitácora y Turno / Corte desde el menú. El hub administrativo vive en Dashboard.
+          Usa POS, Inventarios y Turno / Corte desde el menú. El hub administrativo vive en Dashboard.
         </p>
       </main>
     </WorkspaceShell>
