@@ -230,7 +230,6 @@ export const PosCobroMode = ({
                   placeholder='SKU incompleto, nombre o escaneo + Enter'
                   aria-label='Buscar producto por código o nombre'
                   aria-busy={codeLookupPending}
-                  aria-expanded={showCandidateList}
                   aria-controls={showCandidateList ? 'cobro-code-search-results' : undefined}
                   aria-autocomplete='list'
                   aria-describedby={codeFeedback ? 'cobro-code-search-feedback' : undefined}
