@@ -19,3 +19,51 @@ body {
   background: #f8fafc;
   color: #0f172a;
 }
+
+/* Ticket modal preview stays on-screen; Ctrl/Cmd+P prints ticket only. */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .pos-ticket-print,
+  .pos-ticket-print * {
+    visibility: visible !important;
+  }
+
+  .pos-ticket-print {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 2mm !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: #fff !important;
+    color: #111827 !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+    white-space: pre-wrap !important;
+  }
+}

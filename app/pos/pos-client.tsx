@@ -485,21 +485,18 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     }
   }
 
-  const handlePrintTicket = () => {
-    if (!ticketText) return
-
-    const popup = window.open('', '_blank', 'noopener,noreferrer,width=420,height=900')
-    if (!popup) {
-      setMessage('No fue posible abrir la ventana de impresión. Habilita popups para continuar.')
-      return
-    }
+  const buildTicketPrintDocument = (closeAfterPrint: boolean) => {
+    if (!ticketText) return null
 
     const escapedTicket = ticketText
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
 
-    popup.document.write(`<!doctype html>
+    // Do not close during print(): browsers return when the dialog opens, so an
+    // immediate window.close() blanks Save as PDF / print preview.
+    return `<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8" />
@@ -507,7 +504,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     <style>
       @page {
         size: 80mm auto;
-        margin: 0;
+        margin: 4mm;
       }
 
       html, body {
@@ -522,30 +519,113 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         font-size: 11px;
         line-height: 1.35;
         color: #111827;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
       }
 
       .ticket {
         box-sizing: border-box;
         width: 80mm;
+        max-width: 80mm;
         padding: 2mm;
         margin: 0;
         white-space: pre-wrap;
-        page-break-inside: avoid;
+        word-break: break-word;
+        overflow-wrap: anywhere;
       }
     </style>
   </head>
   <body>
     <pre class="ticket">${escapedTicket}</pre>
     <script>
-      window.onload = () => {
-        window.focus()
-        window.print()
-        window.close()
-      }
+      (function () {
+        var printed = false
+        var closeWhenDone = ${closeAfterPrint ? 'true' : 'false'}
+
+        var runPrint = function () {
+          if (printed) return
+          printed = true
+          window.focus()
+          window.print()
+        }
+
+        var cleanup = function () {
+          if (!closeWhenDone) return
+          try {
+            window.close()
+          } catch (error) {}
+        }
+
+        window.addEventListener('afterprint', cleanup)
+
+        if (document.readyState === 'complete') {
+          window.setTimeout(runPrint, 50)
+        } else {
+          window.addEventListener('load', function () {
+            window.setTimeout(runPrint, 50)
+          })
+        }
+      })()
     </script>
   </body>
-</html>`)
-    popup.document.close()
+</html>`
+  }
+
+  const handlePrintTicket = () => {
+    const popupHtml = buildTicketPrintDocument(true)
+    if (!popupHtml) return
+
+    // Avoid noopener/noreferrer: Chrome often returns null and print never runs.
+    const popup = window.open('', '_blank', 'width=420,height=900')
+    if (popup) {
+      popup.document.open()
+      popup.document.write(popupHtml)
+      popup.document.close()
+      return
+    }
+
+    const iframeHtml = buildTicketPrintDocument(false)
+    if (!iframeHtml) return
+
+    // Popup blocked: print via a same-origin iframe (still ticket-only).
+    const iframe = document.createElement('iframe')
+    iframe.setAttribute('title', 'Impresión de ticket')
+    iframe.setAttribute('aria-hidden', 'true')
+    iframe.style.position = 'fixed'
+    iframe.style.right = '0'
+    iframe.style.bottom = '0'
+    iframe.style.width = '80mm'
+    iframe.style.height = '100vh'
+    iframe.style.opacity = '0'
+    iframe.style.pointerEvents = 'none'
+    iframe.style.border = '0'
+    iframe.style.zIndex = '-1'
+    document.body.appendChild(iframe)
+
+    const iframeWindow = iframe.contentWindow
+    const iframeDocument = iframe.contentDocument || iframeWindow?.document
+    if (!iframeWindow || !iframeDocument) {
+      iframe.remove()
+      setMessage('No fue posible abrir la ventana de impresión. Habilita popups para continuar.')
+      return
+    }
+
+    const handleAfterPrint = () => {
+      iframeWindow.removeEventListener('afterprint', handleAfterPrint)
+      iframe.remove()
+    }
+    iframeWindow.addEventListener('afterprint', handleAfterPrint)
+
+    iframeDocument.open()
+    iframeDocument.write(iframeHtml)
+    iframeDocument.close()
+
+    // Safety net if afterprint never fires (some WebView/PDF flows).
+    window.setTimeout(() => {
+      if (document.body.contains(iframe)) {
+        iframe.remove()
+      }
+    }, 60_000)
   }
 
   const canCheckout =
@@ -977,7 +1057,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             role='dialog'
             aria-modal='true'
             aria-label='Ticket de venta para impresión'
-            className='fixed left-1/2 top-1/2 z-[80] w-[min(720px,94vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl'
+            className='fixed left-1/2 top-1/2 z-[80] w-[min(720px,94vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl print:static print:left-auto print:top-auto print:w-auto print:translate-x-0 print:translate-y-0 print:border-0 print:p-0 print:shadow-none'
           >
             <div className='no-print mb-4 flex items-center justify-between gap-3'>
               <div>
