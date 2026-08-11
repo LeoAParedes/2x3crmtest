@@ -8,7 +8,7 @@ const periodValues: FinancePeriod[] = ['day', 'week', 'month']
 export const isFinancePeriod = (value: string | null | undefined): value is FinancePeriod =>
   typeof value === 'string' && periodValues.includes(value as FinancePeriod)
 
-const getTimeZoneParts = (date: Date, timeZone: string) => {
+export const getTimeZoneParts = (date: Date, timeZone: string) => {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',

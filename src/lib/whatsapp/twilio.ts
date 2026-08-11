@@ -175,4 +175,54 @@ export const buildTwilioMessagingTwiml = (message: string) => {
   return `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escaped}</Message></Response>`
 }
 
+/** Empty TwiML ack when the reply was already sent via REST API. */
+export const buildTwilioEmptyTwiml = () =>
+  `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`
+
+/**
+ * Explicit outbound WhatsApp send via Twilio REST.
+ * Prefer this over relying only on webhook TwiML when delivery must be confirmed.
+ */
+export const sendTwilioWhatsAppText = async (input: {
+  from: string
+  to: string
+  body: string
+}): Promise<{ ok: boolean; sid?: string; error?: string }> => {
+  const accountSid = env.twilioAccountSid
+  const authToken = env.twilioAuthToken
+  if (!accountSid || !authToken) {
+    return { ok: false, error: 'TWILIO_CREDENTIALS_MISSING' }
+  }
+
+  const from = input.from.startsWith('whatsapp:') ? input.from : `whatsapp:${input.from}`
+  const to = input.to.startsWith('whatsapp:') ? input.to : `whatsapp:${input.to}`
+  const endpoint = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`
+  const form = new URLSearchParams({
+    From: from,
+    To: to,
+    Body: input.body.slice(0, 1500)
+  })
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: form.toString()
+    })
+    const payload = (await response.json()) as { sid?: string; message?: string; error_message?: string }
+    if (!response.ok) {
+      return {
+        ok: false,
+        error: payload.error_message || payload.message || `TWILIO_HTTP_${response.status}`
+      }
+    }
+    return { ok: true, sid: payload.sid }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'TWILIO_SEND_FAILED' }
+  }
+}
+
 export const hasTwilioProviderConfig = Boolean(env.twilioAuthToken || env.twilioAccountSid)

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatDeterministicErpReply,
   isErpDataQuestion,
+  parseBusinessDateMention,
   selectErpToolsForQuestion,
   stampErpDbProvenance
 } from '@/src/lib/ai/erp-db-harness'
@@ -15,11 +16,17 @@ describe('erp-db-harness', () => {
     expect(isErpDataQuestion('hola')).toBe(false)
   })
 
+  it('parses agosto 10 as a local business date', () => {
+    const parsed = parseBusinessDateMention(
+      'Cuantas ventas hubo agosto 10?',
+      new Date('2026-08-11T10:00:00.000Z')
+    )
+    expect(parsed?.isoDate).toBe('2026-08-10')
+  })
+
   it('selects live sales tools for sales questions', () => {
     const picks = selectErpToolsForQuestion('ventas de la semana', DEFAULT_ALLOWED_ERP_TOOLS)
-    expect(picks.map(pick => pick.toolId)).toEqual(
-      expect.arrayContaining(['sales_total_today', 'sales_total_period'])
-    )
+    expect(picks.map(pick => pick.toolId)).toEqual(expect.arrayContaining(['sales_total_period']))
   })
 
   it('stamps supabase provenance on facts', () => {

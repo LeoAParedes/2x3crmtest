@@ -5,11 +5,17 @@
     "app/api/whatsapp/webhook/route.ts": {
       "maxDuration": 15
     },
+    "app/api/whatsapp/twilio/webhook/route.ts": {
+      "maxDuration": 60
+    },
     "app/api/whatsapp/send/route.ts": {
       "maxDuration": 10
     },
     "app/api/crm/**/route.ts": {
       "maxDuration": 10
+    },
+    "app/api/agent/chat/route.ts": {
+      "maxDuration": 60
     }
   }
 }

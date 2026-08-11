@@ -270,6 +270,20 @@ export const runCrmAgent = async (message: CrmNormalizedMessage): Promise<ChatRe
 
   const erpQuestion = isErpDataQuestion(message.message)
 
+  // WhatsApp ERP: answer from Prisma only (skip OpenAI latency / Twilio timeout risk).
+  if (erpQuestion && message.channel === 'whatsapp' && settings.allowedErpTools.length > 0) {
+    const deterministic = await runDeterministicErpDbReply(message.message, settings.allowedErpTools)
+    return applyReplyPolicy(
+      {
+        reply: deterministic.reply,
+        intent: 'erp_metrics',
+        actions: deterministic.usedTools.map(id => `erp.${id}`),
+        runMode: 'fallback'
+      },
+      settings
+    )
+  }
+
   // DavinciAi: OpenAI + whitelisted ERP tools (DB-only facts). Never invent figures.
   if (env.openAiApiKey && settings.allowedErpTools.length > 0) {
     const davinciReply = await runDavinciErpAgent(message, settings)

@@ -4,7 +4,13 @@ import { resolve } from 'node:path'
 import { executeErpTool, type ErpToolFactResult } from '@/src/lib/ai/erp-tool-executors'
 import { type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
 import { getPrisma } from '@/src/lib/db/prisma'
-import { FINANCE_TIME_ZONE, getPeriodBounds } from '@/src/lib/finance/period'
+import {
+  FINANCE_TIME_ZONE,
+  getCustomBounds,
+  getPeriodBounds,
+  getTimeZoneParts,
+  zonedWallTimeToUtc
+} from '@/src/lib/finance/period'
 
 export type ErpDbProvenance = {
   source: 'supabase_postgres'
@@ -26,13 +32,92 @@ export type ErpDbSnapshot = {
   mismatches: string[]
 }
 
+export type BusinessDateMention = {
+  label: string
+  isoDate: string
+}
+
+const MONTHS: Record<string, number> = {
+  enero: 1,
+  febrero: 2,
+  marzo: 3,
+  abril: 4,
+  mayo: 5,
+  junio: 6,
+  julio: 7,
+  agosto: 8,
+  septiembre: 9,
+  setiembre: 9,
+  octubre: 10,
+  noviembre: 11,
+  diciembre: 12
+}
+
 const ERP_DATA_PATTERN =
-  /\b(venta|ventas|ticket|tickets|ingreso|ingresos|egreso|egresos|gasto|gastos|ganancia|utilidad|pnl|p&l|flujo|caja|stock|inventario|sku|producto|productos|precio|low[\s-]?stock|bajo|n[oó]mina|renta|proveedor|finanzas|cu[aá]nto|total|promedio|top|ranking|hoy|semana|mes|periodo)\b/i
+  /\b(venta|ventas|ticket|tickets|ingreso|ingresos|egreso|egresos|gasto|gastos|ganancia|utilidad|pnl|p&l|flujo|caja|stock|inventario|sku|producto|productos|precio|low[\s-]?stock|bajo|n[oó]mina|renta|proveedor|finanzas|cu[aá]nto|total|promedio|top|ranking|hoy|semana|mes|periodo|ayer|agosto|enero|febrero|marzo|abril|mayo|junio|julio|septiembre|octubre|noviembre|diciembre)\b/i
 
 export const isErpDataQuestion = (message: string): boolean => {
   const text = message.trim()
   if (!text) return false
   return ERP_DATA_PATTERN.test(text)
+}
+
+/** Resolve "ayer", "10 de agosto", "agosto 10", "2026-08-10" in America/Los_Angeles. */
+export const parseBusinessDateMention = (
+  message: string,
+  now = new Date(),
+  timeZone = FINANCE_TIME_ZONE
+): BusinessDateMention | null => {
+  const text = message.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '')
+  const parts = getTimeZoneParts(now, timeZone)
+
+  if (/\bayer\b/.test(text)) {
+    const yesterday = zonedWallTimeToUtc(parts.year, parts.month, parts.day - 1, 12, 0, 0, timeZone)
+    const y = getTimeZoneParts(yesterday, timeZone)
+    const isoDate = `${y.year}-${String(y.month).padStart(2, '0')}-${String(y.day).padStart(2, '0')}`
+    return { label: `ayer (${isoDate})`, isoDate }
+  }
+
+  const isoMatch = text.match(/\b(20\d{2})-(\d{1,2})-(\d{1,2})\b/)
+  if (isoMatch) {
+    const year = Number(isoMatch[1])
+    const month = Number(isoMatch[2])
+    const day = Number(isoMatch[3])
+    const isoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+    return { label: isoDate, isoDate }
+  }
+
+  const slashMatch = text.match(/\b(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](20\d{2}))?\b/)
+  if (slashMatch) {
+    const day = Number(slashMatch[1])
+    const month = Number(slashMatch[2])
+    const year = slashMatch[3] ? Number(slashMatch[3]) : parts.year
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      const isoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      return { label: isoDate, isoDate }
+    }
+  }
+
+  for (const [name, month] of Object.entries(MONTHS)) {
+    const dayFirst = text.match(new RegExp(`\\b(\\d{1,2})\\s+(?:de\\s+)?${name}\\b`))
+    if (dayFirst) {
+      const day = Number(dayFirst[1])
+      const yearMatch = text.match(/\b(20\d{2})\b/)
+      const year = yearMatch ? Number(yearMatch[1]) : parts.year
+      const isoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      return { label: `${day} de ${name} ${year}`, isoDate }
+    }
+    const monthFirst = text.match(new RegExp(`\\b${name}\\s+(\\d{1,2})\\b`))
+    if (monthFirst) {
+      const day = Number(monthFirst[1])
+      const yearMatch = text.match(/\b(20\d{2})\b/)
+      const year = yearMatch ? Number(yearMatch[1]) : parts.year
+      const isoDate = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      return { label: `${day} de ${name} ${year}`, isoDate }
+    }
+  }
+
+  return null
 }
 
 export const stampErpDbProvenance = <T extends Record<string, unknown>>(facts: T): T & {
@@ -49,6 +134,29 @@ export const stampErpDbProvenance = <T extends Record<string, unknown>>(facts: T
   }
 }
 
+export const queryCompletedSalesForLocalDate = async (isoDate: string) => {
+  const { start, end } = getCustomBounds(isoDate, isoDate)
+  const prisma = await getPrisma()
+  const result = await prisma.sale.aggregate({
+    where: {
+      status: 'completed',
+      createdAt: { gte: start, lte: end }
+    },
+    _sum: { total: true },
+    _count: { _all: true }
+  })
+
+  return stampErpDbProvenance({
+    toolId: 'sales_total_on_date',
+    totalSales: Number(Number(result._sum.total || 0).toFixed(2)),
+    ticketCount: result._count._all,
+    rangeStart: start.toISOString(),
+    rangeEnd: end.toISOString(),
+    localDate: isoDate,
+    source: 'Sale.status=completed'
+  })
+}
+
 export const selectErpToolsForQuestion = (
   message: string,
   allowedTools: ErpToolId[]
@@ -61,6 +169,10 @@ export const selectErpToolsForQuestion = (
     picks.push({ toolId: id, args })
   }
 
+  if (parseBusinessDateMention(message)) {
+    return picks
+  }
+
   const wantsInventory =
     /\b(stock|inventario|sku|producto|productos|low[\s-]?stock|bajo)\b/.test(text)
   const wantsExpenses = /\b(egreso|egresos|gasto|gastos|n[oó]mina|renta|proveedor)\b/.test(text)
@@ -70,10 +182,22 @@ export const selectErpToolsForQuestion = (
     wantsProfit
   const wantsTop = /\b(top|ranking|m[aá]s vendido)\b/.test(text)
   const wantsRecent = /\b(reciente|últim|ultim|ticket|tickets|qu[eé] se vendi[oó])\b/.test(text)
+  const wantsAllTime = /\b(sistema|historial|todas|acumulad)\b/.test(text)
 
   if (wantsSales) {
-    allow('sales_total_today')
-    allow('sales_total_period', { period: 'week' })
+    if (wantsAllTime || (!/\bhoy\b/.test(text) && !/\bsemana\b/.test(text) && !/\bmes\b/.test(text))) {
+      allow('sales_total_period', { period: 'week' })
+      allow('sales_total_period', { period: 'month' })
+    }
+    if (/\bhoy\b/.test(text) || (!wantsAllTime && !/\bsemana\b/.test(text) && !/\bmes\b/.test(text))) {
+      allow('sales_total_today')
+    }
+    if (/\bsemana\b/.test(text)) {
+      allow('sales_total_period', { period: 'week' })
+    }
+    if (/\bmes\b/.test(text)) {
+      allow('sales_total_period', { period: 'month' })
+    }
   }
   if (wantsProfit) {
     allow('cash_flow_period', { period: 'week' })
@@ -93,16 +217,9 @@ export const selectErpToolsForQuestion = (
   }
 
   if (picks.length === 0 && allowedTools.length > 0) {
-    // Conservative default for ambiguous ERP questions: live sales + inventory.
-    if (allowedTools.includes('sales_total_today')) {
-      allow('sales_total_today')
-    }
-    if (allowedTools.includes('sales_total_period')) {
-      allow('sales_total_period', { period: 'week' })
-    }
-    if (allowedTools.includes('inventory_snapshot')) {
-      allow('inventory_snapshot')
-    }
+    if (allowedTools.includes('sales_total_today')) allow('sales_total_today')
+    if (allowedTools.includes('sales_total_period')) allow('sales_total_period', { period: 'week' })
+    if (allowedTools.includes('inventory_snapshot')) allow('inventory_snapshot')
   }
 
   return picks.slice(0, 4)
@@ -141,6 +258,12 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
   for (const result of okResults) {
     if (!result.ok) continue
     const facts = result.facts
+    if (result.toolId === 'sales_total_on_date') {
+      lines.push(
+        `Ventas ${String(facts.localDate || facts.label || 'fecha')}: $${money(facts.totalSales) ?? '0.00'} | tickets: ${String(facts.ticketCount ?? 0)} (${FINANCE_TIME_ZONE})`
+      )
+      continue
+    }
     if (result.toolId === 'sales_total_today') {
       lines.push(
         `Ventas hoy (${FINANCE_TIME_ZONE}): $${money(facts.totalSales) ?? '0.00'} | tickets: ${String(facts.ticketCount ?? 0)}`
@@ -151,7 +274,7 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
         | undefined
       if (facts.ticketCount === 0 && last?.saleNumber) {
         lines.push(
-          `Última venta completed fuera de hoy: ${last.saleNumber} $${money(last.total) ?? '?'} (${last.createdAt || 'N/A'})`
+          `Ultima venta completed fuera de hoy: ${last.saleNumber} $${money(last.total) ?? '?'} (${last.createdAt || 'N/A'})`
         )
       }
       continue
@@ -164,7 +287,7 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
     }
     if (result.toolId === 'cash_flow_period') {
       lines.push(
-        `P&L ${String(facts.period)}: ingresos $${money(facts.ingresos) ?? '0.00'} − egresos $${money(facts.egresos) ?? '0.00'} = ganancia $${money(facts.ganancia) ?? '0.00'}`
+        `P&L ${String(facts.period)}: ingresos $${money(facts.ingresos) ?? '0.00'} - egresos $${money(facts.egresos) ?? '0.00'} = ganancia $${money(facts.ganancia) ?? '0.00'}`
       )
       continue
     }
@@ -215,7 +338,7 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
     }
   }
 
-  lines.push('Fuente: Supabase Postgres (solo Sale/Expense/InventoryItem completed según tool).')
+  lines.push('Fuente: Supabase Postgres (Sale/Expense/InventoryItem).')
   return lines.join('\n')
 }
 
@@ -223,6 +346,25 @@ export const runDeterministicErpDbReply = async (
   message: string,
   allowedTools: ErpToolId[]
 ): Promise<{ reply: string; usedTools: string[]; results: ErpToolFactResult[] }> => {
+  const mentioned = parseBusinessDateMention(message)
+  if (mentioned) {
+    const facts = await queryCompletedSalesForLocalDate(mentioned.isoDate)
+    const result: ErpToolFactResult = {
+      toolId: 'sales_total_on_date',
+      ok: true,
+      facts: {
+        ...facts,
+        label: mentioned.label,
+        localDate: mentioned.label
+      }
+    }
+    return {
+      reply: formatDeterministicErpReply([result]),
+      usedTools: ['sales_total_on_date'],
+      results: [result]
+    }
+  }
+
   const { results, usedTools } = await collectErpToolFacts(message, allowedTools)
   return {
     reply: formatDeterministicErpReply(results),
@@ -262,21 +404,10 @@ export const verifyErpDbHarness = async (): Promise<ErpDbSnapshot> => {
     prisma.inventoryItem.count()
   ])
 
-  const salesTool = await executeErpTool('sales_total_today', {}, [
-    'sales_total_today',
-    'sales_total_period',
-    'inventory_snapshot'
-  ])
-  const weekTool = await executeErpTool('sales_total_period', { period: 'week' }, [
-    'sales_total_today',
-    'sales_total_period',
-    'inventory_snapshot'
-  ])
-  const inventoryTool = await executeErpTool('inventory_snapshot', {}, [
-    'sales_total_today',
-    'sales_total_period',
-    'inventory_snapshot'
-  ])
+  const allowed = ['sales_total_today', 'sales_total_period', 'inventory_snapshot'] as ErpToolId[]
+  const salesTool = await executeErpTool('sales_total_today', {}, allowed)
+  const weekTool = await executeErpTool('sales_total_period', { period: 'week' }, allowed)
+  const inventoryTool = await executeErpTool('inventory_snapshot', {}, allowed)
 
   const mismatches: string[] = []
   const todayTotal = Number(todaySales._sum.total || 0)
@@ -320,14 +451,7 @@ export const verifyErpDbHarness = async (): Promise<ErpDbSnapshot> => {
       location: 'src/lib/ai/erp-db-harness.ts:verifyErpDbHarness',
       message: 'harness snapshot vs tools',
       timestamp: Date.now(),
-      data: {
-        mismatches,
-        todayTotal,
-        todayCount,
-        inventoryCount,
-        salesToolOk: salesTool.ok,
-        weekToolOk: weekTool.ok
-      }
+      data: { mismatches, todayTotal, todayCount, inventoryCount }
     }
     appendFileSync(resolve(process.cwd(), '..', 'debug-449600.log'), `${JSON.stringify(body)}\n`)
   } catch {
