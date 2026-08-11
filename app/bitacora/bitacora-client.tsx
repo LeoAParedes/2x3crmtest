@@ -522,7 +522,7 @@ export const BitacoraClient = () => {
 
             {!ticketLoadingSaleId && ticketText ? (
               <>
-                <pre className='mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs leading-5 text-slate-800'>
+                <pre className='pos-ticket-print mx-auto mt-4 w-[42ch] max-w-full overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-[11px] leading-[1.3] text-slate-800 whitespace-pre'>
                   {ticketText}
                 </pre>
                 <div className='mt-4 flex justify-end'>

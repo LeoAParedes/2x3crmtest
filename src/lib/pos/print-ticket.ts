@@ -1,9 +1,20 @@
-export const buildTicketPrintHtml = (ticketText: string, closeAfterPrint: boolean) => {
+import { printerColumns, type TicketPrinterWidth } from '@/src/lib/pos/ticket-format'
+
+const DEFAULT_PRINTER_WIDTH: TicketPrinterWidth = '80mm'
+
+export const buildTicketPrintHtml = (
+  ticketText: string,
+  closeAfterPrint: boolean,
+  printerWidth: TicketPrinterWidth = DEFAULT_PRINTER_WIDTH
+) => {
   const escapedTicket = ticketText
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
+
+  const columns = printerColumns[printerWidth]
+  const pageWidth = printerWidth
 
   // Do not close during print(): browsers return when the dialog opens, so an
   // immediate window.close() blanks Save as PDF / print preview.
@@ -14,21 +25,26 @@ export const buildTicketPrintHtml = (ticketText: string, closeAfterPrint: boolea
     <title>Ticket de venta</title>
     <style>
       @page {
-        size: 80mm auto;
-        margin: 4mm;
+        size: ${pageWidth} auto;
+        margin: 2mm;
       }
 
       html, body {
-        width: 80mm;
         margin: 0;
         padding: 0;
         background: #fff;
+        width: 100%;
+        min-height: 100%;
       }
 
+      /* Center ticket when the browser ignores @page size and falls back to A4. */
       body {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        font-family: "Courier New", Courier, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         font-size: 11px;
-        line-height: 1.35;
+        line-height: 1.3;
         color: #111827;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -36,13 +52,17 @@ export const buildTicketPrintHtml = (ticketText: string, closeAfterPrint: boolea
 
       .ticket {
         box-sizing: border-box;
-        width: 80mm;
-        max-width: 80mm;
-        padding: 2mm;
-        margin: 0;
-        white-space: pre-wrap;
-        word-break: break-word;
-        overflow-wrap: anywhere;
+        width: ${columns}ch;
+        max-width: calc(${pageWidth} - 4mm);
+        margin: 0 auto;
+        padding: 2mm 0;
+        white-space: pre;
+        overflow: visible;
+        word-break: normal;
+        overflow-wrap: normal;
+        font-variant-ligatures: none;
+        letter-spacing: 0;
+        text-align: left;
       }
     </style>
   </head>
@@ -82,8 +102,12 @@ export const buildTicketPrintHtml = (ticketText: string, closeAfterPrint: boolea
 </html>`
 }
 
-export const printTicketText = (ticketText: string, onBlocked?: () => void) => {
-  const popupHtml = buildTicketPrintHtml(ticketText, true)
+export const printTicketText = (
+  ticketText: string,
+  onBlocked?: () => void,
+  printerWidth: TicketPrinterWidth = DEFAULT_PRINTER_WIDTH
+) => {
+  const popupHtml = buildTicketPrintHtml(ticketText, true, printerWidth)
 
   // Avoid noopener/noreferrer: Chrome often returns null and print never runs.
   const popup = window.open('', '_blank', 'width=420,height=900')
@@ -94,14 +118,14 @@ export const printTicketText = (ticketText: string, onBlocked?: () => void) => {
     return
   }
 
-  const iframeHtml = buildTicketPrintHtml(ticketText, false)
+  const iframeHtml = buildTicketPrintHtml(ticketText, false, printerWidth)
   const iframe = document.createElement('iframe')
   iframe.setAttribute('title', 'Impresión de ticket')
   iframe.setAttribute('aria-hidden', 'true')
   iframe.style.position = 'fixed'
   iframe.style.right = '0'
   iframe.style.bottom = '0'
-  iframe.style.width = '80mm'
+  iframe.style.width = printerWidth
   iframe.style.height = '100vh'
   iframe.style.opacity = '0'
   iframe.style.pointerEvents = 'none'

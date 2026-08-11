@@ -29,10 +29,14 @@ type TicketBuildOptions = {
   printerWidth?: TicketPrinterWidth
 }
 
-const printerColumns: Record<TicketPrinterWidth, number> = {
+/** Fixed column counts for monospace thermal layout (must match print CSS `Nch`). */
+export const printerColumns: Record<TicketPrinterWidth, number> = {
   '58mm': 32,
   '80mm': 42
 }
+
+/** Non-breaking space — keeps label/value padding from wrapping under `pre-wrap`. */
+const PAD = '\u00A0'
 
 export const formatMoney = (value: number) => formatMxnCurrency(value)
 
@@ -52,25 +56,25 @@ export const formatTicketQuantity = (item: Pick<TicketItem, 'quantity' | 'unitMo
 
 const padRight = (value: string, length: number) => {
   if (value.length >= length) return value.slice(0, length)
-  return `${value}${' '.repeat(length - value.length)}`
-}
-
-const padLeft = (value: string, length: number) => {
-  if (value.length >= length) return value.slice(0, length)
-  return `${' '.repeat(length - value.length)}${value}`
+  return `${value}${PAD.repeat(length - value.length)}`
 }
 
 const centered = (value: string, length: number) => {
   if (value.length >= length) return value.slice(0, length)
   const left = Math.floor((length - value.length) / 2)
   const right = length - value.length - left
-  return `${' '.repeat(left)}${value}${' '.repeat(right)}`
+  return `${PAD.repeat(left)}${value}${PAD.repeat(right)}`
 }
 
-const labelAmountLine = (label: string, amount: number, columns: number) => {
+/** Label left, amount right on one line (padded to exact column width). */
+export const labelAmountLine = (label: string, amount: number, columns: number) => {
   const amountLabel = formatMoney(amount)
-  const leftWidth = Math.max(0, columns - amountLabel.length)
-  return `${padRight(label, leftWidth)}${padLeft(amountLabel, amountLabel.length)}`
+  if (amountLabel.length >= columns) return amountLabel.slice(0, columns)
+
+  const maxLabelWidth = columns - amountLabel.length
+  const safeLabel = label.length > maxLabelWidth ? label.slice(0, maxLabelWidth) : label
+  const gap = columns - safeLabel.length - amountLabel.length
+  return `${safeLabel}${PAD.repeat(gap)}${amountLabel}`
 }
 
 export const buildSaleTicketText = (sale: TicketSale, options: TicketBuildOptions = {}) => {
@@ -86,9 +90,9 @@ export const buildSaleTicketText = (sale: TicketSale, options: TicketBuildOption
     lines.push(centered(headerLine, columns))
   }
   lines.push(divider)
-  lines.push(`Venta: ${sale.saleNumber}`)
-  lines.push(`Fecha: ${formatTicketDateTime(sale.createdAt)}`)
-  lines.push(`Cajero: ${sale.cashierUsername}`)
+  lines.push(`Venta: ${sale.saleNumber}`.slice(0, columns))
+  lines.push(`Fecha: ${formatTicketDateTime(sale.createdAt)}`.slice(0, columns))
+  lines.push(`Cajero: ${sale.cashierUsername}`.slice(0, columns))
   lines.push(divider)
 
   for (const item of sale.items) {
@@ -96,14 +100,16 @@ export const buildSaleTicketText = (sale: TicketSale, options: TicketBuildOption
     const leftLabel = `${item.sku} ${formatTicketQuantity(item)}`
     const rightLabel = formatMoney(item.lineTotal)
     const leftWidth = Math.max(0, columns - rightLabel.length - 1)
-    lines.push(`${padRight(leftLabel, leftWidth)} ${rightLabel}`)
+    lines.push(`${padRight(leftLabel, leftWidth)}${PAD}${rightLabel}`)
   }
 
   lines.push(divider)
   lines.push(labelAmountLine('Subtotal', sale.subtotal, columns))
   lines.push(labelAmountLine('Impuesto', sale.tax, columns))
   lines.push(labelAmountLine('Total', sale.total, columns))
-  lines.push(labelAmountLine(`Pago (${sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'})`, sale.total, columns))
+  lines.push(
+    labelAmountLine(`Pago (${sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'})`, sale.total, columns)
+  )
   if (sale.paymentMethod === 'cash') {
     lines.push(labelAmountLine('Recibido', sale.amountReceived || 0, columns))
     lines.push(labelAmountLine('Cambio', sale.changeDue, columns))

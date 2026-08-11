@@ -947,7 +947,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
               </div>
             </div>
 
-            <pre className='pos-ticket-print mx-auto w-[80mm] max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-xs leading-5 text-slate-900'>
+            <pre className='pos-ticket-print mx-auto w-[42ch] max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-[11px] leading-[1.3] text-slate-900 whitespace-pre'>
               {ticketText}
             </pre>
           </section>

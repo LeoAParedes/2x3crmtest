@@ -24,7 +24,7 @@ body {
 @media print {
   @page {
     size: 80mm auto;
-    margin: 4mm;
+    margin: 2mm;
   }
 
   html,
@@ -32,6 +32,8 @@ body {
     background: #fff !important;
     margin: 0 !important;
     padding: 0 !important;
+    width: 100% !important;
+    min-height: 100% !important;
   }
 
   .no-print {
@@ -47,23 +49,30 @@ body {
     visibility: visible !important;
   }
 
+  /* 42ch matches ticket-format 80mm columns; centered if browser falls back to A4. */
   .pos-ticket-print {
     position: absolute !important;
-    left: 0 !important;
+    left: 50% !important;
     top: 0 !important;
-    width: 80mm !important;
-    max-width: 80mm !important;
+    transform: translateX(-50%) !important;
+    width: 42ch !important;
+    max-width: calc(80mm - 4mm) !important;
     margin: 0 !important;
-    padding: 2mm !important;
+    padding: 2mm 0 !important;
     border: none !important;
     border-radius: 0 !important;
     background: #fff !important;
     color: #111827 !important;
     overflow: visible !important;
     box-shadow: none !important;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+    font-family: "Courier New", Courier, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
     font-size: 11px !important;
-    line-height: 1.35 !important;
-    white-space: pre-wrap !important;
+    line-height: 1.3 !important;
+    white-space: pre !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    font-variant-ligatures: none !important;
+    letter-spacing: 0 !important;
+    text-align: left !important;
   }
 }
