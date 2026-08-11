@@ -47,6 +47,17 @@ describe('finance period helpers', () => {
     expect(quincena.end.toISOString()).toBe(now.toISOString())
   })
 
+  it('rolling 31 natural days can span two calendar months', () => {
+    // Aug 10 2026 Pacific → start Jul 11 (31 days inclusive)
+    const now = zonedWallTimeToUtc(2026, 8, 10, 12, 0, 0, FINANCE_TIME_ZONE)
+    const last31 = getRollingBounds(31, now, FINANCE_TIME_ZONE)
+    expect(last31.days).toBe(31)
+    const startLabel = formatBucketKey(last31.start, 'week', FINANCE_TIME_ZONE)
+    const endLabel = formatBucketKey(last31.end, 'week', FINANCE_TIME_ZONE)
+    expect(startLabel.toLowerCase()).toMatch(/jul/)
+    expect(endLabel.toLowerCase()).toMatch(/ago|aug/)
+  })
+
   it('uses daily buckets for multi-day ranges', () => {
     const start = zonedWallTimeToUtc(2026, 8, 1, 0, 0, 0, FINANCE_TIME_ZONE)
     const end = zonedWallTimeToUtc(2026, 8, 10, 12, 0, 0, FINANCE_TIME_ZONE)

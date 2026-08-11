@@ -23,6 +23,7 @@ import {
 } from '@/src/lib/finance/expense-schema'
 import {
   CASH_FLOW_WINDOW_OPTIONS,
+  normalizeCashFlowWindowDays,
   type CashFlowWindowDays
 } from '@/src/lib/finance/period'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
@@ -130,11 +131,8 @@ const readPrefs = (): PeriodosPrefs => {
     if (!raw) return defaultPrefs()
     const parsed = JSON.parse(raw) as Partial<PeriodosPrefs>
     const base = defaultPrefs()
-    const days = parsed.cashFlowDays
     return {
-      cashFlowDays: CASH_FLOW_WINDOW_OPTIONS.includes(days as CashFlowWindowDays)
-        ? (days as CashFlowWindowDays)
-        : 15,
+      cashFlowDays: normalizeCashFlowWindowDays(parsed.cashFlowDays),
       visible: { ...base.visible, ...(parsed.visible || {}) },
       collapsed: { ...base.collapsed, ...(parsed.collapsed || {}) }
     }
@@ -381,7 +379,7 @@ export const FinancePeriodosClient = () => {
       <section className='border-b border-slate-200 pb-5'>
         <h1 className='text-2xl font-semibold text-slate-950'>Periodos</h1>
         <p className='mt-1 text-sm text-slate-600'>
-          Ventas por rango · P&L a quincena · leaderboard del mes (Pacífico).
+          Ventas por rango · P&L en días naturales · leaderboard últimos 31 días (Pacífico).
         </p>
         <p className='mt-1 text-xs text-emerald-700'>
           En vivo · {data?.timeZone || 'America/Los_Angeles'} · actualiza cada 15s
@@ -495,7 +493,7 @@ export const FinancePeriodosClient = () => {
                         : 'border border-slate-200 text-slate-700'
                     }`}
                   >
-                    {days === 15 ? 'Quincena' : `${days}d`}
+                    {days === 15 ? '15d' : days === 7 ? '7d' : '31d'}
                   </button>
                 ))}
               </div>
@@ -769,7 +767,7 @@ export const FinancePeriodosClient = () => {
           <CollapsibleCard
             id='leaderboard'
             title='Leaderboard por cantidad'
-            subtitle={panels?.leaderboard.label || 'Último mes'}
+            subtitle={panels?.leaderboard.label || 'Últimos 31 días naturales'}
             collapsed={prefs.collapsed.leaderboard}
             onToggle={() => handleToggleCollapsed('leaderboard')}
           >
@@ -805,7 +803,7 @@ export const FinancePeriodosClient = () => {
                 </ResponsiveContainer>
               ) : (
                 <p className='flex h-full items-center justify-center text-sm text-slate-500'>
-                  {loading ? 'Cargando productos…' : 'Sin productos vendidos en el mes.'}
+                  {loading ? 'Cargando productos…' : 'Sin productos en los últimos 31 días.'}
                 </p>
               )}
             </div>
@@ -848,7 +846,7 @@ export const FinancePeriodosClient = () => {
           <CollapsibleCard
             id='comparison'
             title='Resumen comparación'
-            subtitle={`Persistente: ${prefs.cashFlowDays === 15 ? 'quincena' : `${prefs.cashFlowDays} días`}`}
+            subtitle={`Persistente: últimos ${prefs.cashFlowDays} días naturales`}
             collapsed={prefs.collapsed.comparison}
             onToggle={() => handleToggleCollapsed('comparison')}
           >

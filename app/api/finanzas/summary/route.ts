@@ -1,8 +1,8 @@
 import { getFinanceDashboard, getPeriodosDashboard, listExpensesInRange } from '@/src/lib/finance/finance-service'
 import {
   getCustomBounds,
-  isCashFlowWindowDays,
   isFinancePeriod,
+  normalizeCashFlowWindowDays,
   type CashFlowWindowDays
 } from '@/src/lib/finance/period'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
@@ -22,7 +22,7 @@ export async function GET(request: Request) {
     const from = searchParams.get('from')
     const to = searchParams.get('to')
     const cashFlowDaysRaw = Number(searchParams.get('cashFlowDays') || 15)
-    const cashFlowDays: CashFlowWindowDays = isCashFlowWindowDays(cashFlowDaysRaw) ? cashFlowDaysRaw : 15
+    const cashFlowDays: CashFlowWindowDays = normalizeCashFlowWindowDays(cashFlowDaysRaw)
 
     let salesRange: { start: Date; end: Date } | undefined
     if (from && to) {

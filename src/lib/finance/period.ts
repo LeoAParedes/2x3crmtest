@@ -147,11 +147,18 @@ export const resolveSeriesPeriod = (start: Date, end: Date, timeZone = FINANCE_T
   return sameDay ? 'day' : 'week'
 }
 
-export const CASH_FLOW_WINDOW_OPTIONS = [7, 15, 30] as const
+export const CASH_FLOW_WINDOW_OPTIONS = [7, 15, 31] as const
 export type CashFlowWindowDays = (typeof CASH_FLOW_WINDOW_OPTIONS)[number]
 
 export const isCashFlowWindowDays = (value: unknown): value is CashFlowWindowDays =>
   typeof value === 'number' && (CASH_FLOW_WINDOW_OPTIONS as readonly number[]).includes(value)
+
+/** Normalize persisted prefs that used calendar-style 30 → natural 31 days. */
+export const normalizeCashFlowWindowDays = (value: unknown): CashFlowWindowDays => {
+  if (value === 30) return 31
+  if (isCashFlowWindowDays(value)) return value
+  return 15
+}
 
 export const formatBucketKey = (date: Date, period: FinancePeriod, timeZone = FINANCE_TIME_ZONE) => {
   if (period === 'day') {

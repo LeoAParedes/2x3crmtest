@@ -331,10 +331,14 @@ export const getPeriodosDashboard = async (input: PeriodosDashboardInput = {}) =
   const salesBounds = input.salesRange || getRollingBounds(7, now)
   const cashFlowDays = input.cashFlowDays || 15
   const cashFlowBounds = getRollingBounds(cashFlowDays, now)
-  const leaderboardBounds = getPeriodBounds('month', now)
+  /** Natural last 31 days (may span two calendar months) — never month-to-date. */
+  const leaderboardBounds = getRollingBounds(31, now)
 
   const salesSeriesPeriod = resolveSeriesPeriod(salesBounds.start, salesBounds.end)
   const cashFlowSeriesPeriod = resolveSeriesPeriod(cashFlowBounds.start, cashFlowBounds.end)
+
+  const last7 = getRollingBounds(7, now)
+  const last31 = leaderboardBounds
 
   const [
     salesTotals,
@@ -353,13 +357,45 @@ export const getPeriodosDashboard = async (input: PeriodosDashboardInput = {}) =
     sumExpensesInRange(cashFlowBounds.start, cashFlowBounds.end),
     buildCashFlowSeries(cashFlowSeriesPeriod, cashFlowBounds.start, cashFlowBounds.end),
     buildTopProducts(leaderboardBounds.start, leaderboardBounds.end),
-    sumSalesInRange(getRollingBounds(7, now).start, now),
-    sumSalesInRange(getPeriodBounds('month', now).start, now),
+    sumSalesInRange(last7.start, last7.end),
+    sumSalesInRange(last31.start, last31.end),
     sumSalesInRange(getPeriodBounds('day', now).start, now)
   ])
 
   const averageTicket = cashIncome.count > 0 ? toMoney(cashIncome.total / cashIncome.count) : 0
   const ganancia = toMoney(cashIncome.total - cashExpenses.total)
+
+  const cashFlowLabel =
+    cashFlowDays === 15
+      ? 'Últimos 15 días (quincena)'
+      : cashFlowDays === 7
+        ? 'Últimos 7 días'
+        : 'Últimos 31 días'
+
+  // #region agent log
+  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+    body: JSON.stringify({
+      sessionId: '449600',
+      runId: 'rolling-days',
+      hypothesisId: 'R1',
+      location: 'finance-service.ts:getPeriodosDashboard',
+      message: 'Periodos rolling windows',
+      data: {
+        cashFlowDays,
+        salesStart: salesBounds.start.toISOString(),
+        salesEnd: salesBounds.end.toISOString(),
+        cashStart: cashFlowBounds.start.toISOString(),
+        cashEnd: cashFlowBounds.end.toISOString(),
+        leaderStart: leaderboardBounds.start.toISOString(),
+        leaderEnd: leaderboardBounds.end.toISOString(),
+        cashFlowSeriesLen: cashFlowSeries.length
+      },
+      timestamp: Date.now()
+    })
+  }).catch(() => {})
+  // #endregion
 
   return {
     mode: 'periodos' as const,
@@ -367,13 +403,13 @@ export const getPeriodosDashboard = async (input: PeriodosDashboardInput = {}) =
     generatedAt: now.toISOString(),
     panels: {
       sales: {
-        label: input.salesRange ? 'Rango seleccionado' : 'Últimos 7 días',
+        label: input.salesRange ? 'Rango seleccionado' : 'Últimos 7 días naturales',
         range: { start: salesBounds.start.toISOString(), end: salesBounds.end.toISOString() },
         totals: salesTotals,
         series: salesSeries
       },
       cashFlow: {
-        label: cashFlowDays === 15 ? 'Quincena' : cashFlowDays === 7 ? 'Últimos 7 días' : 'Últimos 30 días',
+        label: cashFlowLabel,
         days: cashFlowDays,
         range: { start: cashFlowBounds.start.toISOString(), end: cashFlowBounds.end.toISOString() },
         ingresos: cashIncome.total,
@@ -397,7 +433,7 @@ export const getPeriodosDashboard = async (input: PeriodosDashboardInput = {}) =
         ]
       },
       leaderboard: {
-        label: 'Último mes',
+        label: 'Últimos 31 días naturales',
         range: {
           start: leaderboardBounds.start.toISOString(),
           end: leaderboardBounds.end.toISOString()
@@ -405,7 +441,7 @@ export const getPeriodosDashboard = async (input: PeriodosDashboardInput = {}) =
         topProducts
       }
     },
-    /** Compat cards for overview strip */
+    /** Compat cards: day = today; week = last 7 natural days; month = last 31 natural days */
     salesTotals: {
       day: daySales,
       week: weekSales,
