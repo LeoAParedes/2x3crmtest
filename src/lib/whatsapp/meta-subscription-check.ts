@@ -156,7 +156,6 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
   const tokenAppIsSubscribed = tokenAppId
     ? subscribedApps.some(app => app.id === tokenAppId)
     : null
-  const hasUserAppSubscribed = Boolean(tokenAppIsSubscribed) || subscribedApps.some(app => !app.isMetaInternalTestApp)
 
   if (tokenAppId && tokenAppName) {
     hints.push(`Tu META_ACCESS_TOKEN pertenece a la app "${tokenAppName}" (id ${tokenAppId}).`)
