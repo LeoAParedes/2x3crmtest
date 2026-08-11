@@ -140,9 +140,21 @@ Las 5 fases DevSecOps se detallan formalmente en:
 
 ## 9) Manuales y documentacion operativa
 
+Base de conocimiento (indice buscable):
+
+- `docs/README.md`
+
+Manuales alineados a ISO/IEC/IEEE 26514 (tareas), ISO/IEC 25000 (usabilidad) e ISO/IEC 29110 (control de configuracion):
+
 - Manual de usuario: `docs/manual-usuario/manual-usuario-erp-supermercado.md`
 - Manual tecnico: `docs/manual-tecnico/manual-tecnico-erp-supermercado.md`
+- Control documental: `docs/calidad/control-configuracion-documental.md`
+- Guia de estilo: `docs/calidad/guia-estilo-documentacion.md`
+- Registro de cambios docs: `docs/calidad/registro-cambios-documentacion.md`
+- Revision ejecutiva estado actual: `docs/arquitectura/revision-ejecutiva-estado-actual.md`
 - Plan de video de avances: `docs/video/estructura-video-avances-5-10min.md`
+
+Regla: todo cambio de software que afecte una tarea de usuario actualiza el manual de usuario en el mismo ciclo de liberacion.
 
 ## 10) Estructura objetivo de directorio
 
@@ -150,9 +162,13 @@ Las 5 fases DevSecOps se detallan formalmente en:
 2x3crmtest/
   app/
   docs/
+    README.md
     arquitectura/
+    calidad/
     manual-usuario/
     manual-tecnico/
+    integraciones/
+    operaciones/
     video/
   docker-compose.yml
   Dockerfile

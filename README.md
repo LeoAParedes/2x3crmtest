@@ -1,5 +1,14 @@
 # 2x3crmtest
 
+ERP de supermercado **2x3 Operaciones** (versión `1.0.0`).
+
+## Documentación
+
+- [Base de conocimiento](docs/README.md) — índice por tarea y por rol
+- [Manual de usuario](docs/manual-usuario/manual-usuario-erp-supermercado.md) — cómo lograr objetivos en el sistema (ISO/IEC/IEEE 26514)
+- [Manual técnico](docs/manual-tecnico/manual-tecnico-erp-supermercado.md) — arquitectura, APIs y despliegue
+- [Control de configuración documental](docs/calidad/control-configuracion-documental.md) — versiones y aprobación (ISO/IEC 29110)
+
 ## Requisitos
 
 - Docker Desktop en ejecución

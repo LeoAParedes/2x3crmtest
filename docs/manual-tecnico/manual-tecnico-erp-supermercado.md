@@ -1,4 +1,19 @@
-# Manual Tecnico - ERP Supermercado 2x3crmtest
+# Manual técnico — ERP Supermercado 2x3crmtest
+
+| Campo | Valor |
+|-------|--------|
+| **Título** | Manual técnico — ERP 2x3crmtest |
+| **Producto** | `2x3crmtest` / 2x3 Operaciones |
+| **Versión del software** | `1.0.0` |
+| **Versión del documento** | `1.0.0-MT` |
+| **Fecha** | 2026-08-11 |
+| **ID** | `DOC-MT-001` |
+| **Audiencia** | Desarrolladores, DevOps y personal de soporte técnico |
+| **Índice KB** | [`docs/README.md`](../README.md) |
+| **Control documental** | [`docs/calidad/control-configuracion-documental.md`](../calidad/control-configuracion-documental.md) |
+
+> Este manual es de **enfoque técnico** (arquitectura e integración).  
+> Para operación de tienda use el [manual de usuario](../manual-usuario/manual-usuario-erp-supermercado.md).
 
 ## 1) Arquitectura tecnica
 
