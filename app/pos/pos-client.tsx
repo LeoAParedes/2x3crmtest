@@ -1,10 +1,21 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 import { buildSaleTicketText, type TicketSale } from '@/src/lib/pos/ticket-format'
+
+const DESKTOP_VIEWPORT_QUERY = '(min-width: 1024px)'
+
+const subscribeDesktopViewport = (onStoreChange: () => void) => {
+  const mediaQuery = window.matchMedia(DESKTOP_VIEWPORT_QUERY)
+  mediaQuery.addEventListener('change', onStoreChange)
+  return () => mediaQuery.removeEventListener('change', onStoreChange)
+}
+
+const getDesktopViewportSnapshot = () => window.matchMedia(DESKTOP_VIEWPORT_QUERY).matches
+const getDesktopViewportServerSnapshot = () => false
 
 type Product = {
   id: string
@@ -207,10 +218,20 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const [message, setMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [draftLoaded, setDraftLoaded] = useState(false)
-  const [isCartPanelOpen, setIsCartPanelOpen] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.matchMedia('(min-width: 1024px)').matches
-  })
+  // SSR-safe desktop default via useSyncExternalStore (avoids React #418 hydration mismatch).
+  const isDesktopViewport = useSyncExternalStore(
+    subscribeDesktopViewport,
+    getDesktopViewportSnapshot,
+    getDesktopViewportServerSnapshot
+  )
+  const [cartPanelUserOverride, setCartPanelUserOverride] = useState<boolean | null>(null)
+  const isCartPanelOpen = cartPanelUserOverride ?? isDesktopViewport
+
+  useEffect(() => {
+    // #region agent log
+    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'post-fix-418',hypothesisId:'H3',location:'pos-client.tsx:cartPanelMount',message:'cart panel open via sync external store',data:{isDesktopViewport,cartPanelUserOverride,isCartPanelOpen},timestamp:Date.now()})}).catch(()=>{})
+    // #endregion
+  }, [cartPanelUserOverride, isCartPanelOpen, isDesktopViewport])
 
   const subtotal = useMemo(
     () =>
@@ -551,18 +572,18 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
 
   const handleSetCartPanelOpen = (nextOpen: boolean) => {
     if (!nextOpen) {
-      setIsCartPanelOpen(false)
+      setCartPanelUserOverride(false)
       clearOpenCartParam()
       return
     }
-    setIsCartPanelOpen(true)
+    setCartPanelUserOverride(true)
   }
 
   useEffect(() => {
     if (!isCartPanelVisible) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setIsCartPanelOpen(false)
+        setCartPanelUserOverride(false)
         if (shouldOpenCartFromUrl) {
           const cleanedSearchParams = new URLSearchParams(searchParams.toString())
           cleanedSearchParams.delete('openCart')
@@ -591,19 +612,31 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     }
   }, [isTicketModalOpen])
 
+  // #region agent log
+  useEffect(() => {
+    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'449600'},body:JSON.stringify({sessionId:'449600',runId:'cart-compact',hypothesisId:'H1-H3',location:'pos-client.tsx:cartPanelContent',message:'cart panel render density',data:{layout:'compact-row',cartLines:cart.length,controlHeight:32,itemPadding:8,panelGap:8},timestamp:Date.now()})}).catch(()=>{})
+  }, [cart.length])
+  // #endregion
+
   const cartPanelContent = (
     <>
-      <div className='space-y-3'>
+      <div className='space-y-2'>
         {cart.map((item, index) => {
           const minQuantity = quantityMinByMode[item.unitMode]
           const currentQuantity = parseQuantityInputValue(item)
           const canDecreaseQuantity = currentQuantity > minQuantity
+          const lineTotal = formatMxnCurrency(item.unitPrice * quantityToDisplay(item))
 
           return (
-            <div key={`${item.inventoryItemId}-${item.unitMode}-${index}`} className='rounded-xl border border-slate-200 p-3'>
-              <p className='text-sm font-medium text-slate-900'>{item.productName}</p>
-              <p className='text-xs text-slate-500'>{item.sku}</p>
-              <div className='mt-2 flex w-full flex-col gap-2'>
+            <div key={`${item.inventoryItemId}-${item.unitMode}-${index}`} className='rounded-lg border border-slate-200 p-2'>
+              <div className='flex items-start justify-between gap-2'>
+                <div className='min-w-0'>
+                  <p className='truncate text-sm font-medium leading-tight text-slate-900'>{item.productName}</p>
+                  <p className='text-[11px] leading-tight text-slate-500'>{item.sku}</p>
+                </div>
+                <p className='shrink-0 text-sm font-semibold tabular-nums text-slate-900'>{lineTotal}</p>
+              </div>
+              <div className='mt-1.5 flex w-full items-center gap-1.5'>
                 <select
                   value={item.unitMode}
                   onChange={event => {
@@ -617,7 +650,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                   }}
                   aria-label={`Modo de venta para ${item.productName}`}
                   disabled={item.supportsWeight}
-                  className='h-10 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500'
+                  className='h-8 w-12 shrink-0 rounded-md border border-slate-300 bg-white px-1 text-xs outline-none focus:border-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500'
                 >
                   {item.supportsWeight ? (
                     <option value='weight'>kg</option>
@@ -628,73 +661,68 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                     </>
                   )}
                 </select>
-
-                <div className='flex w-full items-stretch gap-2'>
-                  <button
-                    type='button'
-                    onClick={() => handleAdjustCartQuantity(index, -1)}
-                    aria-label={`Disminuir cantidad de ${item.productName}`}
-                    disabled={!canDecreaseQuantity}
-                    className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-base font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300'
-                  >
-                    -
-                  </button>
-                  <input
-                    value={item.quantityInput}
-                    onChange={event => handleUpdateCartItem(index, { quantityInput: event.target.value })}
-                    onBlur={event => {
-                      const draftItem = { ...item, quantityInput: event.currentTarget.value }
-                      handleUpdateCartItem(index, { quantityInput: normalizeQuantityInput(draftItem) })
-                    }}
-                    onKeyDown={event => {
-                      if (event.key === 'ArrowUp') {
-                        event.preventDefault()
-                        handleAdjustCartQuantity(index, 1)
-                      }
-                      if (event.key === 'ArrowDown') {
-                        event.preventDefault()
-                        handleAdjustCartQuantity(index, -1)
-                      }
-                    }}
-                    inputMode={item.unitMode === 'weight' ? 'decimal' : 'numeric'}
-                    pattern={item.unitMode === 'weight' ? '^[0-9]*[\\.,]?[0-9]*$' : '^[0-9]*$'}
-                    placeholder={item.unitMode === 'weight' ? '0.75' : '1'}
-                    aria-label={`Cantidad de ${item.productName}`}
-                    className='h-10 min-w-[6rem] flex-1 rounded-lg border border-slate-300 bg-white px-3 text-center text-base font-medium text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100'
-                  />
-                  <button
-                    type='button'
-                    onClick={() => handleAdjustCartQuantity(index, 1)}
-                    aria-label={`Aumentar cantidad de ${item.productName}`}
-                    className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-base font-semibold text-slate-700 hover:bg-slate-50'
-                  >
-                    +
-                  </button>
-                </div>
-
+                <button
+                  type='button'
+                  onClick={() => handleAdjustCartQuantity(index, -1)}
+                  aria-label={`Disminuir cantidad de ${item.productName}`}
+                  disabled={!canDecreaseQuantity}
+                  className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300'
+                >
+                  -
+                </button>
+                <input
+                  value={item.quantityInput}
+                  onChange={event => handleUpdateCartItem(index, { quantityInput: event.target.value })}
+                  onBlur={event => {
+                    const draftItem = { ...item, quantityInput: event.currentTarget.value }
+                    handleUpdateCartItem(index, { quantityInput: normalizeQuantityInput(draftItem) })
+                  }}
+                  onKeyDown={event => {
+                    if (event.key === 'ArrowUp') {
+                      event.preventDefault()
+                      handleAdjustCartQuantity(index, 1)
+                    }
+                    if (event.key === 'ArrowDown') {
+                      event.preventDefault()
+                      handleAdjustCartQuantity(index, -1)
+                    }
+                  }}
+                  inputMode={item.unitMode === 'weight' ? 'decimal' : 'numeric'}
+                  pattern={item.unitMode === 'weight' ? '^[0-9]*[\\.,]?[0-9]*$' : '^[0-9]*$'}
+                  placeholder={item.unitMode === 'weight' ? '0.75' : '1'}
+                  aria-label={`Cantidad de ${item.productName}`}
+                  className='h-8 min-w-[4.5rem] flex-1 rounded-md border border-slate-300 bg-white px-2 text-center text-sm font-medium tabular-nums text-slate-900 outline-none focus:border-emerald-500'
+                />
+                <button
+                  type='button'
+                  onClick={() => handleAdjustCartQuantity(index, 1)}
+                  aria-label={`Aumentar cantidad de ${item.productName}`}
+                  className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-300 text-sm font-semibold text-slate-700 hover:bg-slate-50'
+                >
+                  +
+                </button>
                 <button
                   type='button'
                   onClick={() => handleRemoveCartItem(index)}
                   aria-label={`Eliminar del carrito ${item.productName}`}
-                  className='flex h-10 w-10 items-center justify-center rounded-lg border border-rose-300 text-xl font-semibold leading-none text-rose-600 hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200'
+                  className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-300 text-base font-semibold leading-none text-rose-600 hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200'
                 >
                   <span aria-hidden='true'>−</span>
                 </button>
               </div>
-              <p className='mt-2 text-xs text-slate-600'>Subtotal línea: {formatMxnCurrency(item.unitPrice * quantityToDisplay(item))}</p>
             </div>
           )
         })}
         {!cart.length ? <p className='text-sm text-slate-500'>Sin productos en carrito</p> : null}
       </div>
 
-      <div className='rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700'>
-        <p>Subtotal: {formatMxnCurrency(subtotal)}</p>
-        <p>Impuesto: {formatMxnCurrency(tax)}</p>
-        <p className='font-semibold text-slate-900'>Total: {formatMxnCurrency(total)}</p>
+      <div className='rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm leading-5 text-slate-700'>
+        <div className='flex justify-between gap-2'><span>Subtotal</span><span className='tabular-nums'>{formatMxnCurrency(subtotal)}</span></div>
+        <div className='flex justify-between gap-2'><span>Impuesto</span><span className='tabular-nums'>{formatMxnCurrency(tax)}</span></div>
+        <div className='flex justify-between gap-2 font-semibold text-slate-900'><span>Total</span><span className='tabular-nums'>{formatMxnCurrency(total)}</span></div>
       </div>
 
-      <div className='grid gap-2'>
+      <div className='grid gap-1.5'>
         <select
           value={paymentMethod}
           onChange={event => {
@@ -702,7 +730,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             setPaymentMethod(nextMethod)
             if (nextMethod === 'card') setAmountReceived('')
           }}
-          className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+          className='h-9 rounded-md border border-slate-300 px-2.5 text-sm'
         >
           <option value='cash'>Efectivo</option>
           <option value='card'>Tarjeta</option>
@@ -715,7 +743,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                 setAmountReceived(event.target.value)
               }}
               placeholder='Monto recibido'
-              className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+              className='h-9 rounded-md border border-slate-300 px-2.5 text-sm'
             />
             <p className={`text-sm ${change < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>Cambio: {formatMxnCurrency(change)}</p>
           </>
@@ -727,19 +755,19 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         onClick={() => void handleSubmitSale()}
         disabled={!canCheckout || submittingSale}
         aria-label='Cobrar venta'
-        className='h-11 w-full rounded-lg bg-emerald-600 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'
+        className='h-10 w-full rounded-md bg-emerald-600 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'
       >
         {submittingSale ? 'Procesando venta...' : 'Cobrar y emitir ticket'}
       </button>
 
       {message ? (
-        <p aria-live='polite' className='rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
+        <p aria-live='polite' className='rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-sm text-rose-700'>
           {message}
         </p>
       ) : null}
 
       {hasInvalidQuantities ? (
-        <p className='rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800'>
+        <p className='rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-sm text-amber-800'>
           Revisa cantidades: no se permiten valores vacíos, cero o negativos.
         </p>
       ) : null}
@@ -875,9 +903,9 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
 
         {isCartPanelVisible ? (
           <aside
-            className='hidden max-h-[calc(100vh-8rem)] space-y-4 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:block'
+            className='hidden max-h-[calc(100vh-8rem)] space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-sm lg:block'
           >
-            <h2 className='text-lg font-semibold text-slate-900'>Carrito y cobro</h2>
+            <h2 className='text-base font-semibold text-slate-900'>Carrito y cobro</h2>
             {cartPanelContent}
           </aside>
         ) : null}
@@ -888,13 +916,13 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         ) : null}
         <aside
           id={cartDrawerId}
-          className={`fixed right-0 top-0 z-50 h-full w-full max-w-sm space-y-4 overflow-y-auto border-l border-slate-200 bg-white p-5 shadow-xl transition-transform duration-200 lg:hidden ${
+          className={`fixed right-0 top-0 z-50 h-full w-full max-w-sm space-y-2 overflow-y-auto border-l border-slate-200 bg-white p-3 shadow-xl transition-transform duration-200 lg:hidden ${
             isCartPanelVisible ? 'translate-x-0' : 'translate-x-full'
           }`}
           aria-hidden={!isCartPanelVisible}
         >
-          <div className='mb-1 flex items-center justify-between'>
-            <h2 className='text-lg font-semibold text-slate-900'>Carrito y cobro</h2>
+          <div className='flex items-center justify-between'>
+            <h2 className='text-base font-semibold text-slate-900'>Carrito y cobro</h2>
             <button
               type='button'
               onClick={() => handleSetCartPanelOpen(false)}

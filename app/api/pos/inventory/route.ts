@@ -1,4 +1,4 @@
-import { jsonOk } from '@/src/lib/http/json-response'
+import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { compareLowStockUrgency } from '@/src/lib/inventory/low-stock'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
@@ -80,28 +80,108 @@ export async function GET(request: Request) {
 
   const where = archiveWhere && queryWhere ? { AND: [archiveWhere, queryWhere] } : archiveWhere || queryWhere
 
-  const prisma = await getPrisma()
-  await applyDueScheduledPrices(prisma)
+  try {
+    const prisma = await getPrisma()
+    await applyDueScheduledPrices(prisma)
 
-  if (alertsOnly) {
-    const alertCandidates = await prisma.inventoryItem.findMany({
-      where: archiveWhere,
-      select: {
-        id: true,
-        sku: true,
-        productName: true,
-        category: true,
-        stock: true,
-        minStock: true,
-        unitPrice: true,
-        aisle: true
-      }
+    if (alertsOnly) {
+      const alertCandidates = await prisma.inventoryItem.findMany({
+        where: archiveWhere,
+        select: {
+          id: true,
+          sku: true,
+          productName: true,
+          category: true,
+          stock: true,
+          minStock: true,
+          unitPrice: true,
+          aisle: true
+        }
+      })
+      const alertItems = alertCandidates
+        .filter(item => item.stock <= item.minStock)
+        .sort(compareLowStockUrgency)
+        .slice(0, 50)
+        .map(item => ({
+          id: item.id,
+          sku: item.sku,
+          productName: item.productName,
+          category: item.category,
+          stock: item.stock,
+          minStock: item.minStock,
+          unitPrice: Number(item.unitPrice),
+          aisle: item.aisle,
+          supportsWeight: inferWeightSupport(item.category, item.aisle)
+        }))
+
+      // #region agent log
+      logInventoryPaginationDebug(runId, 'H1', 'alertsOnly success', {
+        alertsOnly: true,
+        alertCount: alertItems.length
+      })
+      // #endregion
+
+      return jsonOk({
+        success: true,
+        alertsOnly: true,
+        pagination: {
+          page: 1,
+          pageSize: alertItems.length,
+          total: alertItems.length,
+          totalPages: 1
+        },
+        items: alertItems
+      })
+    }
+
+    const [total, items] = await Promise.all([
+      prisma.inventoryItem.count({ where }),
+      prisma.inventoryItem.findMany({
+        where,
+        orderBy: { [orderField]: sortDirection },
+        skip,
+        take: pageSize
+      })
+    ])
+    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    const requestedPageExceedsRange = page > totalPages
+    // #region agent log
+    console.info('[H3] inventory pagination response', {
+      runId,
+      query,
+      sortBy,
+      sortDirection,
+      page,
+      pageSize,
+      includeArchived,
+      total,
+      totalPages,
+      returnedItems: items.length,
+      requestedPageExceedsRange
     })
-    const alertItems = alertCandidates
-      .filter(item => item.stock <= item.minStock)
-      .sort(compareLowStockUrgency)
-      .slice(0, 50)
-      .map(item => ({
+    // #endregion
+    logInventoryPaginationDebug(runId, 'H1', 'inventory pagination response', {
+      query: query || null,
+      sortBy,
+      sortDirection,
+      page,
+      pageSize,
+      total,
+      totalPages,
+      returnedItems: items.length,
+      requestedPageExceedsRange,
+      hasMinStock: items.every(item => typeof item.minStock === 'number')
+    })
+
+    return jsonOk({
+      success: true,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages
+      },
+      items: items.map(item => ({
         id: item.id,
         sku: item.sku,
         productName: item.productName,
@@ -112,76 +192,19 @@ export async function GET(request: Request) {
         aisle: item.aisle,
         supportsWeight: inferWeightSupport(item.category, item.aisle)
       }))
-
-    return jsonOk({
-      success: true,
-      alertsOnly: true,
-      pagination: {
-        page: 1,
-        pageSize: alertItems.length,
-        total: alertItems.length,
-        totalPages: 1
-      },
-      items: alertItems
     })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'inventory query failed'
+    const code =
+      error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
+    // #region agent log
+    logInventoryPaginationDebug(runId, 'H1', 'inventory query failed', {
+      alertsOnly,
+      message: message.slice(0, 240),
+      code,
+      mentionsMinStock: /minStock/i.test(message)
+    })
+    // #endregion
+    return jsonError('No fue posible cargar inventario', 500, { code, message: message.slice(0, 240) })
   }
-
-  const [total, items] = await Promise.all([
-    prisma.inventoryItem.count({ where }),
-    prisma.inventoryItem.findMany({
-      where,
-      orderBy: { [orderField]: sortDirection },
-      skip,
-      take: pageSize
-    })
-  ])
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  const requestedPageExceedsRange = page > totalPages
-  // #region agent log
-  console.info('[H3] inventory pagination response', {
-    runId,
-    query,
-    sortBy,
-    sortDirection,
-    page,
-    pageSize,
-    includeArchived,
-    total,
-    totalPages,
-    returnedItems: items.length,
-    requestedPageExceedsRange
-  })
-  // #endregion
-  logInventoryPaginationDebug(runId, 'H3', 'inventory pagination response', {
-    query: query || null,
-    sortBy,
-    sortDirection,
-    page,
-    pageSize,
-    total,
-    totalPages,
-    returnedItems: items.length,
-    requestedPageExceedsRange
-  })
-
-  return jsonOk({
-    success: true,
-    pagination: {
-      page,
-      pageSize,
-      total,
-      totalPages
-    },
-    items: items.map(item => ({
-      id: item.id,
-      sku: item.sku,
-      productName: item.productName,
-      category: item.category,
-      stock: item.stock,
-      minStock: item.minStock,
-      unitPrice: Number(item.unitPrice),
-      aisle: item.aisle,
-      supportsWeight: inferWeightSupport(item.category, item.aisle)
-    }))
-  })
 }
