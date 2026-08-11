@@ -110,21 +110,53 @@ export const listActiveLots = async (inventoryItemId?: string) => {
 
 export const listExpiryAlerts = async () => {
   const lots = await listActiveLots()
-  return lots.filter(lot => lot.alertKind !== null && !isArchivedInventoryItem(lot))
+  return lots.filter(
+    lot =>
+      lot.alertKind !== null &&
+      !isArchivedInventoryItem({ sku: lot.sku, productName: lot.productName })
+  )
 }
 
-/** Heal leftover active lots attached to already-archived catalog rows. */
-export const closeLotsForArchivedItems = async () => {
+const archivedInventoryItemWhere = {
+  OR: [
+    { aisle: ARCHIVED_AISLE },
+    { sku: { contains: 'archived', mode: 'insensitive' as const } },
+    { productName: { contains: 'Archivado', mode: 'insensitive' as const } }
+  ]
+}
+
+/** Normalize archived markers and close leftover lots so alerts stay clean. */
+export const repairAndSuppressArchivedInventoryAlerts = async () => {
   const prisma = await getPrisma()
+  const candidates = await prisma.inventoryItem.findMany({
+    where: archivedInventoryItemWhere,
+    select: { id: true, aisle: true, stock: true, sku: true, productName: true },
+    take: 5000
+  })
+
+  const archivedIds = candidates
+    .filter(item => isArchivedInventoryItem(item))
+    .map(item => item.id)
+
+  if (archivedIds.length === 0) return
+
+  const needsStockOrAisleFix = candidates.filter(
+    item =>
+      archivedIds.includes(item.id) &&
+      (item.aisle !== ARCHIVED_AISLE || item.stock !== 0)
+  )
+
+  if (needsStockOrAisleFix.length > 0) {
+    await prisma.inventoryItem.updateMany({
+      where: { id: { in: needsStockOrAisleFix.map(item => item.id) } },
+      data: { aisle: ARCHIVED_AISLE, stock: 0 }
+    })
+  }
+
   await prisma.inventoryLot.updateMany({
     where: {
-      status: 'active',
-      quantityRemaining: { gt: 0 },
-      OR: [
-        { inventoryItem: { aisle: ARCHIVED_AISLE } },
-        { inventoryItem: { sku: { contains: '-archived-' } } },
-        { inventoryItem: { productName: { contains: '[Archivado]' } } }
-      ]
+      inventoryItemId: { in: archivedIds },
+      OR: [{ status: 'active' }, { quantityRemaining: { gt: 0 } }]
     },
     data: {
       quantityRemaining: 0,
@@ -133,15 +165,19 @@ export const closeLotsForArchivedItems = async () => {
   })
 }
 
+/** Heal leftover active lots attached to already-archived catalog rows. */
+export const closeLotsForArchivedItems = async () => {
+  await repairAndSuppressArchivedInventoryAlerts()
+}
+
 export const listUnifiedWorkspaceAlerts = async () => {
-  await closeLotsForArchivedItems()
+  await repairAndSuppressArchivedInventoryAlerts()
   const prisma = await getPrisma()
   const [expiryAlerts, inventoryRows] = await Promise.all([
     listExpiryAlerts(),
     prisma.inventoryItem.findMany({
-      where: activeInventoryItemWhere,
       select: { id: true, sku: true, productName: true, stock: true, minStock: true, aisle: true },
-      take: 2000
+      take: 3000
     })
   ])
 
@@ -160,7 +196,7 @@ export const listUnifiedWorkspaceAlerts = async () => {
     }))
 
   const expiry = expiryAlerts
-    .filter(lot => !isArchivedInventoryItem(lot))
+    .filter(lot => !isArchivedInventoryItem({ sku: lot.sku, productName: lot.productName }))
     .map(lot => ({
       kind: lot.alertKind === 'expired' ? ('expired' as const) : ('expiring' as const),
       id: lot.id,

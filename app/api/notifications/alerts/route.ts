@@ -8,7 +8,15 @@ export async function GET(request: Request) {
 
   try {
     const alerts = await listUnifiedWorkspaceAlerts()
-    return jsonOk({ success: true, ...alerts })
+    return jsonOk(
+      { success: true, ...alerts },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          Pragma: 'no-cache'
+        }
+      }
+    )
   } catch (error) {
     return jsonError(error instanceof Error ? error.message : 'ALERTS_FAILED', 500)
   }

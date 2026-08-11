@@ -1424,7 +1424,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           >
                             <p className='text-sm font-medium text-slate-900'>{item.productName}</p>
                             <p className='text-xs text-slate-600'>
-                              SKU {item.sku} · Stock {formatStockQuantityLabel(item.stock, item.supportsWeight)} / umbral{' '}
+                              SKU {item.sku} · Stock {formatStockQuantityLabel(item.stock, item.supportsWeight)} / Mínimo{' '}
                               {formatStockQuantityLabel(item.minStock, item.supportsWeight)}
                             </p>
                           </li>
@@ -1570,7 +1570,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <p className='text-xs text-slate-500'>{item.category}</p>
                         {isLowStockItem(item) ? (
                           <p className='mt-1 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-800'>
-                            Stock bajo (umbral {formatStockQuantityLabel(item.minStock, item.supportsWeight)})
+                            Stock bajo (Mínimo {formatStockQuantityLabel(item.minStock, item.supportsWeight)})
                           </p>
                         ) : null}
                         {item.aisle === '__archived__' ? (
@@ -1824,7 +1824,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           <p className='text-slate-500'>{item.category}</p>
                           {isLowStockItem(item) ? (
                             <p className='mt-1 text-[11px] font-medium text-orange-700'>
-                              Stock bajo · umbral {formatStockQuantityLabel(item.minStock, item.supportsWeight)}
+                              Stock bajo · Mínimo {formatStockQuantityLabel(item.minStock, item.supportsWeight)}
                             </p>
                           ) : null}
                         </td>

@@ -374,7 +374,8 @@ export const getSaleTicket = async (saleId: string, actor: AuthenticatedActor): 
           inventoryItem: {
             select: {
               category: true,
-              aisle: true
+              aisle: true,
+              productName: true
             }
           }
         }

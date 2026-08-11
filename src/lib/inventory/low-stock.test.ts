@@ -11,7 +11,9 @@ import {
 describe('archived inventory alerts', () => {
   it('detects archived aisle, sku suffix, and name marker', () => {
     expect(isArchivedInventoryItem({ aisle: '__archived__' })).toBe(true)
+    expect(isArchivedInventoryItem({ aisle: ' __ARCHIVED__ ' })).toBe(true)
     expect(isArchivedInventoryItem({ aisle: 'A1', sku: 'ABA-007-archived-20260810' })).toBe(true)
+    expect(isArchivedInventoryItem({ aisle: null, sku: 'X-ARCHIVED-1' })).toBe(true)
     expect(
       isArchivedInventoryItem({ aisle: null, productName: 'Aceite de oliva 500 ml [Archivado]' })
     ).toBe(true)

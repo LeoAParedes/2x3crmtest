@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
+import { isArchivedInventoryItem } from '@/src/lib/inventory/low-stock'
 
 type LowStockAlert = {
   kind: 'low_stock'
@@ -34,6 +35,20 @@ type AlertsPayload = {
   message?: string
 }
 
+const sanitizeAlerts = (payload: AlertsPayload) => {
+  const lowStock = (payload.lowStock || []).filter(
+    item => !isArchivedInventoryItem({ sku: item.sku, productName: item.productName })
+  )
+  const expiry = (payload.expiry || []).filter(
+    item => !isArchivedInventoryItem({ sku: item.sku, productName: item.productName })
+  )
+  return {
+    lowStock,
+    expiry,
+    totalCount: lowStock.length + expiry.length
+  }
+}
+
 export const WorkspaceAlertsBell = () => {
   const [open, setOpen] = useState(false)
   const [totalCount, setTotalCount] = useState(0)
@@ -42,14 +57,18 @@ export const WorkspaceAlertsBell = () => {
   const mountedRef = useRef(false)
 
   const applyAlerts = useCallback((payload: AlertsPayload) => {
-    setTotalCount(payload.totalCount || 0)
-    setLowStock(payload.lowStock || [])
-    setExpiry(payload.expiry || [])
+    const sanitized = sanitizeAlerts(payload)
+    setTotalCount(sanitized.totalCount)
+    setLowStock(sanitized.lowStock)
+    setExpiry(sanitized.expiry)
   }, [])
 
   const loadAlerts = useCallback(async () => {
     try {
-      const response = await fetch('/api/notifications/alerts')
+      const response = await fetch('/api/notifications/alerts', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' }
+      })
       const payload = (await response.json()) as AlertsPayload
       if (!response.ok || !payload.success) return
       applyAlerts(payload)

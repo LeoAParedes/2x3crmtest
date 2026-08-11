@@ -32,30 +32,37 @@ type OperationsClientProps = {
   role: CrmRole
 }
 
-const quickCards = [
+type QuickCard = {
+  href: string
+  title: string
+  description: string
+  roles: readonly CrmRole[]
+}
+
+const quickCards: QuickCard[] = [
   {
     href: '/pos',
     title: 'Abrir punto de venta',
     description: 'Inicia cobros, tickets y cierre de caja.',
-    roles: ['admin', 'cashier'] as const
+    roles: ['admin', 'cashier']
   },
   {
     href: '/bitacora',
     title: 'Revisar bitácora',
     description: 'Audita operaciones del sistema por tipo y estado.',
-    roles: ['admin', 'cashier'] as const
+    roles: ['admin', 'cashier']
   },
   {
     href: '/inventario?shortcut=ajuste',
     title: 'Registrar ajuste rápido',
     description: 'Corrige diferencias de stock en caliente.',
-    roles: ['admin'] as const
+    roles: ['admin']
   },
   {
     href: '/finanzas',
     title: 'Control de finanzas',
     description: 'Visualiza saldos, cobranza y pendientes.',
-    roles: ['admin'] as const
+    roles: ['admin']
   }
 ]
 

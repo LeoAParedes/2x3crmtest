@@ -10,24 +10,27 @@ export type LowStockComparable = {
 
 export const DEFAULT_MIN_STOCK = 20
 
-/** Soft-deleted catalog rows: aisle marker, renamed SKU, or [Archivado] label. */
+/** Soft-deleted catalog rows: aisle marker, renamed SKU, or Archivado label. */
 export const isArchivedInventoryItem = (item: {
   aisle?: string | null
   sku?: string | null
   productName?: string | null
 }) => {
-  if (item.aisle === ARCHIVED_AISLE) return true
-  if (typeof item.sku === 'string' && /-archived-/i.test(item.sku)) return true
-  if (typeof item.productName === 'string' && /\[archivado\]/i.test(item.productName)) return true
+  const aisle = typeof item.aisle === 'string' ? item.aisle.trim().toLowerCase() : ''
+  if (aisle === ARCHIVED_AISLE || aisle.includes('archived')) return true
+  if (typeof item.sku === 'string' && /archived/i.test(item.sku)) return true
+  if (typeof item.productName === 'string' && /archivado/i.test(item.productName)) return true
   return false
 }
 
-/** Prisma filter for non-archived InventoryItem rows. */
+/** Prisma filter for non-archived InventoryItem rows (best-effort; always re-check in JS). */
 export const activeInventoryItemWhere = {
   AND: [
-    { OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }] },
-    { NOT: { sku: { contains: '-archived-' } } },
-    { NOT: { productName: { contains: '[Archivado]' } } }
+    {
+      OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
+    },
+    { NOT: { sku: { contains: 'archived', mode: 'insensitive' as const } } },
+    { NOT: { productName: { contains: 'Archivado', mode: 'insensitive' as const } } }
   ]
 }
 
