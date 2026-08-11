@@ -158,6 +158,6 @@ Configuración operativa en `MastraSettings` y herramientas en el código AI del
 
 ---
 
-## Documento ejecutivo
+## Resumen ejecutivo (negocio)
 
-Resumen de 1–2 páginas (qué hace el sistema y qué sigue): [`resumen-ejecutivo.pdf`](./resumen-ejecutivo.pdf)
+Visión de producto y siguiente etapa — **sin** runbook técnico: [`resumen-ejecutivo.pdf`](./resumen-ejecutivo.pdf)
