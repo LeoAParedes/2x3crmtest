@@ -1,7 +1,7 @@
 import { ZodError } from 'zod'
 
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
-import { createSale, listSales } from '@/src/lib/pos/sale-service'
+import { createSale, InsufficientStockError, listSales } from '@/src/lib/pos/sale-service'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
 export async function GET(request: Request) {
@@ -31,10 +31,17 @@ export async function POST(request: Request) {
         requestId: access.context.requestId
       })
     }
+    if (error instanceof InsufficientStockError) {
+      const skuSuffix = error.skus.length > 0 ? ` (${error.skus.join(', ')})` : ''
+      return jsonError(`Stock insuficiente para uno o más productos del carrito${skuSuffix}`, 409, {
+        code: 'INSUFFICIENT_STOCK',
+        skus: error.skus,
+        requestId: access.context.requestId
+      })
+    }
     const code = error instanceof Error ? error.message : 'SALE_CREATE_FAILED'
-    const status = ['INSUFFICIENT_STOCK', 'INSUFFICIENT_PAYMENT'].includes(code) ? 409 : 503
+    const status = code === 'INSUFFICIENT_PAYMENT' ? 409 : 503
     const messageByCode: Record<string, string> = {
-      INSUFFICIENT_STOCK: 'Stock insuficiente para uno o más productos del carrito',
       INSUFFICIENT_PAYMENT: 'El monto recibido es insuficiente para el total de la venta',
       INVENTORY_ITEM_NOT_FOUND: 'Uno o más productos del carrito ya no están disponibles'
     }

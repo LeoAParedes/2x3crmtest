@@ -2,6 +2,8 @@ import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { compareLowStockUrgency } from '@/src/lib/inventory/low-stock'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
+import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
+import { ensureCanonicalWeightStocks } from '@/src/lib/inventory/normalize-weight-stock'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
 const sortFieldMap = {
@@ -11,13 +13,6 @@ const sortFieldMap = {
   stock: 'stock',
   unitPrice: 'unitPrice'
 } as const
-
-const inferWeightSupport = (category: string, aisle: string | null) => {
-  const fingerprint = `${category} ${aisle || ''}`.toLowerCase()
-  return /(granel|peso|kg|fruta|verdura|vegetal|carn|res|pollo|cerdo|pesc|marisc|legumbr|ra[ií]z|tub[eé]rc)/.test(
-    fingerprint
-  )
-}
 
 const logInventoryPaginationDebug = (runId: string, hypothesisId: string, message: string, data: Record<string, unknown>) => {
   // #region agent log
@@ -83,6 +78,11 @@ export async function GET(request: Request) {
   try {
     const prisma = await getPrisma()
     await applyDueScheduledPrices(prisma)
+    await ensureCanonicalWeightStocks(prisma, {
+      userId: access.context.actor.userId,
+      username: access.context.actor.username,
+      role: access.context.actor.role
+    })
 
     if (alertsOnly) {
       const alertCandidates = await prisma.inventoryItem.findMany({

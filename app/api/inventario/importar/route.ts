@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { getPrisma } from '@/src/lib/db/prisma'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
+import { isGramUnit, isKilogramUnit, stockQuantityFromCsvUnit } from '@/src/lib/inventory/weight-units'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
 const importPayloadSchema = z.object({
@@ -42,7 +43,6 @@ const parseNumber = (value: string) => Number(value.replace(',', '.').trim())
 
 const spanishHeaders = ['sku', 'producto', 'categoria', 'unidad', 'precio', 'stock'] as const
 const legacyHeaders = ['sku', 'productName', 'category', 'stock', 'unitPrice'] as const
-const weightedUnitValues = new Set(['kg', 'g', 'gramo', 'gramos'])
 
 type HeaderConfig = {
   sku: string
@@ -84,12 +84,7 @@ const resolveHeaderConfig = (header: string[]): HeaderConfig => {
 
 const buildAisleHint = (unitRaw: string, aisleRaw: string) => {
   if (aisleRaw) return aisleRaw
-
-  const normalizedUnit = unitRaw.trim().toLowerCase()
-  if (weightedUnitValues.has(normalizedUnit)) {
-    return 'Granel (kg)'
-  }
-
+  if (isKilogramUnit(unitRaw) || isGramUnit(unitRaw)) return 'Granel (kg)'
   return null
 }
 
@@ -168,7 +163,7 @@ export const parseCsvRows = (csv: string) => {
       sku,
       productName,
       category,
-      stock: Math.round(stock),
+      stock: stockQuantityFromCsvUnit(stock, unitRaw),
       unitPrice: Number(unitPrice.toFixed(2)),
       aisle: buildAisleHint(unitRaw, aisleRaw)
     })

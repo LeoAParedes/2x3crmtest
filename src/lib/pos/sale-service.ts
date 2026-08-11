@@ -9,6 +9,8 @@ import {
 } from '@/src/lib/pos/sale-schema'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
+import { ensureCanonicalWeightStocks } from '@/src/lib/inventory/normalize-weight-stock'
+import { hasSufficientStock, inferWeightSupport } from '@/src/lib/inventory/weight-units'
 
 export const normalizeSaleItems = (items: CreateSaleInput['items']) => {
   const quantities = new Map<string, { inventoryItemId: string; quantity: number; unitMode: 'piece' | 'weight' }>()
@@ -40,19 +42,69 @@ const calculateChangeDue = (paymentMethod: CreateSaleInput['paymentMethod'], tot
   return Number((normalizedAmountReceived - total).toFixed(2))
 }
 
+export class InsufficientStockError extends Error {
+  readonly code = 'INSUFFICIENT_STOCK'
+  readonly skus: string[]
+
+  constructor(skus: string[]) {
+    const uniqueSkus = [...new Set(skus.filter(Boolean))]
+    const skuSuffix = uniqueSkus.length > 0 ? ` (${uniqueSkus.join(', ')})` : ''
+    super(`INSUFFICIENT_STOCK${skuSuffix}`)
+    this.name = 'InsufficientStockError'
+    this.skus = uniqueSkus
+  }
+}
+
+export const assertStockAvailability = (
+  items: Array<{ inventoryItemId: string; quantity: number; unitMode: 'piece' | 'weight' }>,
+  inventory: Array<{ id: string; sku: string; stock: number; category: string; aisle: string | null }>
+) => {
+  const missingSkus: string[] = []
+  for (const item of items) {
+    const product = inventory.find(candidate => candidate.id === item.inventoryItemId)
+    if (!product) {
+      missingSkus.push(item.inventoryItemId)
+      continue
+    }
+    if (!hasSufficientStock(product.stock, item.quantity)) {
+      missingSkus.push(product.sku)
+    }
+  }
+  if (missingSkus.length > 0) {
+    throw new InsufficientStockError(missingSkus)
+  }
+}
+
 export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) => {
   const input = createSaleSchema.parse(rawInput)
   const items = normalizeSaleItems(input.items)
   const prisma = await getPrisma()
   await applyDueScheduledPrices(prisma)
+  await ensureCanonicalWeightStocks(prisma, {
+    userId: actor.userId,
+    username: actor.username,
+    role: actor.role
+  })
 
   return prisma.$transaction(async transaction => {
+    const uniqueIds = [...new Set(items.map(item => item.inventoryItemId))]
     const inventory = await transaction.inventoryItem.findMany({
-      where: { id: { in: items.map(item => item.inventoryItemId) } }
+      where: { id: { in: uniqueIds } }
     })
-    if (inventory.length !== items.length) {
+    if (inventory.length !== uniqueIds.length) {
       throw new Error('INVENTORY_ITEM_NOT_FOUND')
     }
+
+    for (const item of items) {
+      const product = inventory.find(candidate => candidate.id === item.inventoryItemId)
+      if (!product) throw new Error('INVENTORY_ITEM_NOT_FOUND')
+      const supportsWeight = inferWeightSupport(product.category, product.aisle)
+      if (item.unitMode === 'weight' && !supportsWeight) {
+        throw new Error('INVENTORY_ITEM_NOT_FOUND')
+      }
+    }
+
+    assertStockAvailability(items, inventory)
 
     const lines = items.map(item => {
       const product = inventory.find(candidate => candidate.id === item.inventoryItemId)
@@ -69,6 +121,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
     validateCashPayment(input.paymentMethod, totals.total, input.amountReceived)
 
     for (const item of items) {
+      const product = inventory.find(candidate => candidate.id === item.inventoryItemId)
       const updated = await transaction.inventoryItem.updateMany({
         where: {
           id: item.inventoryItemId,
@@ -77,7 +130,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         data: { stock: { decrement: item.quantity } }
       })
       if (updated.count !== 1) {
-        throw new Error('INSUFFICIENT_STOCK')
+        throw new InsufficientStockError(product ? [product.sku] : [])
       }
     }
 

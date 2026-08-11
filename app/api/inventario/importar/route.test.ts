@@ -15,7 +15,7 @@ FRV-001,Tomate saladet,Frutas y Verduras,kg,28.50,120`
         sku: 'FRV-001',
         productName: 'Tomate saladet',
         category: 'Frutas y Verduras',
-        stock: 120,
+        stock: 120_000,
         unitPrice: 28.5,
         aisle: 'Granel (kg)'
       }

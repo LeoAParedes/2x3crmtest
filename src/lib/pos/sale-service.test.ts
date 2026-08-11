@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
+import { toCanonicalWeightStock } from '@/src/lib/inventory/weight-units'
 import { calculateSaleTotals } from '@/src/lib/pos/sale-schema'
-import { normalizeSaleItems, validateCashPayment } from '@/src/lib/pos/sale-service'
+import {
+  assertStockAvailability,
+  InsufficientStockError,
+  normalizeSaleItems,
+  validateCashPayment
+} from '@/src/lib/pos/sale-service'
 
 describe('sale service rules', () => {
   it('merges duplicate products before decrementing stock', () => {
@@ -30,5 +36,35 @@ describe('sale service rules', () => {
     ])
     expect(totals.total).toBe(701)
     expect(() => validateCashPayment('cash', totals.total, 702)).not.toThrow()
+  })
+
+  it('allows weight sales when gram stock covers requested kilograms', () => {
+    const stockGrams = toCanonicalWeightStock(5)
+    expect(() =>
+      assertStockAvailability(
+        [{ inventoryItemId: 'avo', quantity: 2500, unitMode: 'weight' }],
+        [{ id: 'avo', sku: 'FRV-004', stock: stockGrams, category: 'Frutas y Verduras', aisle: 'Granel (kg)' }]
+      )
+    ).not.toThrow()
+  })
+
+  it('rejects weight sales that exceed available grams and includes SKU', () => {
+    const stockGrams = toCanonicalWeightStock(5)
+    expect(() =>
+      assertStockAvailability(
+        [{ inventoryItemId: 'avo', quantity: 6000, unitMode: 'weight' }],
+        [{ id: 'avo', sku: 'FRV-004', stock: stockGrams, category: 'Frutas y Verduras', aisle: 'Granel (kg)' }]
+      )
+    ).toThrow(InsufficientStockError)
+
+    try {
+      assertStockAvailability(
+        [{ inventoryItemId: 'avo', quantity: 6000, unitMode: 'weight' }],
+        [{ id: 'avo', sku: 'FRV-004', stock: stockGrams, category: 'Frutas y Verduras', aisle: 'Granel (kg)' }]
+      )
+    } catch (error) {
+      expect(error).toBeInstanceOf(InsufficientStockError)
+      expect((error as InsufficientStockError).skus).toEqual(['FRV-004'])
+    }
   })
 })

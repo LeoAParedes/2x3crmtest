@@ -11,8 +11,8 @@ const addProductSchema = z.object({
   sku: z.string().min(1).max(64),
   productName: z.string().min(1).max(160),
   category: z.string().min(1).max(80),
-  stock: z.number().int().min(0).max(1_000_000),
-  minStock: z.number().int().min(0).max(1_000_000).optional(),
+  stock: z.number().int().min(0).max(10_000_000),
+  minStock: z.number().int().min(0).max(10_000_000).optional(),
   unitPrice: z.number().positive().max(10_000_000),
   aisle: z.string().max(120).nullable().optional()
 })
@@ -20,7 +20,7 @@ const addProductSchema = z.object({
 const setMinStockSchema = z.object({
   operation: z.literal('set_min_stock'),
   inventoryItemId: z.string().cuid(),
-  minStock: z.number().int().min(0).max(1_000_000),
+  minStock: z.number().int().min(0).max(10_000_000),
   reason: z.string().min(3).max(240)
 })
 
@@ -48,7 +48,7 @@ const schedulePriceSchema = z.object({
 const stockEntrySchema = z.object({
   operation: z.literal('stock_entry'),
   inventoryItemId: z.string().cuid(),
-  quantity: z.number().int().positive().max(1_000_000),
+  quantity: z.number().int().positive().max(10_000_000),
   unitCost: z.number().positive().max(10_000_000),
   reason: z.string().min(3).max(240)
 })
@@ -56,7 +56,7 @@ const stockEntrySchema = z.object({
 const stockExitSchema = z.object({
   operation: z.literal('stock_exit'),
   inventoryItemId: z.string().cuid(),
-  quantity: z.number().int().positive().max(1_000_000),
+  quantity: z.number().int().positive().max(10_000_000),
   valuationMethod: z.enum(['fifo', 'average']),
   reason: z.string().min(3).max(240)
 })

@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 
 import { calculateWeightedAveragePrice } from '@/src/lib/inventory/valuation'
 import { DEFAULT_MIN_STOCK, isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { inferWeightSupport, kilogramsToGrams } from '@/src/lib/inventory/weight-units'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 import type { CrmRole } from '@/src/lib/security/rbac'
 
@@ -266,10 +267,10 @@ const getOperationHelpText = (operation: RowAdjustmentOperation) => {
     return 'Indica precio y fecha de vigencia.'
   }
   if (operation === 'stock_entry') {
-    return 'Indica cantidad y costo unitario de entrada.'
+    return 'Indica cantidad (kg para peso, pz para piezas) y costo unitario de entrada.'
   }
   if (operation === 'stock_exit') {
-    return 'Indica cantidad a retirar y método de valoración.'
+    return 'Indica cantidad a retirar (kg para peso, pz para piezas) y método de valoración.'
   }
   return ''
 }
@@ -637,6 +638,21 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     return normalized
   }
 
+  const toStoredStockQuantity = (quantity: number, supportsWeight: boolean) => {
+    if (supportsWeight) return Math.max(1, kilogramsToGrams(quantity))
+    return Math.max(1, Math.round(quantity))
+  }
+
+  const toStoredMinStock = (minStock: number, supportsWeight: boolean) => {
+    if (supportsWeight) return Math.max(0, kilogramsToGrams(minStock))
+    return Math.max(0, Math.round(minStock))
+  }
+
+  const resolveSupportsWeight = (itemId: string) => {
+    const item = items.find(candidate => candidate.id === itemId)
+    return item?.supportsWeight ?? false
+  }
+
   useEffect(() => {
     if (!toasts.length) return
     const timeoutId = window.setTimeout(() => {
@@ -915,13 +931,14 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       return
     }
 
+    const supportsWeight = inferWeightSupport(addProductForm.category.trim(), addProductForm.aisle.trim() || null)
     const success = await submitAdjustment({
       operation: 'add_product',
       sku: addProductForm.sku.trim(),
       productName: addProductForm.productName.trim(),
       category: addProductForm.category.trim(),
-      stock: Math.max(0, Math.round(stock)),
-      minStock: Math.max(0, Math.round(minStock)),
+      stock: supportsWeight ? Math.max(0, kilogramsToGrams(stock)) : Math.max(0, Math.round(stock)),
+      minStock: toStoredMinStock(minStock, supportsWeight),
       unitPrice: Number(unitPrice.toFixed(2)),
       aisle: addProductForm.aisle.trim() ? addProductForm.aisle.trim() : null
     })
@@ -1041,7 +1058,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       return {
         operation: 'stock_entry',
         inventoryItemId: itemId,
-        quantity: Math.max(1, Math.round(quantity)),
+        quantity: toStoredStockQuantity(quantity, resolveSupportsWeight(itemId)),
         unitCost: Number(unitCost.toFixed(2)),
         reason: normalizedReason
       }
@@ -1058,7 +1075,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       return {
         operation: 'set_min_stock',
         inventoryItemId: itemId,
-        minStock: Math.max(0, Math.round(minStock)),
+        minStock: toStoredMinStock(minStock, resolveSupportsWeight(itemId)),
         reason: normalizedReason
       }
     }
@@ -1073,7 +1090,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     return {
       operation: 'stock_exit',
       inventoryItemId: itemId,
-      quantity: Math.max(1, Math.round(quantity)),
+      quantity: toStoredStockQuantity(quantity, resolveSupportsWeight(itemId)),
       valuationMethod: draft.valuationMethod,
       reason: normalizedReason
     }
@@ -1108,7 +1125,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         incomingUnitCost: payload.unitCost
       })
       const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} pz`
-      lines.push(`Entrada: +${payload.quantity} pz`)
+      lines.push(
+        item.supportsWeight
+          ? `Entrada: +${(payload.quantity / 1000).toFixed(3)} kg`
+          : `Entrada: +${payload.quantity} pz`
+      )
       lines.push(`Costo de entrada: ${formatMxnCurrency(payload.unitCost)}`)
       lines.push(`Stock proyectado: ${nextStockLabel}`)
       lines.push(`Precio promedio proyectado: ${formatMxnCurrency(nextPrice)}`)
@@ -1119,7 +1140,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     if (payload.operation === 'stock_exit') {
       const nextStock = Math.max(0, item.stock - payload.quantity)
       const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} pz`
-      lines.push(`Salida: -${payload.quantity} pz`)
+      lines.push(
+        item.supportsWeight
+          ? `Salida: -${(payload.quantity / 1000).toFixed(3)} kg`
+          : `Salida: -${payload.quantity} pz`
+      )
       lines.push(`Método de valoración: ${payload.valuationMethod === 'fifo' ? 'FIFO' : 'Promedio general'}`)
       lines.push(`Stock proyectado: ${nextStockLabel}`)
       if (payload.valuationMethod === 'fifo') {
@@ -1304,7 +1329,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       return {
         operation: 'stock_entry',
         inventoryItemId: itemId,
-        quantity: Math.max(1, Math.round(quantity)),
+        quantity: toStoredStockQuantity(quantity, resolveSupportsWeight(itemId)),
         unitCost: Number(unitCost.toFixed(2)),
         reason: normalizedReason
       }
@@ -1321,7 +1346,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
       return {
         operation: 'set_min_stock',
         inventoryItemId: itemId,
-        minStock: Math.max(0, Math.round(minStock)),
+        minStock: toStoredMinStock(minStock, resolveSupportsWeight(itemId)),
         reason: normalizedReason
       }
     }
@@ -1336,7 +1361,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     return {
       operation: 'stock_exit',
       inventoryItemId: itemId,
-      quantity: Math.max(1, Math.round(quantity)),
+      quantity: toStoredStockQuantity(quantity, resolveSupportsWeight(itemId)),
       valuationMethod: bulkValuationMethod,
       reason: normalizedReason
     }
@@ -2233,7 +2258,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                       className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
                     />
                     <span className='text-xs font-normal text-slate-500'>
-                      Alerta cuando el stock sea igual o menor a este valor (predeterminado {DEFAULT_MIN_STOCK}).
+                      Alerta cuando el stock sea igual o menor a este valor. Para productos a peso usa kilogramos
+                      (predeterminado {DEFAULT_MIN_STOCK} pz / {DEFAULT_MIN_STOCK} kg según el tipo).
                     </span>
                   </label>
                   <label className='grid gap-1 text-sm font-medium text-slate-700'>
