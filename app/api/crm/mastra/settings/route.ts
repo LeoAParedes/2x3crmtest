@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 import { ERP_TOOL_IDS, ERP_TOOL_LABELS } from '@/src/lib/ai/erp-tool-ids'
 import { safeRecordAgentAction } from '@/src/lib/crm/agent-action-audit'
-import { getMastraSettings, updateMastraSettings } from '@/src/lib/crm/mastra-settings'
+import { buildInMemoryMastraSettings, getMastraSettings, updateMastraSettings } from '@/src/lib/crm/mastra-settings'
 import { hasLlmProviderConfig } from '@/src/lib/config/env'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
@@ -83,11 +83,31 @@ export async function GET(request: Request) {
 
     return jsonOk(payload.data)
   } catch (error) {
-    return jsonError('Unable to load Mastra settings', 500, {
+    // DB is unavailable (most likely a pending migration — allowedErpTools column missing).
+    // Log for Vercel observability, then return 200 with in-memory defaults so the
+    // dashboard settings panel degrades gracefully instead of showing a hard error.
+    console.error('[api/crm/mastra/settings] storage unavailable, serving in-memory defaults', {
       code: 'MASTRA_SETTINGS_STORAGE_UNAVAILABLE',
-      details: error instanceof Error ? error.message : 'unknown error',
+      error: error instanceof Error ? error.message : String(error),
       requestId: access.context.requestId
     })
+
+    const degradedPayload = mastraSettingsResponseSchema.safeParse({
+      success: true,
+      settings: buildInMemoryMastraSettings(),
+      providerStatus: { llmConfigured: hasLlmProviderConfig },
+      erpToolCatalog
+    })
+
+    if (!degradedPayload.success) {
+      return jsonError('Unable to load Mastra settings', 500, {
+        code: 'MASTRA_SETTINGS_STORAGE_UNAVAILABLE',
+        details: error instanceof Error ? error.message : 'unknown error',
+        requestId: access.context.requestId
+      })
+    }
+
+    return jsonOk(degradedPayload.data)
   }
 }
 

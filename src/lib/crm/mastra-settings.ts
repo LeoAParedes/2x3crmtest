@@ -108,6 +108,20 @@ export const updateMastraSettings = async (input: unknown) => {
   return mapSettings(row)
 }
 
+/**
+ * Returns in-memory defaults without touching the database.
+ * Used as a graceful-degradation fallback when the DB is unavailable
+ * (e.g. a pending migration hasn't been applied yet).
+ */
+export const buildInMemoryMastraSettings = (): MastraSettings & { updatedAt: string } => {
+  const defaults = mastraSettingsSchema.parse({})
+  return {
+    ...defaults,
+    allowedErpTools: defaults.allowedErpTools as ErpToolId[],
+    updatedAt: new Date().toISOString()
+  }
+}
+
 export const getMastraSettingsCacheKey = (settings: MastraSettings) =>
   JSON.stringify({
     modelId: settings.modelId,
