@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSPropert
 import { createPortal } from 'react-dom'
 
 import { calculateWeightedAveragePrice } from '@/src/lib/inventory/valuation'
+import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
 import { DEFAULT_MIN_STOCK, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { inferWeightSupport, kilogramsToGrams } from '@/src/lib/inventory/weight-units'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
@@ -1122,7 +1123,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }
 
   const buildRowPreview = (item: InventoryItem, payload: RowAdjustmentPayload): RowAdjustmentPreview => {
-    const currentStockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`
+    const currentStockLabel = formatStockQuantityLabel(item.stock, item.supportsWeight)
     const currentPriceLabel = formatMxnCurrency(item.unitPrice)
     const lines: string[] = [
       `Stock actual: ${currentStockLabel}`,
@@ -1180,8 +1181,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }
 
     if (payload.operation === 'set_min_stock') {
-      lines.push(`Umbral actual: ${item.minStock}`)
-      lines.push(`Nuevo umbral de stock bajo: ${payload.minStock}`)
+      lines.push(`Umbral actual: ${formatStockQuantityLabel(item.minStock, item.supportsWeight)}`)
+      lines.push(`Nuevo umbral de stock bajo: ${formatStockQuantityLabel(payload.minStock, item.supportsWeight)}`)
       if (item.stock <= payload.minStock) {
         lines.push('El producto quedará en alerta de stock bajo')
       } else {
@@ -1192,9 +1193,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     if (payload.operation === 'delete_product') {
       lines.push('Acción: eliminación del producto en catálogo')
       if (item.stock > 0) {
-        const stockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`
+        const stockLabel = formatStockQuantityLabel(item.stock, item.supportsWeight)
         lines.push(`Inventario actual: ${stockLabel}`)
-        lines.push(`Se registrará salida automática de ${item.stock} unidad(es)`)
+        lines.push(`Se registrará salida automática de ${stockLabel}`)
         lines.push('Después se eliminará el producto del catálogo')
       } else {
         lines.push('Inventario actual: 0 unidades')
@@ -1495,8 +1496,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           >
                             <p className='text-sm font-medium text-slate-900'>{item.productName}</p>
                             <p className='text-xs text-slate-600'>
-                              SKU {item.sku} · Stock {item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : item.stock} / umbral{' '}
-                              {item.minStock}
+                              SKU {item.sku} · Stock {formatStockQuantityLabel(item.stock, item.supportsWeight)} / umbral{' '}
+                              {formatStockQuantityLabel(item.minStock, item.supportsWeight)}
                             </p>
                           </li>
                         ))}
@@ -1641,7 +1642,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         <p className='text-xs text-slate-500'>{item.category}</p>
                         {isLowStockItem(item) ? (
                           <p className='mt-1 inline-flex rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-800'>
-                            Stock bajo (umbral {item.minStock})
+                            Stock bajo (umbral {formatStockQuantityLabel(item.minStock, item.supportsWeight)})
                           </p>
                         ) : null}
                         {item.aisle === '__archived__' ? (
@@ -1651,7 +1652,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         ) : null}
                       </td>
                       <td className='px-3 py-2 text-sm text-slate-700'>
-                        {item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`}
+                        {formatStockQuantityLabel(item.stock, item.supportsWeight)}
                       </td>
                       <td className='px-3 py-2 text-sm text-slate-700'>{formatMxnCurrency(item.unitPrice)}</td>
                       <td className='px-3 py-2 text-sm text-slate-700'>{item.supportsWeight ? 'Peso' : 'Pieza'}</td>
@@ -1894,11 +1895,13 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           <p className='font-medium text-slate-900'>{item.productName}</p>
                           <p className='text-slate-500'>{item.category}</p>
                           {isLowStockItem(item) ? (
-                            <p className='mt-1 text-[11px] font-medium text-orange-700'>Stock bajo · umbral {item.minStock}</p>
+                            <p className='mt-1 text-[11px] font-medium text-orange-700'>
+                              Stock bajo · umbral {formatStockQuantityLabel(item.minStock, item.supportsWeight)}
+                            </p>
                           ) : null}
                         </td>
                         <td className='px-2 py-2 text-xs text-slate-700'>
-                          <p>{item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`}</p>
+                          <p>{formatStockQuantityLabel(item.stock, item.supportsWeight)}</p>
                           <p>{formatMxnCurrency(item.unitPrice)}</p>
                         </td>
                         <td className='px-2 py-2'>

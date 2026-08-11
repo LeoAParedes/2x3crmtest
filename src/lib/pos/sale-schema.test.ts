@@ -20,7 +20,19 @@ describe('createSaleSchema', () => {
         { quantity: 2, unitPrice: 10 },
         { quantity: 1, unitPrice: 5.5 }
       ])
-    ).toEqual({ subtotal: 25.5, tax: 0, total: 25.5 })
+    ).toEqual({ subtotal: 25.5, tax: 0, total: 25.5, lines: expect.any(Array) })
+  })
+
+  it('calculates IVA per line when enabled', () => {
+    expect(
+      calculateSaleTotals(
+        [
+          { quantity: 2, unitPrice: 100, unitMode: 'piece' },
+          { quantity: 1, unitPrice: 50, unitMode: 'piece' }
+        ],
+        { showIvaOnReceipt: true, defaultIvaRate: 0.16 }
+      )
+    ).toEqual({ subtotal: 250, tax: 40, total: 290, lines: expect.any(Array) })
   })
 
   it('bills weight quantities in kilograms not grams', () => {
@@ -31,6 +43,6 @@ describe('createSaleSchema', () => {
         { quantity: 29, unitPrice: 16.5, unitMode: 'piece' },
         { quantity: 2500, unitPrice: 89, unitMode: 'weight' }
       ])
-    ).toEqual({ subtotal: 701, tax: 0, total: 701 })
+    ).toEqual({ subtotal: 701, tax: 0, total: 701, lines: expect.any(Array) })
   })
 })

@@ -78,7 +78,7 @@ const navTree: NavGroup[] = [
     children: [
       { href: '/finanzas/periodos', label: 'Periodos', iconSrc: '/icons/nav/finance.png' },
       { href: '/finanzas/fondos', label: 'Fondos activo', iconSrc: '/icons/nav/finance.png' },
-      { href: '/finanzas/pasivo', label: 'Pasivo corriente', iconSrc: '/icons/nav/finance.png' },
+      { href: '/finanzas/pasivo', label: 'Pasivo', iconSrc: '/icons/nav/finance.png' },
       {
         href: '/finanzas/compras',
         label: 'Compras y Proveedores',

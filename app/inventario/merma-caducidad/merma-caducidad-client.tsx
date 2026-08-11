@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
+import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
 import { isLowStockItem } from '@/src/lib/inventory/low-stock'
 
 type InventoryItem = {
@@ -13,6 +14,8 @@ type InventoryItem = {
   stock: number
   minStock: number
   unitPrice: number
+  supportsWeight?: boolean
+  aisle?: string | null
 }
 
 type ExpiryNote = {
@@ -198,7 +201,8 @@ export const MermaCaducidadClient = () => {
           </label>
           {selected ? (
             <p className='mt-2 text-xs text-slate-500'>
-              Stock actual {selected.stock} · {formatMxnCurrency(selected.unitPrice)} c/u
+              Stock actual {formatStockQuantityLabel(selected.stock, selected.supportsWeight ?? false)} ·{' '}
+              {formatMxnCurrency(selected.unitPrice)} c/u
             </p>
           ) : null}
           <button

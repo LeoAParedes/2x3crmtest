@@ -8,6 +8,7 @@ export type TicketItem = {
   quantity: number
   unitMode: 'piece' | 'weight'
   lineTotal: number
+  lineTax?: number
 }
 
 export type TicketSale = {
@@ -18,6 +19,7 @@ export type TicketSale = {
   subtotal: number
   tax: number
   total: number
+  showIvaOnReceipt?: boolean
   paymentMethod: 'cash' | 'card'
   amountReceived: number | null
   changeDue: number
@@ -101,11 +103,21 @@ export const buildSaleTicketText = (sale: TicketSale, options: TicketBuildOption
     const rightLabel = formatMoney(item.lineTotal)
     const leftWidth = Math.max(0, columns - rightLabel.length - 1)
     lines.push(`${padRight(leftLabel, leftWidth)}${PAD}${rightLabel}`)
+    if (sale.showIvaOnReceipt && (item.lineTax ?? 0) > 0) {
+      const ivaLabel = `  IVA`
+      const ivaAmount = formatMoney(item.lineTax ?? 0)
+      const ivaLeftWidth = Math.max(0, columns - ivaAmount.length - 1)
+      lines.push(`${padRight(ivaLabel, ivaLeftWidth)}${PAD}${ivaAmount}`)
+    }
   }
 
   lines.push(divider)
   lines.push(labelAmountLine('Subtotal', sale.subtotal, columns))
-  lines.push(labelAmountLine('Impuesto', sale.tax, columns))
+  if (sale.showIvaOnReceipt && sale.tax > 0) {
+    lines.push(labelAmountLine('IVA', sale.tax, columns))
+  } else {
+    lines.push(labelAmountLine('Impuesto', sale.tax, columns))
+  }
   lines.push(labelAmountLine('Total', sale.total, columns))
   lines.push(
     labelAmountLine(`Pago (${sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'})`, sale.total, columns)

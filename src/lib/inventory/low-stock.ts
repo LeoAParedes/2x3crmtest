@@ -17,3 +17,27 @@ export const compareLowStockUrgency = (left: LowStockComparable, right: LowStock
   if (urgencyDelta !== 0) return urgencyDelta
   return left.stock - right.stock
 }
+
+/** Stored-unit gap between minimum threshold and current stock (grams for weight, pieces otherwise). */
+export const getRestockDeficit = (stock: number, minStock: number) => Math.max(0, minStock - stock)
+
+/** Billable quantity for cost math: kg for weight inventory, pieces otherwise. */
+export const getRestockBillableQuantity = (deficit: number, supportsWeight: boolean) => {
+  if (deficit <= 0) return 0
+  if (supportsWeight) {
+    return Number((deficit / 1000).toFixed(3))
+  }
+  return deficit
+}
+
+export const getRestockEstimatedCost = (
+  stock: number,
+  minStock: number,
+  unitPrice: number,
+  supportsWeight: boolean
+) => {
+  const deficit = getRestockDeficit(stock, minStock)
+  if (deficit <= 0) return 0
+  const billableQuantity = getRestockBillableQuantity(deficit, supportsWeight)
+  return Number((unitPrice * billableQuantity).toFixed(2))
+}

@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
+import { calculateLineTotals, calculateSaleTotals, type IvaPolicy } from '@/src/lib/pos/sale-schema'
 import { printTicketText } from '@/src/lib/pos/print-ticket'
 import { buildSaleTicketText, type TicketSale } from '@/src/lib/pos/ticket-format'
 
@@ -27,6 +28,7 @@ type Product = {
   unitPrice: number
   aisle: string | null
   supportsWeight: boolean
+  ivaRate?: number | null
 }
 
 type CartItem = {
@@ -35,6 +37,7 @@ type CartItem = {
   productName: string
   unitPrice: number
   supportsWeight: boolean
+  ivaRate?: number | null
   unitMode: 'piece' | 'weight'
   quantityInput: string
 }
@@ -70,7 +73,9 @@ type SaleResponse = {
       unitMode: 'piece' | 'weight'
       unitPrice: number
       lineTotal: number
+      lineTax?: number
     }>
+    showIvaOnReceipt?: boolean
   }
   message?: string
   error?: {
@@ -229,6 +234,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const [message, setMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [draftLoaded, setDraftLoaded] = useState(false)
+  const [ivaPolicy, setIvaPolicy] = useState<IvaPolicy>({ showIvaOnReceipt: false, defaultIvaRate: 0.16 })
   // SSR-safe desktop default via useSyncExternalStore (avoids React #418 hydration mismatch).
   const isDesktopViewport = useSyncExternalStore(
     subscribeDesktopViewport,
@@ -244,22 +250,74 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     // #endregion
   }, [cartPanelUserOverride, isCartPanelOpen, isDesktopViewport])
 
-  const subtotal = useMemo(
+  useEffect(() => {
+    let cancelled = false
+    const loadPosSettings = async () => {
+      try {
+        const response = await fetch('/api/pos/settings')
+        const payload = (await response.json()) as {
+          success?: boolean
+          settings?: { showIvaOnReceipt: boolean; defaultIvaRate: number }
+        }
+        if (!cancelled && response.ok && payload.settings) {
+          setIvaPolicy({
+            showIvaOnReceipt: payload.settings.showIvaOnReceipt,
+            defaultIvaRate: payload.settings.defaultIvaRate
+          })
+        }
+      } catch {
+        // keep defaults
+      }
+    }
+    void loadPosSettings()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const cartLineTotals = useMemo(
     () =>
-      Number(
-        cart
-          .reduce((sum, item) => {
-            if (item.unitMode === 'weight') {
-              return sum + item.unitPrice * quantityToDisplay(item)
-            }
-            return sum + item.unitPrice * quantityToDisplay(item)
-          }, 0)
-          .toFixed(2)
-      ),
-    [cart]
+      cart.map(item => {
+        const quantity =
+          item.unitMode === 'weight'
+            ? parseWeightQuantity(item.quantityInput)
+            : parsePieceQuantity(item.quantityInput)
+        return calculateLineTotals(
+          {
+            quantity,
+            unitPrice: item.unitPrice,
+            unitMode: item.unitMode,
+            ivaRate: item.ivaRate
+          },
+          ivaPolicy
+        )
+      }),
+    [cart, ivaPolicy]
   )
-  const tax = 0
-  const total = Number((subtotal + tax).toFixed(2))
+
+  const saleTotals = useMemo(
+    () =>
+      calculateSaleTotals(
+        cart.map((item, index) => {
+          const quantity =
+            item.unitMode === 'weight'
+              ? parseWeightQuantity(item.quantityInput)
+              : parsePieceQuantity(item.quantityInput)
+          return {
+            quantity,
+            unitPrice: item.unitPrice,
+            unitMode: item.unitMode,
+            ivaRate: item.ivaRate
+          }
+        }),
+        ivaPolicy
+      ),
+    [cart, ivaPolicy]
+  )
+
+  const subtotal = saleTotals.subtotal
+  const tax = saleTotals.tax
+  const total = saleTotals.total
   const parsedAmountReceived = parseCurrencyInput(amountReceived)
   const change = paymentMethod === 'cash' ? calculateCashChange(parsedAmountReceived, total) : 0
 
@@ -383,6 +441,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             ? {
                 ...item,
                 supportsWeight: product.supportsWeight,
+                ivaRate: product.ivaRate ?? null,
                 unitMode,
                 quantityInput:
                   unitMode === 'weight'
@@ -399,6 +458,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             productName: product.productName,
             unitPrice: product.unitPrice,
             supportsWeight: product.supportsWeight,
+            ivaRate: product.ivaRate ?? null,
             unitMode,
             quantityInput: unitMode === 'weight' ? '0.25' : '1'
           }
@@ -580,7 +640,10 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
           const minQuantity = quantityMinByMode[item.unitMode]
           const currentQuantity = parseQuantityInputValue(item)
           const canDecreaseQuantity = currentQuantity > minQuantity
-          const lineTotal = formatMxnCurrency(item.unitPrice * quantityToDisplay(item))
+          const line = cartLineTotals[index]
+          const lineTotal = formatMxnCurrency(line?.lineTotalWithTax ?? 0)
+          const lineBase = formatMxnCurrency(line?.lineSubtotal ?? 0)
+          const lineTax = formatMxnCurrency(line?.lineTax ?? 0)
 
           return (
             <div key={`${item.inventoryItemId}-${item.unitMode}-${index}`} className='rounded-lg border border-slate-200 p-2'>
@@ -588,6 +651,11 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                 <div className='min-w-0'>
                   <p className='truncate text-sm font-medium leading-tight text-slate-900'>{item.productName}</p>
                   <p className='text-[11px] leading-tight text-slate-500'>{item.sku}</p>
+                  {ivaPolicy.showIvaOnReceipt && (line?.lineTax ?? 0) > 0 ? (
+                    <p className='text-[11px] leading-tight text-slate-500'>
+                      Piso {lineBase} + IVA {lineTax}
+                    </p>
+                  ) : null}
                 </div>
                 <p className='shrink-0 text-sm font-semibold tabular-nums text-slate-900'>{lineTotal}</p>
               </div>
@@ -673,7 +741,10 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
 
       <div className='rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm leading-5 text-slate-700'>
         <div className='flex justify-between gap-2'><span>Subtotal</span><span className='tabular-nums'>{formatMxnCurrency(subtotal)}</span></div>
-        <div className='flex justify-between gap-2'><span>Impuesto</span><span className='tabular-nums'>{formatMxnCurrency(tax)}</span></div>
+        <div className='flex justify-between gap-2'>
+          <span>{ivaPolicy.showIvaOnReceipt ? 'IVA' : 'Impuesto'}</span>
+          <span className='tabular-nums'>{formatMxnCurrency(tax)}</span>
+        </div>
         <div className='flex justify-between gap-2 font-semibold text-slate-900'><span>Total</span><span className='tabular-nums'>{formatMxnCurrency(total)}</span></div>
       </div>
 

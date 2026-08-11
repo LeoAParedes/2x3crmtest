@@ -2,11 +2,12 @@ import crypto from 'node:crypto'
 
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 import {
-  calculateLineTotal,
+  calculateLineTotals,
   calculateSaleTotals,
   createSaleSchema,
   type CreateSaleInput
 } from '@/src/lib/pos/sale-schema'
+import { getPosSettings } from '@/src/lib/pos/pos-settings'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { summarizeSaleQuantities } from '@/src/lib/inventory/logbook-quantity'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
@@ -83,6 +84,11 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
   const items = normalizeSaleItems(input.items)
   const cashSessionId = await requireOpenCashSessionId(actor)
   const prisma = await getPrisma()
+  const posSettings = await getPosSettings()
+  const ivaPolicy = {
+    showIvaOnReceipt: posSettings.showIvaOnReceipt,
+    defaultIvaRate: posSettings.defaultIvaRate
+  }
   await applyDueScheduledPrices(prisma)
   await ensureCanonicalWeightStocks(prisma, {
     userId: actor.userId,
@@ -113,15 +119,38 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
     const lines = items.map(item => {
       const product = inventory.find(candidate => candidate.id === item.inventoryItemId)
       if (!product) throw new Error('INVENTORY_ITEM_NOT_FOUND')
+      const productIvaRate = product.ivaRate === null ? null : Number(product.ivaRate)
+      const lineTotals = calculateLineTotals(
+        {
+          quantity: item.quantity,
+          unitPrice: Number(product.unitPrice),
+          unitMode: item.unitMode,
+          ivaRate: productIvaRate
+        },
+        ivaPolicy
+      )
       return {
         ...item,
         sku: product.sku,
         productName: product.productName,
         unitPrice: Number(product.unitPrice),
-        lineTotal: calculateLineTotal(item.quantity, Number(product.unitPrice), item.unitMode)
+        lineTotal: lineTotals.lineSubtotal,
+        lineTax: lineTotals.lineTax
       }
     })
-    const totals = calculateSaleTotals(lines)
+    const totals = calculateSaleTotals(
+      lines.map(line => {
+        const product = inventory.find(candidate => candidate.id === line.inventoryItemId)
+        const productIvaRate = product?.ivaRate === null || product?.ivaRate === undefined ? null : Number(product.ivaRate)
+        return {
+          quantity: line.quantity,
+          unitPrice: line.unitPrice,
+          unitMode: line.unitMode,
+          ivaRate: productIvaRate
+        }
+      }),
+      ivaPolicy
+    )
     validateCashPayment(input.paymentMethod, totals.total, input.amountReceived)
 
     for (const item of items) {
@@ -162,7 +191,8 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
             productName: line.productName,
             quantity: line.quantity,
             unitPrice: line.unitPrice,
-            lineTotal: line.lineTotal
+            lineTotal: line.lineTotal,
+            lineTax: line.lineTax
           }))
         }
       },
@@ -196,7 +226,8 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
       quantity: line.quantity,
       unitMode: line.unitMode,
       unitPrice: line.unitPrice,
-      lineTotal: line.lineTotal
+      lineTotal: line.lineTotal,
+      lineTax: line.lineTax
     }))
 
     await transaction.systemActionLog.create({
@@ -239,6 +270,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
       amountReceived: sale.amountReceived === null ? null : Number(sale.amountReceived),
       changeDue,
       createdAt: sale.createdAt.toISOString(),
+      showIvaOnReceipt: ivaPolicy.showIvaOnReceipt,
       items: ticketItems
     }
   })
@@ -302,12 +334,14 @@ export const getSaleTicket = async (saleId: string, actor: AuthenticatedActor): 
         productName: item.productName,
         quantity: item.quantity,
         unitMode: supportsWeight ? 'weight' : 'piece',
-        lineTotal: Number(item.lineTotal)
+        lineTotal: Number(item.lineTotal),
+        lineTax: Number(item.lineTax ?? 0)
       }
     }),
     subtotal: Number(sale.subtotal),
     tax: Number(sale.tax),
     total,
+    showIvaOnReceipt: Number(sale.tax) > 0,
     paymentMethod: sale.paymentMethod === 'card' ? 'card' : 'cash',
     amountReceived,
     changeDue

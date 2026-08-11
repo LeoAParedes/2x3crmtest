@@ -5,17 +5,20 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useMemo, type KeyboardEvent } from 'react'
 
 import { CashiersPanel } from '@/app/configuracion/cashiers-panel'
+import { ChatbotPanel } from '@/app/configuracion/chatbot-panel'
+import { PosSettingsPanel } from '@/app/configuracion/pos-settings-panel'
 
-type ConfigTab = 'general' | 'cajeros' | 'turno'
+type ConfigTab = 'general' | 'cajeros' | 'turno' | 'chatbot'
 
 const tabs: Array<{ id: ConfigTab; label: string }> = [
   { id: 'general', label: 'General' },
+  { id: 'chatbot', label: 'Chatbot' },
   { id: 'cajeros', label: 'Cajeros' },
   { id: 'turno', label: 'Turno / Corte' }
 ]
 
 const parseTab = (value: string | null): ConfigTab => {
-  if (value === 'cajeros' || value === 'turno' || value === 'general') return value
+  if (value === 'cajeros' || value === 'turno' || value === 'chatbot' || value === 'general') return value
   return 'general'
 }
 
@@ -41,12 +44,12 @@ export const ConfiguracionClient = () => {
       <section className='border-b border-slate-200 pb-5'>
         <h1 className='text-2xl font-semibold text-slate-950'>Configuración</h1>
         <p className='mt-1 text-sm text-slate-600'>
-          Usuarios de caja, turno operativo y ajustes del sistema.
+          Punto de venta, chatbot DavinciAi, usuarios de caja y turno operativo.
         </p>
       </section>
 
       <div
-        className='mt-5 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1'
+        className='mt-5 inline-flex flex-wrap rounded-lg border border-slate-200 bg-slate-50 p-1'
         role='tablist'
         aria-label='Secciones de configuración'
       >
@@ -74,32 +77,42 @@ export const ConfiguracionClient = () => {
 
       <div className='mt-6' role='tabpanel'>
         {tab === 'general' ? (
-          <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
-            <h2 className='text-lg font-semibold text-slate-950'>Preferencias</h2>
-            <p className='mt-2 text-sm text-slate-600'>
-              Desde aquí administras cajeros y el corte de turno. El asistente WhatsApp (Mastra) sigue en el
-              Dashboard operativo.
-            </p>
-            <ul className='mt-4 space-y-2 text-sm text-slate-700'>
-              <li>
-                <button
-                  type='button'
-                  className='font-medium text-emerald-700 underline'
-                  onClick={() => handleTabChange('cajeros')}
-                  aria-label='Ir a cajeros'
-                >
-                  Gestionar cajeros
-                </button>
-              </li>
-              <li>
-                <Link href='/caja' className='font-medium text-emerald-700 underline' aria-label='Ir a turno y corte'>
-                  Abrir / cerrar turno de caja
-                </Link>
-              </li>
-            </ul>
-          </section>
+          <div className='space-y-6'>
+            <PosSettingsPanel />
+            <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
+              <h2 className='text-lg font-semibold text-slate-950'>Accesos rápidos</h2>
+              <ul className='mt-4 space-y-2 text-sm text-slate-700'>
+                <li>
+                  <button
+                    type='button'
+                    className='font-medium text-emerald-700 underline'
+                    onClick={() => handleTabChange('chatbot')}
+                    aria-label='Ir a configuración del chatbot'
+                  >
+                    Configurar DavinciAi y Evolution API
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type='button'
+                    className='font-medium text-emerald-700 underline'
+                    onClick={() => handleTabChange('cajeros')}
+                    aria-label='Ir a cajeros'
+                  >
+                    Gestionar cajeros
+                  </button>
+                </li>
+                <li>
+                  <Link href='/caja' className='font-medium text-emerald-700 underline' aria-label='Ir a turno y corte'>
+                    Abrir / cerrar turno de caja
+                  </Link>
+                </li>
+              </ul>
+            </section>
+          </div>
         ) : null}
 
+        {tab === 'chatbot' ? <ChatbotPanel /> : null}
         {tab === 'cajeros' ? <CashiersPanel /> : null}
 
         {tab === 'turno' ? (

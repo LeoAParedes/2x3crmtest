@@ -175,7 +175,8 @@ export async function GET(request: Request) {
         minStock: item.minStock,
         unitPrice: Number(item.unitPrice),
         aisle: item.aisle,
-        supportsWeight: inferWeightSupport(item.category, item.aisle)
+        supportsWeight: inferWeightSupport(item.category, item.aisle),
+        ivaRate: item.ivaRate === null ? null : Number(item.ivaRate)
       }))
     })
   } catch (error) {

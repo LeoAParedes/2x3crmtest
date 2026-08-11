@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
+import {
+  getRestockBillableQuantity,
+  getRestockDeficit,
+  getRestockEstimatedCost
+} from '@/src/lib/inventory/low-stock'
+import { gramsToKilograms, kilogramsToGrams } from '@/src/lib/inventory/weight-units'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 
 type InventoryItem = {
@@ -13,6 +20,7 @@ type InventoryItem = {
   minStock: number
   unitPrice: number
   aisle: string | null
+  supportsWeight: boolean
 }
 
 type InventoryResponse = {
@@ -39,6 +47,7 @@ type PurchaseFormState = {
   unitCost: string
   reason: string
   registerExpense: boolean
+  supportsWeight: boolean
 }
 
 export const ComprasClient = () => {
@@ -60,12 +69,49 @@ export const ComprasClient = () => {
       }
       const lowStock = (payload.items || [])
         .filter(item => item.stock <= item.minStock)
-        .map(item => ({
-          ...item,
-          deficit: Math.max(0, item.minStock - item.stock + 1),
-          estimatedCost: item.unitPrice * Math.max(1, item.minStock - item.stock + 1)
-        }))
+        .map(item => {
+          const supportsWeight = item.supportsWeight ?? false
+          const deficit = getRestockDeficit(item.stock, item.minStock)
+          const estimatedCost = getRestockEstimatedCost(
+            item.stock,
+            item.minStock,
+            item.unitPrice,
+            supportsWeight
+          )
+          return {
+            ...item,
+            supportsWeight,
+            deficit,
+            estimatedCost
+          }
+        })
         .sort((left, right) => right.deficit - left.deficit)
+      // #region agent log
+      fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+        body: JSON.stringify({
+          sessionId: '449600',
+          runId: 'restock-fix',
+          hypothesisId: 'H1',
+          location: 'compras-client.tsx:loadRestock',
+          message: 'restock rows computed',
+          data: {
+            count: lowStock.length,
+            sample: lowStock.slice(0, 3).map(item => ({
+              sku: item.sku,
+              stock: item.stock,
+              minStock: item.minStock,
+              supportsWeight: item.supportsWeight,
+              deficit: item.deficit,
+              billableQuantity: getRestockBillableQuantity(item.deficit, item.supportsWeight),
+              estimatedCost: item.estimatedCost
+            }))
+          },
+          timestamp: Date.now()
+        })
+      }).catch(() => {})
+      // #endregion
       setRestockItems(lowStock)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Error de carga')
@@ -81,13 +127,17 @@ export const ComprasClient = () => {
   const handleOpenPurchaseForm = (item: RestockItem) => {
     setMessage(null)
     setError(null)
+    const suggestedQuantity = item.supportsWeight
+      ? gramsToKilograms(item.deficit).toFixed(3)
+      : String(item.deficit || 1)
     setPurchaseForm({
       inventoryItemId: item.id,
       productName: item.productName,
-      quantity: String(item.deficit),
+      quantity: suggestedQuantity,
       unitCost: String(item.unitPrice),
       reason: 'Compra a proveedor',
-      registerExpense: true
+      registerExpense: true,
+      supportsWeight: item.supportsWeight
     })
   }
 
@@ -101,13 +151,25 @@ export const ComprasClient = () => {
     setError(null)
     setMessage(null)
 
-    const quantity = Number(purchaseForm.quantity.replace(',', '.'))
+    const quantityInput = Number(purchaseForm.quantity.replace(',', '.'))
     const unitCost = Number(purchaseForm.unitCost.replace(',', '.'))
-    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isInteger(quantity)) {
+    if (!Number.isFinite(quantityInput) || quantityInput <= 0) {
+      setError(
+        purchaseForm.supportsWeight
+          ? 'Indica una cantidad válida en kilogramos mayor a cero'
+          : 'Indica una cantidad entera válida mayor a cero'
+      )
+      setSubmitting(false)
+      return
+    }
+    if (!purchaseForm.supportsWeight && !Number.isInteger(quantityInput)) {
       setError('Indica una cantidad entera válida mayor a cero')
       setSubmitting(false)
       return
     }
+    const quantity = purchaseForm.supportsWeight
+      ? kilogramsToGrams(quantityInput)
+      : Math.round(quantityInput)
     if (!Number.isFinite(unitCost) || unitCost <= 0) {
       setError('Indica un costo unitario válido mayor a cero')
       setSubmitting(false)
@@ -214,11 +276,11 @@ export const ComprasClient = () => {
           <p className='mt-1 text-sm text-slate-600'>Producto: {purchaseForm.productName}</p>
           <div className='mt-4 grid gap-3 sm:grid-cols-2'>
             <label className='grid gap-1 text-sm text-slate-700'>
-              Cantidad
+              Cantidad {purchaseForm.supportsWeight ? '(kg)' : '(pz)'}
               <input
                 type='number'
-                min='1'
-                step='1'
+                min={purchaseForm.supportsWeight ? '0.001' : '1'}
+                step={purchaseForm.supportsWeight ? '0.001' : '1'}
                 value={purchaseForm.quantity}
                 onChange={event =>
                   setPurchaseForm(current =>
@@ -310,7 +372,7 @@ export const ComprasClient = () => {
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Categoría</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Stock actual</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Mínimo</th>
-              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Unidades a pedir</th>
+              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Cantidad a pedir</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Costo est.</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Acción</th>
             </tr>
@@ -322,10 +384,16 @@ export const ComprasClient = () => {
                 <td className='px-3 py-2 text-sm font-medium text-slate-900'>{item.productName}</td>
                 <td className='px-3 py-2 text-sm text-slate-700'>{item.category}</td>
                 <td className='px-3 py-2 text-sm tabular-nums'>
-                  <span className='font-semibold text-rose-700'>{item.stock}</span>
+                  <span className='font-semibold text-rose-700'>
+                    {formatStockQuantityLabel(item.stock, item.supportsWeight)}
+                  </span>
                 </td>
-                <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>{item.minStock}</td>
-                <td className='px-3 py-2 text-sm tabular-nums font-semibold text-amber-800'>{item.deficit}</td>
+                <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
+                  {formatStockQuantityLabel(item.minStock, item.supportsWeight)}
+                </td>
+                <td className='px-3 py-2 text-sm tabular-nums font-semibold text-amber-800'>
+                  {formatStockQuantityLabel(item.deficit, item.supportsWeight)}
+                </td>
                 <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
                   {formatMxnCurrency(item.estimatedCost)}
                 </td>

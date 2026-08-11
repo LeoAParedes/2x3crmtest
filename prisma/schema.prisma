@@ -136,6 +136,8 @@ model InventoryItem {
   stock            Int
   minStock         Int                  @default(20)
   unitPrice        Decimal              @db.Decimal(10, 2)
+  /// Optional IVA rate override (e.g. 0.16 = 16%). Null uses PosSettings.defaultIvaRate.
+  ivaRate          Decimal?             @db.Decimal(5, 4)
   aisle            String?
   createdAt        DateTime             @default(now())
   updatedAt        DateTime             @updatedAt
@@ -275,6 +277,7 @@ model SaleItem {
   quantity        Int
   unitPrice       Decimal       @db.Decimal(10, 2)
   lineTotal       Decimal       @db.Decimal(10, 2)
+  lineTax         Decimal       @default(0) @db.Decimal(10, 2)
   sale            Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
   inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
 
@@ -343,6 +346,13 @@ model ApprovalRequest {
   resolvedAt DateTime?
 
   @@index([status, createdAt])
+}
+
+model PosSettings {
+  id                String   @id @default("default")
+  showIvaOnReceipt  Boolean  @default(false)
+  defaultIvaRate    Decimal  @default(0.16) @db.Decimal(5, 4)
+  updatedAt         DateTime @updatedAt
 }
 
 model MastraSettings {
