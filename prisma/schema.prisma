@@ -143,6 +143,8 @@ model InventoryItem {
   updatedAt        DateTime             @updatedAt
   movements        InventoryMovement[]
   saleItems        SaleItem[]
+  productSuppliers ProductSupplier[]
+  purchases        Purchase[]
 }
 
 model InventoryMovement {
@@ -155,6 +157,65 @@ model InventoryMovement {
   inventoryItem    InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
 
   @@index([inventoryItemId, createdAt])
+}
+
+model Supplier {
+  id          String            @id @default(cuid())
+  name        String
+  phone       String?
+  email       String?
+  notes       String?
+  creditLimit Decimal           @default(0) @db.Decimal(12, 2)
+  openBalance Decimal           @default(0) @db.Decimal(12, 2)
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  products    ProductSupplier[]
+  purchases   Purchase[]
+
+  @@index([name])
+  @@index([isActive, name])
+}
+
+model ProductSupplier {
+  id              String        @id @default(cuid())
+  inventoryItemId String
+  supplierId      String
+  supplierSku     String?
+  lastUnitCost    Decimal?      @db.Decimal(10, 2)
+  isPreferred     Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+  supplier        Supplier      @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([inventoryItemId, supplierId])
+  @@index([supplierId])
+}
+
+model Purchase {
+  id                String         @id @default(cuid())
+  supplierId        String
+  inventoryItemId   String
+  quantity          Int
+  unitCost          Decimal        @db.Decimal(10, 2)
+  totalAmount       Decimal        @db.Decimal(12, 2)
+  /// paid = contado | credit = cuenta por pagar
+  paymentStatus     String
+  soldByName        String?
+  reason            String?
+  expenseId         String?
+  movementId        String?
+  purchasedAt       DateTime       @default(now())
+  createdByUsername String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  supplier          Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  inventoryItem     InventoryItem  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([supplierId, purchasedAt])
+  @@index([inventoryItemId, purchasedAt])
+  @@index([paymentStatus, purchasedAt])
 }
 
 model FinanceAccount {
