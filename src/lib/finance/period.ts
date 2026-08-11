@@ -1,0 +1,155 @@
+export type FinancePeriod = 'day' | 'week' | 'month'
+
+export const FINANCE_TIME_ZONE = 'America/Mexico_City'
+
+const periodValues: FinancePeriod[] = ['day', 'week', 'month']
+
+export const isFinancePeriod = (value: string | null | undefined): value is FinancePeriod =>
+  typeof value === 'string' && periodValues.includes(value as FinancePeriod)
+
+const getTimeZoneParts = (date: Date, timeZone: string) => {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+    weekday: 'short'
+  })
+
+  const parts = formatter.formatToParts(date)
+  const read = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value || ''
+
+  return {
+    year: Number(read('year')),
+    month: Number(read('month')),
+    day: Number(read('day')),
+    hour: Number(read('hour')),
+    minute: Number(read('minute')),
+    second: Number(read('second')),
+    weekday: read('weekday')
+  }
+}
+
+const weekdayIndex: Record<string, number> = {
+  Sun: 0,
+  Mon: 1,
+  Tue: 2,
+  Wed: 3,
+  Thu: 4,
+  Fri: 5,
+  Sat: 6
+}
+
+/** Convert a wall-clock date/time in `timeZone` to a UTC Date. */
+export const zonedWallTimeToUtc = (
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone = FINANCE_TIME_ZONE
+) => {
+  const utcGuess = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
+  const parts = getTimeZoneParts(utcGuess, timeZone)
+  const asUtcMs = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+  const desiredMs = Date.UTC(year, month - 1, day, hour, minute, second)
+  return new Date(utcGuess.getTime() + (desiredMs - asUtcMs))
+}
+
+export const getPeriodBounds = (period: FinancePeriod, now = new Date(), timeZone = FINANCE_TIME_ZONE) => {
+  const parts = getTimeZoneParts(now, timeZone)
+  const startOfToday = zonedWallTimeToUtc(parts.year, parts.month, parts.day, 0, 0, 0, timeZone)
+
+  if (period === 'day') {
+    return { start: startOfToday, end: now }
+  }
+
+  if (period === 'week') {
+    const weekday = weekdayIndex[parts.weekday] ?? 1
+    const daysFromMonday = (weekday + 6) % 7
+    const mondayUtc = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - daysFromMonday))
+    const start = zonedWallTimeToUtc(
+      mondayUtc.getUTCFullYear(),
+      mondayUtc.getUTCMonth() + 1,
+      mondayUtc.getUTCDate(),
+      0,
+      0,
+      0,
+      timeZone
+    )
+    return { start, end: now }
+  }
+
+  const start = zonedWallTimeToUtc(parts.year, parts.month, 1, 0, 0, 0, timeZone)
+  return { start, end: now }
+}
+
+export const getAllPeriodBounds = (now = new Date(), timeZone = FINANCE_TIME_ZONE) => ({
+  day: getPeriodBounds('day', now, timeZone),
+  week: getPeriodBounds('week', now, timeZone),
+  month: getPeriodBounds('month', now, timeZone)
+})
+
+export const formatBucketKey = (date: Date, period: FinancePeriod, timeZone = FINANCE_TIME_ZONE) => {
+  if (period === 'day') {
+    return new Intl.DateTimeFormat('es-MX', {
+      timeZone,
+      hour: '2-digit',
+      hourCycle: 'h23'
+    }).format(date)
+  }
+
+  return new Intl.DateTimeFormat('es-MX', {
+    timeZone,
+    day: '2-digit',
+    month: 'short'
+  }).format(date)
+}
+
+export const buildBucketLabels = (period: FinancePeriod, start: Date, end: Date, timeZone = FINANCE_TIME_ZONE) => {
+  const labels: string[] = []
+
+  if (period === 'day') {
+    const startParts = getTimeZoneParts(start, timeZone)
+    const endParts = getTimeZoneParts(end, timeZone)
+    for (let hour = 0; hour <= endParts.hour; hour += 1) {
+      const point = zonedWallTimeToUtc(startParts.year, startParts.month, startParts.day, hour, 0, 0, timeZone)
+      labels.push(formatBucketKey(point, period, timeZone))
+    }
+    return labels
+  }
+
+  let cursorParts = getTimeZoneParts(start, timeZone)
+  const endParts = getTimeZoneParts(end, timeZone)
+
+  while (true) {
+    const point = zonedWallTimeToUtc(cursorParts.year, cursorParts.month, cursorParts.day, 12, 0, 0, timeZone)
+    labels.push(formatBucketKey(point, period, timeZone))
+
+    if (
+      cursorParts.year === endParts.year &&
+      cursorParts.month === endParts.month &&
+      cursorParts.day === endParts.day
+    ) {
+      break
+    }
+
+    const next = new Date(Date.UTC(cursorParts.year, cursorParts.month - 1, cursorParts.day + 1))
+    cursorParts = {
+      year: next.getUTCFullYear(),
+      month: next.getUTCMonth() + 1,
+      day: next.getUTCDate(),
+      hour: 0,
+      minute: 0,
+      second: 0,
+      weekday: ''
+    }
+  }
+
+  return labels
+}
