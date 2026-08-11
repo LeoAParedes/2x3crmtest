@@ -31,6 +31,10 @@ export const CajaClient = ({ role, username }: CajaClientProps) => {
   const [gate, setGate] = useState<'ready' | 'on_shift' | 'must_logout'>('ready')
   const [session, setSession] = useState<CashSession | null>(null)
   const [history, setHistory] = useState<CashSession[]>([])
+  const [exclusiveCashierSession, setExclusiveCashierSession] = useState<{
+    cashierUsername: string
+    openedAt: string
+  } | null>(null)
   const [openingFloat, setOpeningFloat] = useState('500')
   const [countedCash, setCountedCash] = useState('')
   const [notes, setNotes] = useState('')
@@ -38,6 +42,7 @@ export const CajaClient = ({ role, username }: CajaClientProps) => {
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [closedResult, setClosedResult] = useState<CashSession | null>(null)
+  const blockedByExclusiveSession = role === 'cashier' && Boolean(exclusiveCashierSession)
 
   useEffect(() => {
     let cancelled = false
@@ -48,6 +53,7 @@ export const CajaClient = ({ role, username }: CajaClientProps) => {
           success?: boolean
           gate?: 'ready' | 'on_shift' | 'must_logout'
           openSession?: CashSession | null
+          exclusiveCashierSession?: { cashierUsername: string; openedAt: string } | null
           message?: string
         }
         if (cancelled) return
@@ -56,6 +62,7 @@ export const CajaClient = ({ role, username }: CajaClientProps) => {
         }
         setGate(payload.gate || 'ready')
         setSession(payload.openSession || null)
+        setExclusiveCashierSession(payload.exclusiveCashierSession || null)
 
         if (role === 'admin') {
           const cortesResponse = await fetch('/api/caja/cortes')
@@ -82,7 +89,7 @@ export const CajaClient = ({ role, username }: CajaClientProps) => {
   }, [role])
 
   const handleOpenSession = async () => {
-    if (submitting) return
+    if (submitting || blockedByExclusiveSession) return
     setSubmitting(true)
     setMessage(null)
     setClosedResult(null)
@@ -195,20 +202,35 @@ export const CajaClient = ({ role, username }: CajaClientProps) => {
       {!session ? (
         <section className='mt-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
           <h2 className='text-lg font-semibold text-slate-900'>Abrir turno</h2>
+          {blockedByExclusiveSession && exclusiveCashierSession ? (
+            <p
+              role='alert'
+              className='mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900'
+            >
+              Solo puede haber un cajero en turno. Ahora opera{' '}
+              <strong>{exclusiveCashierSession.cashierUsername}</strong>. El administrador no tiene este límite.
+            </p>
+          ) : null}
+          {role === 'admin' ? (
+            <p className='mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>
+              Como administrador puedes abrir turno aunque haya un cajero activo.
+            </p>
+          ) : null}
           <label className='mt-4 grid max-w-xs gap-1 text-sm text-slate-700'>
             Fondo inicial (efectivo)
             <input
               value={openingFloat}
               onChange={event => setOpeningFloat(event.target.value)}
               inputMode='decimal'
-              className='h-10 rounded-lg border border-slate-300 px-3'
+              disabled={blockedByExclusiveSession}
+              className='h-10 rounded-lg border border-slate-300 px-3 disabled:bg-slate-100'
               aria-label='Fondo inicial de caja'
             />
           </label>
           <button
             type='button'
             onClick={() => void handleOpenSession()}
-            disabled={submitting}
+            disabled={submitting || blockedByExclusiveSession}
             aria-label='Abrir turno de caja'
             className='mt-4 h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
           >

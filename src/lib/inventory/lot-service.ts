@@ -7,6 +7,7 @@ import {
   getTimeZoneParts,
   zonedWallTimeToUtc
 } from '@/src/lib/finance/period'
+import { ARCHIVED_AISLE, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -71,11 +72,14 @@ export const listActiveLots = async (inventoryItemId?: string) => {
     where: {
       quantityRemaining: { gt: 0 },
       status: 'active',
+      inventoryItem: {
+        OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
+      },
       ...(inventoryItemId ? { inventoryItemId } : {})
     },
     orderBy: [{ expiresOn: 'asc' }, { receivedAt: 'asc' }],
     include: {
-      inventoryItem: { select: { sku: true, productName: true } }
+      inventoryItem: { select: { sku: true, productName: true, aisle: true } }
     },
     take: 500
   })
@@ -107,13 +111,16 @@ export const listUnifiedWorkspaceAlerts = async () => {
   const [expiryAlerts, inventoryRows] = await Promise.all([
     listExpiryAlerts(),
     prisma.inventoryItem.findMany({
-      select: { id: true, sku: true, productName: true, stock: true, minStock: true },
+      where: {
+        OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
+      },
+      select: { id: true, sku: true, productName: true, stock: true, minStock: true, aisle: true },
       take: 2000
     })
   ])
 
   const lowStock = inventoryRows
-    .filter(item => item.stock <= item.minStock)
+    .filter(item => isLowStockItem(item))
     .sort((left, right) => left.stock - right.stock)
     .slice(0, 50)
     .map(item => ({

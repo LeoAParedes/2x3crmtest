@@ -3,18 +3,26 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import type { CrmRole } from '@/src/lib/security/rbac'
+
 type PosOpenShiftProps = {
   username: string
+  role: CrmRole
+  exclusiveCashierSession?: {
+    cashierUsername: string
+    openedAt: string
+  } | null
 }
 
-export const PosOpenShift = ({ username }: PosOpenShiftProps) => {
+export const PosOpenShift = ({ username, role, exclusiveCashierSession = null }: PosOpenShiftProps) => {
   const router = useRouter()
   const [openingFloat, setOpeningFloat] = useState('500')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const blockedByExclusiveSession = role === 'cashier' && Boolean(exclusiveCashierSession)
 
   const handleOpenShift = async () => {
-    if (submitting) return
+    if (submitting || blockedByExclusiveSession) return
     setSubmitting(true)
     setError(null)
     try {
@@ -49,6 +57,24 @@ export const PosOpenShift = ({ username }: PosOpenShiftProps) => {
           módulo.
         </p>
 
+        {blockedByExclusiveSession && exclusiveCashierSession ? (
+          <p
+            role='alert'
+            className='mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900'
+          >
+            Solo puede haber un cajero en turno. Ahora opera{' '}
+            <strong>{exclusiveCashierSession.cashierUsername}</strong> (desde{' '}
+            {new Date(exclusiveCashierSession.openedAt).toLocaleString('es-MX')}). El administrador no tiene este
+            límite.
+          </p>
+        ) : null}
+
+        {role === 'admin' ? (
+          <p className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>
+            Como administrador puedes abrir turno aunque haya un cajero activo.
+          </p>
+        ) : null}
+
         <label className='mt-6 grid gap-1 text-sm text-slate-700'>
           Fondo de apertura (MXN)
           <input
@@ -59,7 +85,8 @@ export const PosOpenShift = ({ username }: PosOpenShiftProps) => {
             onChange={event => setOpeningFloat(event.target.value)}
             aria-label='Fondo de apertura'
             aria-invalid={Boolean(error)}
-            className={`h-11 rounded-lg border px-3 ${
+            disabled={blockedByExclusiveSession}
+            className={`h-11 rounded-lg border px-3 disabled:bg-slate-100 ${
               error ? 'border-rose-400 focus:border-rose-500' : 'border-slate-300'
             }`}
           />
@@ -74,7 +101,7 @@ export const PosOpenShift = ({ username }: PosOpenShiftProps) => {
         <button
           type='button'
           onClick={() => void handleOpenShift()}
-          disabled={submitting}
+          disabled={submitting || blockedByExclusiveSession}
           aria-label='Abrir turno y continuar al punto de venta'
           className='mt-5 h-11 w-full rounded-lg bg-emerald-600 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300'
         >

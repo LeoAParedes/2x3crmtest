@@ -11,6 +11,7 @@ import {
   type FinancePeriod
 } from '@/src/lib/finance/period'
 import { createExpenseSchema, type CreateExpenseInput } from '@/src/lib/finance/expense-schema'
+import { ARCHIVED_AISLE, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { gramsToKilograms, inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 
@@ -584,26 +585,32 @@ export const listRecentPosSales = async (period: FinancePeriod, limit = 8) => {
 /** Inventory SKU/stock snapshot for DavinciAi (efficient aggregates + low-stock sample). */
 export const getInventorySnapshot = async () => {
   const prisma = await getPrisma()
+  const activeWhere = {
+    OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
+  }
   const [aggregates, rows] = await Promise.all([
     prisma.inventoryItem.aggregate({
+      where: activeWhere,
       _count: { _all: true },
       _sum: { stock: true }
     }),
     prisma.inventoryItem.findMany({
+      where: activeWhere,
       select: {
         sku: true,
         productName: true,
         stock: true,
         minStock: true,
         category: true,
-        unitPrice: true
+        unitPrice: true,
+        aisle: true
       },
       orderBy: { sku: 'asc' }
     })
   ])
 
   const lowStock = rows
-    .filter(item => item.stock <= item.minStock)
+    .filter(item => isLowStockItem(item))
     .sort((left, right) => left.stock - right.stock)
 
   return {

@@ -66,7 +66,8 @@ const navTree: NavGroup[] = [
       {
         href: '/inventario?shortcut=ajuste',
         label: 'Ajuste rápido',
-        iconSrc: '/icons/nav/adjust.png'
+        iconSrc: '/icons/nav/adjust.png',
+        adminOnly: true
       }
     ]
   },
@@ -519,6 +520,9 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
             <div className='space-y-3'>
               <p className='font-mono text-[11px] uppercase tracking-[1.2px] text-[#898989]'>Sesión</p>
               <p className='truncate text-sm font-medium text-[#fafafa]'>{username}</p>
+              <p className='inline-flex rounded-[6px] border border-[#2e2e2e] bg-[#1c1c1c] px-2 py-1 text-xs font-medium capitalize text-[#3ecf8e]'>
+                {role === 'admin' ? 'Administrador' : 'Cajero'}
+              </p>
               <form action='/auth/logout' method='post'>
                 <button
                   type='submit'
@@ -530,22 +534,30 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
               </form>
             </div>
           ) : (
-            <form action='/auth/logout' method='post'>
-              <button
-                type='submit'
-                aria-label='Cerrar sesión'
-                className='w-full rounded-[6px] border border-[#2e2e2e] px-2 py-2 text-xs text-[#fafafa] transition hover:border-[#363636] hover:bg-[#1c1c1c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
+            <div className='space-y-2'>
+              <p
+                className='truncate text-center text-[10px] font-medium uppercase tracking-wide text-[#3ecf8e]'
+                title={role === 'admin' ? 'Administrador' : 'Cajero'}
               >
-                X
-              </button>
-            </form>
+                {role === 'admin' ? 'Adm' : 'Caj'}
+              </p>
+              <form action='/auth/logout' method='post'>
+                <button
+                  type='submit'
+                  aria-label='Cerrar sesión'
+                  className='w-full rounded-[6px] border border-[#2e2e2e] px-2 py-2 text-xs text-[#fafafa] transition hover:border-[#363636] hover:bg-[#1c1c1c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
+                >
+                  X
+                </button>
+              </form>
+            </div>
           )}
         </div>
       </aside>
 
       <div className='flex min-h-dvh min-w-0 flex-1 flex-col overflow-x-hidden bg-slate-100 text-slate-950'>
         <header className='sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur'>
-          <div className='mx-auto flex h-14 max-w-7xl items-center justify-between px-4 md:px-8'>
+          <div className='mx-auto flex h-14 max-w-7xl items-center justify-between gap-3 px-4 md:px-8'>
             <button
               type='button'
               aria-label='Abrir navegación'
@@ -554,9 +566,11 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
             >
               Menú
             </button>
-            <div className='flex items-center gap-3'>
-              <p className='text-sm font-semibold text-slate-900'>{currentModule}</p>
-              <span className='rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600'>{role}</span>
+            <div className='flex min-w-0 flex-1 items-center gap-2'>
+              <p className='truncate text-sm font-semibold text-slate-900'>{currentModule}</p>
+              <span className='shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize text-slate-600'>
+                {role === 'admin' ? 'Administrador' : 'Cajero'}
+              </span>
             </div>
             <div className='flex items-center gap-2'>
               <WorkspaceAlertsBell />
@@ -574,7 +588,6 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
                   </span>
                 </Link>
               ) : null}
-              <p className='hidden text-sm text-slate-600 md:block'>Usuario: {username}</p>
             </div>
           </div>
         </header>

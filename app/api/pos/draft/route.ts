@@ -9,6 +9,8 @@ const draftItemSchema = z.object({
   sku: z.string().min(1).max(64),
   productName: z.string().min(1).max(160),
   unitPrice: z.number().nonnegative(),
+  supportsWeight: z.boolean().optional(),
+  ivaRate: z.number().min(0).max(1).nullable().optional(),
   unitMode: z.enum(['piece', 'weight']),
   quantityInput: z.string().min(1).max(24)
 })
@@ -18,7 +20,8 @@ const draftPayloadSchema = z.object({
   paymentMethod: z.enum(['cash', 'card', 'credit']),
   amountReceived: z.number().nonnegative().nullable(),
   creditCustomerName: z.string().max(120).optional(),
-  creditCustomerPhone: z.string().max(40).optional()
+  creditCustomerPhone: z.string().max(40).optional(),
+  updatedAt: z.string().datetime({ offset: true }).optional()
 })
 
 export async function GET(request: Request) {

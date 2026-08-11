@@ -1,11 +1,21 @@
+export const ARCHIVED_AISLE = '__archived__'
+
 export type LowStockComparable = {
   stock: number
   minStock: number
+  aisle?: string | null
 }
 
 export const DEFAULT_MIN_STOCK = 20
 
-export const isLowStockItem = (item: LowStockComparable) => item.stock <= item.minStock
+export const isArchivedInventoryItem = (item: { aisle?: string | null }) =>
+  item.aisle === ARCHIVED_AISLE
+
+/** Low-stock alerts never include archived catalog rows. */
+export const isLowStockItem = (item: LowStockComparable) => {
+  if (isArchivedInventoryItem(item)) return false
+  return item.stock <= item.minStock
+}
 
 export const getLowStockUrgency = (item: LowStockComparable) => {
   const threshold = Math.max(1, item.minStock)

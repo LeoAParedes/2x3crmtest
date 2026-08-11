@@ -36,22 +36,26 @@ const quickCards = [
   {
     href: '/pos',
     title: 'Abrir punto de venta',
-    description: 'Inicia cobros, tickets y cierre de caja.'
+    description: 'Inicia cobros, tickets y cierre de caja.',
+    roles: ['admin', 'cashier'] as const
   },
   {
     href: '/bitacora',
     title: 'Revisar bitácora',
-    description: 'Audita operaciones del sistema por tipo y estado.'
+    description: 'Audita operaciones del sistema por tipo y estado.',
+    roles: ['admin', 'cashier'] as const
   },
   {
     href: '/inventario?shortcut=ajuste',
     title: 'Registrar ajuste rápido',
-    description: 'Corrige diferencias de stock en caliente.'
+    description: 'Corrige diferencias de stock en caliente.',
+    roles: ['admin'] as const
   },
   {
     href: '/finanzas',
     title: 'Control de finanzas',
-    description: 'Visualiza saldos, cobranza y pendientes.'
+    description: 'Visualiza saldos, cobranza y pendientes.',
+    roles: ['admin'] as const
   }
 ]
 
@@ -106,7 +110,9 @@ export const OperationsClient = ({ role }: OperationsClientProps) => {
       </section>
 
       <section className='mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
-        {(role === 'cashier' ? quickCards.filter(card => card.href !== '/finanzas') : quickCards).map(card => (
+        {quickCards
+          .filter(card => card.roles.includes(role))
+          .map(card => (
           <Link key={card.href} href={card.href} className='rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-emerald-200 hover:shadow'>
             <h2 className='text-sm font-semibold text-slate-900'>{card.title}</h2>
             <p className='mt-1 text-sm text-slate-600'>{card.description}</p>

@@ -18,9 +18,13 @@ export default async function PosPage() {
   return (
     <WorkspaceShell username={actor.username} role={actor.role}>
       {runtime.openSession ? (
-        <PosClient cashierUsername={actor.username} />
+        <PosClient cashierUsername={actor.username} role={actor.role} />
       ) : (
-        <PosOpenShift username={actor.username} />
+        <PosOpenShift
+          username={actor.username}
+          role={actor.role}
+          exclusiveCashierSession={runtime.exclusiveCashierSession}
+        />
       )}
     </WorkspaceShell>
   )

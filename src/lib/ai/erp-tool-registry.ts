@@ -125,7 +125,7 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
   low_stock_count: {
     id: 'low_stock_count',
     description:
-      'Cuenta InventoryItem donde stock <= minStock (alerta de inventario) y lista hasta 10 ejemplos con SKU y unidades.',
+      'Cuenta InventoryItem activos donde stock <= minStock (excluye archivados) y lista hasta 10 ejemplos con SKU y unidades.',
     parameters: {
       type: 'object',
       properties: {},

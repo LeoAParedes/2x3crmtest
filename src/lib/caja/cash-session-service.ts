@@ -11,8 +11,35 @@ import {
   toBusinessDayKey
 } from '@/src/lib/caja/shift-windows'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
+import type { CrmRole } from '@/src/lib/security/rbac'
 
 const toMoney = (value: number) => Number(value.toFixed(2))
+
+/** Only one cashier may hold an open cash session. Admins are exempt. */
+export const shouldBlockCashierOpenForExclusiveSession = (
+  actorRole: CrmRole,
+  occupyingCashierUsername: string | null | undefined
+) => actorRole === 'cashier' && Boolean(occupyingCashierUsername)
+
+const findOpenCashierOwnedSession = async (
+  prisma: Awaited<ReturnType<typeof getPrisma>>,
+  excludeAuthUserId?: string
+) => {
+  return prisma.cashSession.findFirst({
+    where: {
+      status: 'open',
+      cashierProfile: { role: 'cashier' },
+      ...(excludeAuthUserId ? { cashierAuthUserId: { not: excludeAuthUserId } } : {})
+    },
+    orderBy: { openedAt: 'desc' },
+    select: {
+      id: true,
+      cashierUsername: true,
+      cashierAuthUserId: true,
+      openedAt: true
+    }
+  })
+}
 
 const mapSession = (session: {
   id: string
@@ -62,6 +89,11 @@ export const getCashierRuntimeState = async (actor: AuthenticatedActor) => {
     orderBy: { openedAt: 'desc' }
   })
 
+  const occupyingCashierSession =
+    actor.role === 'cashier' && !openSession
+      ? await findOpenCashierOwnedSession(prisma, actor.userId)
+      : null
+
   const gate = (profile?.cashierGate || 'ready') as 'ready' | 'on_shift' | 'must_logout'
   const currentSlot = resolveCashShiftSlot()
 
@@ -69,7 +101,13 @@ export const getCashierRuntimeState = async (actor: AuthenticatedActor) => {
     gate: actor.role === 'admin' ? (openSession ? 'on_shift' : 'ready') : gate,
     openSession: openSession ? mapSession(openSession) : null,
     currentShiftSlot: currentSlot,
-    outsideShiftHours: currentSlot === null
+    outsideShiftHours: currentSlot === null,
+    exclusiveCashierSession: occupyingCashierSession
+      ? {
+          cashierUsername: occupyingCashierSession.cashierUsername,
+          openedAt: occupyingCashierSession.openedAt.toISOString()
+        }
+      : null
   }
 }
 
@@ -87,6 +125,13 @@ export const openCashSession = async (rawInput: unknown, actor: AuthenticatedAct
   })
   if (existing) {
     throw new Error('CASH_SESSION_ALREADY_OPEN')
+  }
+
+  if (actor.role === 'cashier') {
+    const occupying = await findOpenCashierOwnedSession(prisma)
+    if (shouldBlockCashierOpenForExclusiveSession(actor.role, occupying?.cashierUsername)) {
+      throw new Error(`CASH_SESSION_CASHIER_OCCUPIED:${occupying?.cashierUsername || 'cajero'}`)
+    }
   }
 
   const bounds = getShiftSlotBounds(shiftSlot, now)
@@ -110,6 +155,19 @@ export const openCashSession = async (rawInput: unknown, actor: AuthenticatedAct
   }
 
   const session = await prisma.$transaction(async tx => {
+    if (actor.role === 'cashier') {
+      const occupying = await tx.cashSession.findFirst({
+        where: {
+          status: 'open',
+          cashierProfile: { role: 'cashier' }
+        },
+        select: { cashierUsername: true }
+      })
+      if (shouldBlockCashierOpenForExclusiveSession(actor.role, occupying?.cashierUsername)) {
+        throw new Error(`CASH_SESSION_CASHIER_OCCUPIED:${occupying?.cashierUsername || 'cajero'}`)
+      }
+    }
+
     const created = await tx.cashSession.create({
       data: {
         cashierProfileId: actor.profileId,

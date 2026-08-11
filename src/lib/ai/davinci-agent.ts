@@ -5,6 +5,7 @@ import type { ChatReply, CrmNormalizedMessage } from '@/src/lib/crm/channel-sche
 import type { MastraSettings } from '@/src/lib/crm/mastra-settings'
 import {
   formatDeterministicErpReply,
+  formatLocalBusinessNow,
   isErpDataQuestion,
   parseBusinessDateMention,
   runDeterministicErpDbReply
@@ -50,7 +51,7 @@ const writeAgentDebugLog = (payload: {
 }
 // #endregion
 
-const buildSystemPrompt = (settings: MastraSettings) => `
+const buildSystemPrompt = (settings: MastraSettings, localNowLabel: string) => `
 Eres DavinciAi, consultor de negocio del ERP 2x3crmtest (POS + inventario + finanzas).
 Responde siempre en español, claro y breve (máximo ${settings.maxReplyChars} caracteres).
 
@@ -66,6 +67,7 @@ Modelo de datos (solo vía tools):
 - InventoryItem: stock/precios.
 - P&L: ingresos − egresos.
 - Zona: ${FINANCE_TIME_ZONE}. Día desde 00:00 local.
+- Ahora local: ${localNowLabel}
 
 Reglas:
 1. Preguntas de negocio: llama tools frescas antes de responder.
@@ -73,6 +75,7 @@ Reglas:
 3. No pidas ni ejecutes SQL.
 4. Distingue ventas, egresos y ganancia.
 5. Si “hoy” es 0, usa week/recent_pos_sales antes de concluir que no hubo ventas.
+6. Preguntas de día/hora/fecha (sin métricas): responde con “Ahora local”; no uses tools de ventas.
 
 Instrucciones del administrador:
 ${settings.instructions}
@@ -111,6 +114,7 @@ export const runDavinciErpAgent = async (
   }
 
   const requiresDbFacts = isErpDataQuestion(message.message)
+  const localNowLabel = formatLocalBusinessNow()
   const explicitBusinessDate = parseBusinessDateMention(message.message)
   if (requiresDbFacts && explicitBusinessDate) {
     const deterministic = await runDeterministicErpDbReply(message.message, allowedTools)
@@ -130,7 +134,7 @@ export const runDavinciErpAgent = async (
 
   const tools = toOpenAiTools(allowedTools)
   const messages: OpenAiChatMessage[] = [
-    { role: 'system', content: buildSystemPrompt(settings) },
+    { role: 'system', content: buildSystemPrompt(settings, localNowLabel) },
     {
       role: 'user',
       content: `
@@ -138,8 +142,9 @@ Canal: ${message.channel}
 Sesión: ${message.sessionId}
 Locale: ${settings.defaultLocale}
 Zona: ${FINANCE_TIME_ZONE}
+Ahora local: ${localNowLabel}
 Pregunta del usuario: ${message.message}
-${requiresDbFacts ? 'OBLIGATORIO: consulta tools de la base de datos antes de responder. Cero cifras sin tool.' : 'Si mencionas cifras, deben venir de tools.'}
+${requiresDbFacts ? 'OBLIGATORIO: consulta tools de la base de datos antes de responder. Cero cifras sin tool.' : 'Si mencionas cifras de negocio, deben venir de tools. Día/hora puedes tomarlos de “Ahora local”.'}
 `.trim()
     }
   ]

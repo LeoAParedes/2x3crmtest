@@ -76,41 +76,7 @@ export const ConfiguracionClient = () => {
       </div>
 
       <div className='mt-6' role='tabpanel'>
-        {tab === 'general' ? (
-          <div className='space-y-6'>
-            <PosSettingsPanel />
-            <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
-              <h2 className='text-lg font-semibold text-slate-950'>Accesos rápidos</h2>
-              <ul className='mt-4 space-y-2 text-sm text-slate-700'>
-                <li>
-                  <button
-                    type='button'
-                    className='font-medium text-emerald-700 underline'
-                    onClick={() => handleTabChange('chatbot')}
-                    aria-label='Ir a configuración del chatbot'
-                  >
-                    Configurar DavinciAi y Evolution API
-                  </button>
-                </li>
-                <li>
-                  <button
-                    type='button'
-                    className='font-medium text-emerald-700 underline'
-                    onClick={() => handleTabChange('cajeros')}
-                    aria-label='Ir a cajeros'
-                  >
-                    Gestionar cajeros
-                  </button>
-                </li>
-                <li>
-                  <Link href='/caja' className='font-medium text-emerald-700 underline' aria-label='Ir a turno y corte'>
-                    Abrir / cerrar turno de caja
-                  </Link>
-                </li>
-              </ul>
-            </section>
-          </div>
-        ) : null}
+        {tab === 'general' ? <PosSettingsPanel /> : null}
 
         {tab === 'chatbot' ? <ChatbotPanel /> : null}
         {tab === 'cajeros' ? <CashiersPanel /> : null}

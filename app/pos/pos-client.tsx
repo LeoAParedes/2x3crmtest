@@ -1,14 +1,24 @@
 'use client'
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 
+import { PosClock } from '@/app/pos/pos-clock'
+import { PosCobroMode } from '@/app/pos/pos-cobro-mode'
+import { AdminAuthModal } from '@/app/pos/admin-auth-modal'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
+import {
+  applyDiscountToSaleTotals,
+  selectBestPromotion,
+  type PromoCandidate
+} from '@/src/lib/pos/promo-engine'
 import { calculateLineTotals, calculateSaleTotals, type IvaPolicy } from '@/src/lib/pos/sale-schema'
 import { printTicketText } from '@/src/lib/pos/print-ticket'
 import { buildSaleTicketText, type TicketSale } from '@/src/lib/pos/ticket-format'
+import type { CrmRole } from '@/src/lib/security/rbac'
 
 const DESKTOP_VIEWPORT_QUERY = '(min-width: 1024px)'
+const COBRO_MODE_STORAGE_KEY = 'pos_cobro_mode'
 
 const subscribeDesktopViewport = (onStoreChange: () => void) => {
   const mediaQuery = window.matchMedia(DESKTOP_VIEWPORT_QUERY)
@@ -98,12 +108,16 @@ type PosDraft = {
   amountReceived: number | null
   creditCustomerName?: string
   creditCustomerPhone?: string
+  updatedAt?: string
 }
+
+type DraftSyncStatus = 'idle' | 'syncing' | 'synced' | 'error'
 
 const POS_DRAFT_COOKIE = 'pos_draft'
 
 type PosClientProps = {
   cashierUsername: string
+  role: CrmRole
 }
 
 export const parseWeightQuantity = (input: string) => {
@@ -209,7 +223,7 @@ const sanitizeCartItem = (item: CartItem): CartItem => {
 
 const sanitizeCartItems = (items: CartItem[]) => items.map(sanitizeCartItem)
 
-export const PosClient = ({ cashierUsername }: PosClientProps) => {
+export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -231,7 +245,17 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const [message, setMessage] = useState<string | null>(null)
   const [reloadToken, setReloadToken] = useState(0)
   const [draftLoaded, setDraftLoaded] = useState(false)
+  const [draftSyncStatus, setDraftSyncStatus] = useState<DraftSyncStatus>('idle')
   const [ivaPolicy, setIvaPolicy] = useState<IvaPolicy>({ showIvaOnReceipt: false, defaultIvaRate: 0.16 })
+  const [promoCandidates, setPromoCandidates] = useState<PromoCandidate[]>([])
+  const [isCobroMode, setIsCobroMode] = useState(false)
+  const [cobroCodeQuery, setCobroCodeQuery] = useState('')
+  const [pendingRemoveIndex, setPendingRemoveIndex] = useState<number | null>(null)
+  const [adminAuthSubmitting, setAdminAuthSubmitting] = useState(false)
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null)
+  const draftDirtyRef = useRef(false)
+  const draftSyncSeqRef = useRef(0)
+  const latestDraftRef = useRef<PosDraft | null>(null)
   // SSR-safe desktop default via useSyncExternalStore (avoids React #418 hydration mismatch).
   const isDesktopViewport = useSyncExternalStore(
     subscribeDesktopViewport,
@@ -241,6 +265,25 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   const [cartPanelUserOverride, setCartPanelUserOverride] = useState<boolean | null>(null)
   const isCartPanelOpen = cartPanelUserOverride ?? isDesktopViewport
 
+  useEffect(() => {
+    try {
+      setIsCobroMode(window.localStorage.getItem(COBRO_MODE_STORAGE_KEY) === '1')
+    } catch {
+      setIsCobroMode(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(COBRO_MODE_STORAGE_KEY, isCobroMode ? '1' : '0')
+    } catch {
+      // ignore storage failures
+    }
+    document.body.classList.toggle('pos-cobro-mode', isCobroMode)
+    return () => {
+      document.body.classList.remove('pos-cobro-mode')
+    }
+  }, [isCobroMode])
 
   useEffect(() => {
     let cancelled = false
@@ -261,7 +304,19 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
         // keep defaults
       }
     }
+    const loadPromos = async () => {
+      try {
+        const response = await fetch('/api/pos/promos')
+        const payload = (await response.json()) as { success?: boolean; promos?: PromoCandidate[] }
+        if (!cancelled && response.ok && payload.promos) {
+          setPromoCandidates(payload.promos)
+        }
+      } catch {
+        // keep empty promos
+      }
+    }
     void loadPosSettings()
+    void loadPromos()
     return () => {
       cancelled = true
     }
@@ -307,9 +362,37 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     [cart, ivaPolicy]
   )
 
+  const bestPromo = useMemo(() => {
+    const promoLines = cart.map((item, index) => {
+      const quantity =
+        item.unitMode === 'weight'
+          ? parseWeightQuantity(item.quantityInput)
+          : parsePieceQuantity(item.quantityInput)
+      const lineSubtotal = cartLineTotals[index]?.lineSubtotal ?? 0
+      return {
+        inventoryItemId: item.inventoryItemId,
+        quantity,
+        unitPrice: item.unitPrice,
+        lineSubtotal
+      }
+    })
+    return selectBestPromotion(promoCandidates, promoLines)
+  }, [cart, cartLineTotals, promoCandidates])
+
+  const discountedTotals = useMemo(
+    () =>
+      applyDiscountToSaleTotals({
+        subtotal: saleTotals.subtotal,
+        tax: saleTotals.tax,
+        discountTotal: bestPromo?.discountTotal || 0
+      }),
+    [saleTotals.subtotal, saleTotals.tax, bestPromo]
+  )
+
   const subtotal = saleTotals.subtotal
-  const tax = saleTotals.tax
-  const total = saleTotals.total
+  const tax = discountedTotals.tax
+  const discountTotal = discountedTotals.discountTotal
+  const total = discountedTotals.total
   const parsedAmountReceived = parseCurrencyInput(amountReceived)
   const change = paymentMethod === 'cash' ? calculateCashChange(parsedAmountReceived, total) : 0
 
@@ -330,13 +413,74 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     })
   }, [ticket])
 
-  const persistDraft = async (draft: PosDraft) => {
+  const buildDraftPayload = (
+    nextCart: CartItem[],
+    nextPaymentMethod: PaymentMethod,
+    nextAmountReceived: number | null,
+    nextCreditName: string,
+    nextCreditPhone: string
+  ): PosDraft => ({
+    cart: nextCart.map(item => ({
+      inventoryItemId: item.inventoryItemId,
+      sku: item.sku,
+      productName: item.productName,
+      unitPrice: item.unitPrice,
+      supportsWeight: item.supportsWeight,
+      ivaRate: item.ivaRate ?? null,
+      unitMode: item.unitMode,
+      quantityInput: item.quantityInput
+    })),
+    paymentMethod: nextPaymentMethod,
+    amountReceived: nextAmountReceived,
+    creditCustomerName: nextCreditName.trim() || undefined,
+    creditCustomerPhone: nextCreditPhone.trim() || undefined,
+    updatedAt: new Date().toISOString()
+  })
+
+  const persistDraft = async (draft: PosDraft, options?: { immediate?: boolean }) => {
+    latestDraftRef.current = draft
     writeDraftCookie(draft)
-    await fetch('/api/pos/draft', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(draft)
-    }).catch(() => {})
+    const seq = ++draftSyncSeqRef.current
+    setDraftSyncStatus('syncing')
+    try {
+      const response = await fetch('/api/pos/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+        keepalive: Boolean(options?.immediate)
+      })
+      if (!response.ok) {
+        throw new Error('POS_DRAFT_SYNC_FAILED')
+      }
+      if (seq !== draftSyncSeqRef.current) return
+      setDraftSyncStatus('synced')
+    } catch {
+      if (seq !== draftSyncSeqRef.current) return
+      setDraftSyncStatus('error')
+    }
+  }
+
+  const queueDraftPersist = (
+    nextCart: CartItem[],
+    nextPaymentMethod: PaymentMethod = paymentMethod,
+    nextAmountReceived: number | null = parsedAmountReceived,
+    nextCreditName = creditCustomerName,
+    nextCreditPhone = creditCustomerPhone,
+    options?: { immediate?: boolean }
+  ) => {
+    draftDirtyRef.current = true
+    const draft = buildDraftPayload(
+      nextCart,
+      nextPaymentMethod,
+      nextAmountReceived,
+      nextCreditName,
+      nextCreditPhone
+    )
+    if (options?.immediate) {
+      void persistDraft(draft, { immediate: true })
+      return
+    }
+    void persistDraft(draft)
   }
 
   useEffect(() => {
@@ -379,27 +523,31 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   useEffect(() => {
     let cancelled = false
 
+    const applyDraft = (draft: PosDraft) => {
+      setCart(sanitizeCartItems(draft.cart))
+      setPaymentMethod(draft.paymentMethod)
+      setAmountReceived(draft.amountReceived !== null ? String(draft.amountReceived) : '')
+      setCreditCustomerName(draft.creditCustomerName ?? '')
+      setCreditCustomerPhone(draft.creditCustomerPhone ?? '')
+    }
+
     const loadDraft = async () => {
       const cookieDraft = readDraftCookie()
-      if (cookieDraft && !cancelled) {
-        setCart(sanitizeCartItems(cookieDraft.cart))
-        setPaymentMethod(cookieDraft.paymentMethod)
-        setAmountReceived(cookieDraft.amountReceived !== null ? String(cookieDraft.amountReceived) : '')
-        setCreditCustomerName(cookieDraft.creditCustomerName ?? '')
-        setCreditCustomerPhone(cookieDraft.creditCustomerPhone ?? '')
+      if (cookieDraft && !cancelled && !draftDirtyRef.current) {
+        applyDraft(cookieDraft)
       }
 
       try {
         const response = await fetch('/api/pos/draft')
         const data = (await response.json()) as { success?: boolean; draft?: PosDraft | null }
-        if (response.ok && data.success && data.draft && !cancelled) {
-          setCart(sanitizeCartItems(data.draft.cart))
-          setPaymentMethod(data.draft.paymentMethod)
-          setAmountReceived(data.draft.amountReceived !== null ? String(data.draft.amountReceived) : '')
-          setCreditCustomerName(data.draft.creditCustomerName ?? '')
-          setCreditCustomerPhone(data.draft.creditCustomerPhone ?? '')
+        if (response.ok && data.success && data.draft && !cancelled && !draftDirtyRef.current) {
+          applyDraft(data.draft)
+          writeDraftCookie(data.draft)
+          setDraftSyncStatus('synced')
         }
-      } catch {}
+      } catch {
+        // keep cookie draft
+      }
 
       if (!cancelled) {
         setDraftLoaded(true)
@@ -416,18 +564,45 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
   useEffect(() => {
     if (!draftLoaded) return
     const timeoutId = window.setTimeout(() => {
-      void persistDraft({
+      draftDirtyRef.current = true
+      const draft = buildDraftPayload(
         cart,
         paymentMethod,
-        amountReceived: parsedAmountReceived,
-        creditCustomerName: creditCustomerName.trim() || undefined,
-        creditCustomerPhone: creditCustomerPhone.trim() || undefined
-      })
-    }, 300)
+        parsedAmountReceived,
+        creditCustomerName,
+        creditCustomerPhone
+      )
+      void persistDraft(draft)
+    }, 180)
     return () => {
       window.clearTimeout(timeoutId)
     }
   }, [cart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, draftLoaded])
+
+  useEffect(() => {
+    const flushLatestDraft = () => {
+      const draft = latestDraftRef.current
+      if (!draft) return
+      writeDraftCookie(draft)
+      void fetch('/api/pos/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+        keepalive: true
+      }).catch(() => {})
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushLatestDraft()
+    }
+
+    window.addEventListener('pagehide', flushLatestDraft)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener('pagehide', flushLatestDraft)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
 
   const handleAddToCart = (product: Product) => {
     setMessage(null)
@@ -462,21 +637,114 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
           }
         ]
     setCart(nextCart)
+    queueDraftPersist(nextCart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, {
+      immediate: true
+    })
+  }
+
+  const handleCobroCodeSubmit = async () => {
+    const code = cobroCodeQuery.trim()
+    if (!code) return
+    setMessage(null)
+    try {
+      const searchParams = new URLSearchParams({
+        q: code,
+        searchField: 'sku',
+        sortBy: 'sku',
+        sortDirection: 'asc',
+        page: '1',
+        pageSize: '20'
+      })
+      const response = await fetch(`/api/pos/inventory?${searchParams.toString()}`)
+      const data = (await response.json()) as InventoryResponse
+      if (!response.ok || !data.success) {
+        throw new Error('No fue posible buscar el código')
+      }
+      const normalized = code.toLowerCase()
+      const exact =
+        data.items.find(item => item.sku.toLowerCase() === normalized) ||
+        data.items.find(item => item.sku.toLowerCase().startsWith(normalized)) ||
+        data.items[0]
+      if (!exact) {
+        setMessage(`Sin producto para el código ${code}`)
+        return
+      }
+      handleAddToCart(exact)
+      setCobroCodeQuery('')
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Error al buscar código')
+    }
+  }
+
+  const handleToggleCobroMode = () => {
+    setIsCobroMode(current => !current)
   }
 
   const handleUpdateCartItem = (index: number, patch: Partial<CartItem>) => {
     const nextCart = cart.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item))
     setCart(nextCart)
+    queueDraftPersist(nextCart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, {
+      immediate: true
+    })
   }
 
   const handleRemoveCartItem = (index: number) => {
     const nextCart = cart.filter((_, itemIndex) => itemIndex !== index)
     setCart(nextCart)
+    queueDraftPersist(nextCart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, {
+      immediate: true
+    })
+  }
+
+  const handleRequestRemoveCartItem = (index: number) => {
+    if (role === 'admin') {
+      handleRemoveCartItem(index)
+      return
+    }
+    setAdminAuthError(null)
+    setPendingRemoveIndex(index)
+  }
+
+  const handleCancelAdminAuth = () => {
+    if (adminAuthSubmitting) return
+    setPendingRemoveIndex(null)
+    setAdminAuthError(null)
+  }
+
+  const handleConfirmAdminAuth = async (input: { username: string; password: string }) => {
+    if (pendingRemoveIndex === null) return
+    setAdminAuthSubmitting(true)
+    setAdminAuthError(null)
+    try {
+      const item = cart[pendingRemoveIndex]
+      const response = await fetch('/api/pos/admin-authorize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: input.username,
+          password: input.password,
+          reason: item
+            ? `Remover del carrito: ${item.productName} (${item.sku})`
+            : 'Remover producto del carrito POS',
+          scope: 'cart_remove_item'
+        })
+      })
+      const payload = (await response.json()) as { success?: boolean; message?: string }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'Clave de administrador inválida')
+      }
+      handleRemoveCartItem(pendingRemoveIndex)
+      setPendingRemoveIndex(null)
+    } catch (error) {
+      setAdminAuthError(error instanceof Error ? error.message : 'No fue posible autorizar')
+    } finally {
+      setAdminAuthSubmitting(false)
+    }
   }
 
   const handleAdjustCartQuantity = (index: number, direction: -1 | 1) => {
-    setCart(currentCart =>
-      currentCart.map((item, itemIndex) => {
+    setCart(currentCart => {
+      const nextCart = currentCart.map((item, itemIndex) => {
         if (itemIndex !== index) return item
         const step = quantityStepByMode[item.unitMode]
         const min = quantityMinByMode[item.unitMode]
@@ -487,7 +755,11 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
           quantityInput: formatQuantityInputValue(nextValue, item.unitMode)
         }
       })
-    )
+      queueDraftPersist(nextCart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, {
+        immediate: true
+      })
+      return nextCart
+    })
   }
 
   const handleSubmitSale = async () => {
@@ -546,13 +818,10 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       setAmountReceived('')
       setCreditCustomerName('')
       setCreditCustomerPhone('')
-      await persistDraft({
-        cart: [],
-        paymentMethod,
-        amountReceived: null,
-        creditCustomerName: undefined,
-        creditCustomerPhone: undefined
-      })
+      await persistDraft(
+        buildDraftPayload([], paymentMethod, null, '', ''),
+        { immediate: true }
+      )
       setReloadToken(current => current + 1)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Error al registrar venta')
@@ -646,8 +915,29 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
     }
   }, [isTicketModalOpen])
 
+  const draftSyncLabel =
+    draftSyncStatus === 'syncing'
+      ? 'Sincronizando con servidor…'
+      : draftSyncStatus === 'synced'
+        ? 'Guardado en servidor'
+        : draftSyncStatus === 'error'
+          ? 'Error al sincronizar'
+          : 'Sin cambios pendientes'
+
   const cartPanelContent = (
     <>
+      <p
+        className={`rounded-md px-2 py-1 text-xs font-medium ${
+          draftSyncStatus === 'error'
+            ? 'bg-rose-50 text-rose-700'
+            : draftSyncStatus === 'syncing'
+              ? 'bg-amber-50 text-amber-800'
+              : 'bg-emerald-50 text-emerald-700'
+        }`}
+        aria-live='polite'
+      >
+        {draftSyncLabel}
+      </p>
       <div className='space-y-2'>
         {cart.map((item, index) => {
           const minQuantity = quantityMinByMode[item.unitMode]
@@ -739,7 +1029,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
                 </button>
                 <button
                   type='button'
-                  onClick={() => handleRemoveCartItem(index)}
+                  onClick={() => handleRequestRemoveCartItem(index)}
                   aria-label={`Eliminar del carrito ${item.productName}`}
                   className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-rose-300 text-base font-semibold leading-none text-rose-600 hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200'
                 >
@@ -754,6 +1044,10 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
 
       <div className='rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm leading-5 text-slate-700'>
         <div className='flex justify-between gap-2'><span>Subtotal</span><span className='tabular-nums'>{formatMxnCurrency(subtotal)}</span></div>
+        <div className='flex justify-between gap-2 text-emerald-700'>
+          <span>Descuentos{bestPromo?.promotionName ? ` · ${bestPromo.promotionName}` : ''}</span>
+          <span className='tabular-nums'>−{formatMxnCurrency(discountTotal)}</span>
+        </div>
         <div className='flex justify-between gap-2'>
           <span>{ivaPolicy.showIvaOnReceipt ? 'IVA' : 'Impuesto'}</span>
           <span className='tabular-nums'>{formatMxnCurrency(tax)}</span>
@@ -837,31 +1131,118 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
 
   return (
     <main className='mx-auto max-w-7xl px-4 py-8 md:px-8'>
+      {isCobroMode ? (
+        <PosCobroMode
+          cashierUsername={cashierUsername}
+          codeQuery={cobroCodeQuery}
+          onCodeQueryChange={setCobroCodeQuery}
+          onCodeSubmit={() => {
+            void handleCobroCodeSubmit()
+          }}
+          lines={cart.map((item, index) => {
+            const line = cartLineTotals[index]
+            const lineDiscount = bestPromo?.lineDiscounts[item.inventoryItemId] || 0
+            const quantityLabel =
+              item.unitMode === 'weight'
+                ? `${item.quantityInput} kg`
+                : `${item.quantityInput} pz`
+            return {
+              key: `${item.inventoryItemId}-${item.unitMode}-${index}`,
+              productName: item.productName,
+              sku: item.sku,
+              quantityLabel,
+              lineTotal: Number(((line?.lineTotalWithTax ?? 0) - lineDiscount).toFixed(2)),
+              lineDiscount
+            }
+          })}
+          totals={{
+            subtotal,
+            discountTotal,
+            tax,
+            total,
+            promoName: bestPromo?.promotionName || null
+          }}
+          showIva={ivaPolicy.showIvaOnReceipt}
+          paymentMethod={paymentMethod}
+          onPaymentMethodChange={nextMethod => {
+            setPaymentMethod(nextMethod)
+            if (nextMethod !== 'cash') setAmountReceived('')
+          }}
+          amountReceived={amountReceived}
+          onAmountReceivedChange={setAmountReceived}
+          change={change}
+          creditCustomerName={creditCustomerName}
+          creditCustomerPhone={creditCustomerPhone}
+          onCreditCustomerNameChange={setCreditCustomerName}
+          onCreditCustomerPhoneChange={setCreditCustomerPhone}
+          canCheckout={canCheckout}
+          submittingSale={submittingSale}
+          message={message}
+          onCheckout={() => {
+            void handleSubmitSale()
+          }}
+          onRemoveLine={handleRequestRemoveCartItem}
+          onAdjustQuantity={handleAdjustCartQuantity}
+          onExitCobroMode={() => setIsCobroMode(false)}
+          draftSyncLabel={draftSyncLabel}
+          draftSyncStatus={draftSyncStatus}
+        />
+      ) : null}
+
       <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div>
             <p className='text-sm font-semibold uppercase tracking-[0.15em] text-emerald-700'>Punto de venta</p>
             <h1 className='mt-2 text-3xl font-semibold text-slate-950'>Caja activa: {cashierUsername}</h1>
             <p className='mt-2 text-sm text-slate-600'>
-              Busca por SKU o nombre, agrega al carrito y confirma la venta con persistencia de borrador en cookie y servidor.
+              Busca por SKU o nombre, agrega al carrito y confirma la venta. Usa modo cobro para tablet o F11.
             </p>
           </div>
-          <button
-            type='button'
-            onClick={() => handleSetCartPanelOpen(!isCartPanelVisible)}
-            aria-expanded={isCartPanelVisible}
-            aria-controls={cartDrawerId}
-            aria-label={isCartPanelVisible ? 'Ocultar carrito y cobro' : 'Mostrar carrito y cobro'}
-            className='inline-flex h-12 min-w-12 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-100'
-          >
-            <span aria-hidden='true' className='text-lg leading-none'>
-              🛒
-            </span>
-            <span>Carrito</span>
-            <span className='rounded-full bg-emerald-600 px-2 py-0.5 text-xs text-white'>
-              {formatCartBadgeCount(distinctProductCount)}
-            </span>
-          </button>
+          <div className='flex flex-wrap items-center gap-2'>
+            <PosClock className='rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700' />
+            <button
+              type='button'
+              role='switch'
+              aria-checked={isCobroMode}
+              aria-label='Activar modo cobro'
+              onClick={handleToggleCobroMode}
+              className={`inline-flex min-h-12 items-center gap-3 rounded-xl border px-4 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+                isCobroMode
+                  ? 'border-emerald-600 bg-emerald-600 text-white'
+                  : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+              }`}
+            >
+              <span
+                aria-hidden='true'
+                className={`relative h-6 w-11 rounded-full transition ${
+                  isCobroMode ? 'bg-emerald-300' : 'bg-slate-300'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                    isCobroMode ? 'left-5' : 'left-0.5'
+                  }`}
+                />
+              </span>
+              Modo cobro
+            </button>
+            <button
+              type='button'
+              onClick={() => handleSetCartPanelOpen(!isCartPanelVisible)}
+              aria-expanded={isCartPanelVisible}
+              aria-controls={cartDrawerId}
+              aria-label={isCartPanelVisible ? 'Ocultar carrito y cobro' : 'Mostrar carrito y cobro'}
+              className='inline-flex h-12 min-w-12 items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-100'
+            >
+              <span aria-hidden='true' className='text-lg leading-none'>
+                🛒
+              </span>
+              <span>Carrito</span>
+              <span className='rounded-full bg-emerald-600 px-2 py-0.5 text-xs text-white'>
+                {formatCartBadgeCount(distinctProductCount)}
+              </span>
+            </button>
+          </div>
         </div>
       </section>
 
@@ -1020,7 +1401,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       {ticket && isTicketModalOpen ? (
         <>
           <div
-            className='fixed inset-0 z-[70] bg-slate-950/70 no-print'
+            className='fixed inset-0 z-[110] bg-slate-950/70 no-print'
             aria-hidden='true'
             onClick={() => setIsTicketModalOpen(false)}
           />
@@ -1028,7 +1409,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
             role='dialog'
             aria-modal='true'
             aria-label='Ticket de venta para impresión'
-            className='fixed left-1/2 top-1/2 z-[80] w-[min(720px,94vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl print:static print:left-auto print:top-auto print:w-auto print:translate-x-0 print:translate-y-0 print:border-0 print:p-0 print:shadow-none'
+            className='fixed left-1/2 top-1/2 z-[120] w-[min(720px,94vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl print:static print:left-auto print:top-auto print:w-auto print:translate-x-0 print:translate-y-0 print:border-0 print:p-0 print:shadow-none'
           >
             <div className='no-print mb-4 flex items-center justify-between gap-3'>
               <div>
@@ -1059,6 +1440,18 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
           </section>
         </>
       ) : null}
+
+      <AdminAuthModal
+        open={pendingRemoveIndex !== null}
+        title='Autorización requerida'
+        description='Para quitar un producto ya registrado en el carrito se necesita la clave del administrador.'
+        submitting={adminAuthSubmitting}
+        error={adminAuthError}
+        onCancel={handleCancelAdminAuth}
+        onConfirm={input => {
+          void handleConfirmAdminAuth(input)
+        }}
+      />
     </main>
   )
 }

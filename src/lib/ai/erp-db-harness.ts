@@ -53,14 +53,73 @@ const MONTHS: Record<string, number> = {
   diciembre: 12
 }
 
-const ERP_DATA_PATTERN =
-  /\b(venta|ventas|ticket|tickets|ingreso|ingresos|egreso|egresos|gasto|gastos|ganancia|utilidad|pnl|p&l|flujo|caja|stock|inventario|sku|producto|productos|precio|low[\s-]?stock|bajo|n[oó]mina|renta|proveedor|finanzas|cu[aá]nto|total|promedio|top|ranking|hoy|semana|mes|periodo|ayer|agosto|enero|febrero|marzo|abril|mayo|junio|julio|septiembre|octubre|noviembre|diciembre)\b/i
+const normalizeIntentText = (message: string): string =>
+  message
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[¿?!.,;:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+/** Business nouns/verbs — temporal words alone (hoy, semana, agosto…) are not enough. */
+const ERP_SALES_SIGNAL =
+  /\b(venta|ventas|ticket|tickets|ingreso|ingresos|vendi[oó]|vendieron|vendimos|vendid[oa]s?|cobro|cobros)\b/
+const ERP_EXPENSE_SIGNAL = /\b(egreso|egresos|gasto|gastos|n[oó]mina|renta|proveedor)\b/
+const ERP_PROFIT_SIGNAL = /\b(ganancia|utilidad|pnl|p&l|flujo|caja|finanzas)\b/
+const ERP_INVENTORY_SIGNAL =
+  /\b(stock|inventario|sku|producto|productos|precio|low[\s-]?stock)\b/
+const ERP_METRIC_SIGNAL =
+  /\b(cu[aá]nto|cu[aá]ntos|cu[aá]ntas|total|promedio|top|ranking)\b/
+
+const hasStrongErpNoun = (text: string): boolean =>
+  ERP_SALES_SIGNAL.test(text) ||
+  ERP_EXPENSE_SIGNAL.test(text) ||
+  ERP_PROFIT_SIGNAL.test(text) ||
+  ERP_INVENTORY_SIGNAL.test(text)
+
+export const hasErpBusinessIntent = (message: string): boolean => {
+  const text = normalizeIntentText(message)
+  if (!text) return false
+  return hasStrongErpNoun(text) || ERP_METRIC_SIGNAL.test(text)
+}
+
+/** "Qué día/hora es hoy" — clock/calendar ask without ERP nouns. */
+const isNonBusinessClockQuestion = (text: string): boolean => {
+  const asksClockOrCalendar =
+    /\b(que|cual)\s+(dia|hora|fecha)\b/.test(text) ||
+    /\b(dia|hora|fecha)\s+(es|son)\b/.test(text) ||
+    /\bhora\s+actual\b/.test(text) ||
+    /\bfecha\s+(de\s+)?hoy\b/.test(text) ||
+    /\b(dia|hora)\s+y\s+(dia|hora)\b/.test(text)
+
+  if (!asksClockOrCalendar) return false
+  return !hasStrongErpNoun(text)
+}
 
 export const isErpDataQuestion = (message: string): boolean => {
-  const text = message.trim()
+  const text = normalizeIntentText(message)
   if (!text) return false
-  return ERP_DATA_PATTERN.test(text)
+  if (isNonBusinessClockQuestion(text)) return false
+  return hasErpBusinessIntent(text)
 }
+
+/** Wall-clock label for prompts (clock questions must not hit the DB harness). */
+export const formatLocalBusinessNow = (
+  now = new Date(),
+  timeZone = FINANCE_TIME_ZONE
+): string =>
+  new Intl.DateTimeFormat('es-MX', {
+    timeZone,
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  }).format(now)
 
 /** Resolve "ayer", "10 de agosto", "agosto 10", "2026-08-10" in America/Los_Angeles. */
 export const parseBusinessDateMention = (
@@ -161,7 +220,7 @@ export const selectErpToolsForQuestion = (
   message: string,
   allowedTools: ErpToolId[]
 ): Array<{ toolId: ErpToolId; args: Record<string, unknown> }> => {
-  const text = message.toLowerCase()
+  const text = normalizeIntentText(message)
   const picks: Array<{ toolId: ErpToolId; args: Record<string, unknown> }> = []
   const allow = (id: ErpToolId, args: Record<string, unknown> = {}) => {
     if (!allowedTools.includes(id)) return
@@ -169,19 +228,24 @@ export const selectErpToolsForQuestion = (
     picks.push({ toolId: id, args })
   }
 
+  // Clock/social phrasing must never map to sales tools because of bare "hoy".
+  if (!hasErpBusinessIntent(message) || isNonBusinessClockQuestion(text)) {
+    return picks
+  }
+
   if (parseBusinessDateMention(message)) {
     return picks
   }
 
-  const wantsInventory =
-    /\b(stock|inventario|sku|producto|productos|low[\s-]?stock|bajo)\b/.test(text)
-  const wantsExpenses = /\b(egreso|egresos|gasto|gastos|n[oó]mina|renta|proveedor)\b/.test(text)
-  const wantsProfit = /\b(ganancia|utilidad|pnl|p&l|flujo|caja)\b/.test(text)
+  const wantsInventory = ERP_INVENTORY_SIGNAL.test(text) || /\bbajo\b/.test(text)
+  const wantsExpenses = ERP_EXPENSE_SIGNAL.test(text)
+  const wantsProfit = ERP_PROFIT_SIGNAL.test(text)
   const wantsSales =
-    /\b(venta|ventas|ticket|tickets|ingreso|ingresos|cu[aá]nto|total|hoy|semana|mes)\b/.test(text) ||
+    ERP_SALES_SIGNAL.test(text) ||
+    /\b(cu[aá]nto|cu[aá]ntos|cu[aá]ntas|total)\b/.test(text) ||
     wantsProfit
-  const wantsTop = /\b(top|ranking|m[aá]s vendido)\b/.test(text)
-  const wantsRecent = /\b(reciente|últim|ultim|ticket|tickets|qu[eé] se vendi[oó])\b/.test(text)
+  const wantsTop = /\b(top|ranking|mas vendido)\b/.test(text)
+  const wantsRecent = /\b(reciente|ultim|ticket|tickets|que se vendio)\b/.test(text)
   const wantsAllTime = /\b(sistema|historial|todas|acumulad)\b/.test(text)
 
   if (wantsSales) {

@@ -1,7 +1,7 @@
 import { getPrisma } from '@/src/lib/db/prisma'
 import { getCashierRuntimeState } from '@/src/lib/caja/cash-session-service'
 import { listExpiryAlerts } from '@/src/lib/inventory/lot-service'
-import { isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { ARCHIVED_AISLE, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { getFinanceDashboard } from '@/src/lib/finance/finance-service'
 import { FINANCE_TIME_ZONE, getPeriodBounds } from '@/src/lib/finance/period'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
@@ -14,7 +14,10 @@ export const getTodayHubDashboard = async (actor: AuthenticatedActor) => {
     getCashierRuntimeState(actor),
     listExpiryAlerts(),
     prisma.inventoryItem.findMany({
-      select: { id: true, sku: true, productName: true, stock: true, minStock: true },
+      where: {
+        OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
+      },
+      select: { id: true, sku: true, productName: true, stock: true, minStock: true, aisle: true },
       take: 2000
     }),
     prisma.sale.groupBy({

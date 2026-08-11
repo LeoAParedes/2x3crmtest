@@ -20,14 +20,6 @@
 
 ---
 
-## Aviso de accesibilidad (WCAG)
-
-- Encabezados jerárquicos (`#` … `####`) para lector de pantalla.
-- Diagramas con **texto alternativo**.
-- Tablas con fila de encabezados; no use solo el color para errores.
-
----
-
 ## 1. Para quién es este manual
 
 | Audiencia | Uso |
@@ -253,9 +245,6 @@ Reporte: fecha/hora, usuario, módulo, pasos, mensaje/código, ID de venta.
 |-----------|-----|
 | [Manual técnico](../manual-tecnico/manual-tecnico-erp-supermercado.md) | APIs y despliegue |
 | [Control documental](../calidad/control-configuracion-documental.md) | Versiones y firmas |
-| [Guía de estilo](../calidad/guia-estilo-documentacion.md) | Cómo escribir docs |
-| [Índice KB](../README.md) | Portal documental |
-| Spec lotes/promos/caja | `docs/superpowers/specs/2026-08-11-lotes-promos-caja-dashboard-design.md` |
 
 ---
 
@@ -263,8 +252,8 @@ Reporte: fecha/hora, usuario, módulo, pasos, mensaje/código, ID de venta.
 
 | Rol | Nombre | Fecha | Evidencia |
 |-----|--------|-------|-----------|
-| Redacción | Equipo docs / asistente | 2026-08-11 | `docs/manual-usuario/` |
-| Validación técnica | _Pendiente_ | — | Flujos en https://2x3crmtest.vercel.app |
-| Aprobación clientes | _Pendiente_ | — | `registro-cambios-documentacion.md` |
+| Redacción | Leonardo Antonio Paredes  | 2026-08-11 | `docs/manual-usuario/` |
+| Validación técnica | Leonardo Antonio Paredes  | — | Flujos en https://2x3crmtest.vercel.app |
+| Aprobación clientes |Leonardo Antonio Paredes | — | `registro-cambios-documentacion.md` |
 
 Versión de trabajo alineada al software `1.0.0` · documento `1.1.0-MU`.

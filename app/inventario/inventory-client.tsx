@@ -340,10 +340,14 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [lowStockAlerts, setLowStockAlerts] = useState<InventoryItem[]>([])
   const [loadingLowStockAlerts, setLoadingLowStockAlerts] = useState(false)
   const [activePanelOverride, setActivePanelOverride] = useState<'inventory' | 'adjustments' | null>(null)
+  const canManageAdjustments = role === 'admin'
   const activePanel: 'inventory' | 'adjustments' =
-    activePanelOverride ?? (shortcut === 'ajuste' ? 'adjustments' : 'inventory')
+    !canManageAdjustments
+      ? 'inventory'
+      : activePanelOverride ?? (shortcut === 'ajuste' ? 'adjustments' : 'inventory')
 
   const setActivePanel = (next: 'inventory' | 'adjustments') => {
+    if (next === 'adjustments' && !canManageAdjustments) return
     setActivePanelOverride(next)
   }
   const [loadingAdjustments, setLoadingAdjustments] = useState(false)
@@ -538,7 +542,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }, [isInventorySettingsOpen, isLowStockAlertsOpen])
 
   useEffect(() => {
-    if (activePanel !== 'adjustments') return
+    if (!canManageAdjustments || activePanel !== 'adjustments') return
 
     let cancelled = false
     const loadAdjustments = async () => {
@@ -567,7 +571,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     return () => {
       cancelled = true
     }
-  }, [activePanel, refreshSeed])
+  }, [activePanel, canManageAdjustments, refreshSeed])
 
   const effectiveSelectedItemIds = useMemo(
     () => selectedItemIds.filter(id => items.some(item => item.id === id)),
@@ -804,19 +808,19 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }
 
   const submitAdjustment = async (payload: AdjustmentPayload): Promise<boolean> => {
+    if (!canManageAdjustments) {
+      pushToast('Solo administradores pueden aplicar ajustes de inventario', 'error')
+      return false
+    }
     setSubmittingAdjustment(true)
     setAdjustmentResult(null)
     try {
-      if (payload.operation === 'delete_product') {
-      }
       const response = await fetch('/api/inventario/ajustes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
       const result = (await response.json()) as InventoryAdjustmentsResponse
-      if (payload.operation === 'delete_product') {
-      }
       if (!response.ok || !result.success) {
         throw new Error(normalizeAdjustmentErrorMessage(result.message || 'No fue posible aplicar el ajuste'))
       }
@@ -1339,16 +1343,18 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
             >
               Inventario
             </button>
-            <button
-              type='button'
-              onClick={() => handleActivePanelChange('adjustments')}
-              aria-label='Ver vista de ajustes'
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                activePanel === 'adjustments' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              Ajustes
-            </button>
+            {canManageAdjustments ? (
+              <button
+                type='button'
+                onClick={() => handleActivePanelChange('adjustments')}
+                aria-label='Ver vista de ajustes'
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  activePanel === 'adjustments' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                Ajustes
+              </button>
+            ) : null}
           </div>
           <div className='flex items-center gap-2'>
             {role === 'admin' ? (

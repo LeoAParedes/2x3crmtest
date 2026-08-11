@@ -1,6 +1,10 @@
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { getPrisma } from '@/src/lib/db/prisma'
-import { compareLowStockUrgency } from '@/src/lib/inventory/low-stock'
+import {
+  ARCHIVED_AISLE,
+  compareLowStockUrgency,
+  isLowStockItem
+} from '@/src/lib/inventory/low-stock'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { buildInventorySearchWhere } from '@/src/lib/inventory/search-filter'
 import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
@@ -35,7 +39,7 @@ export async function GET(request: Request) {
   const archiveWhere = includeArchived
     ? undefined
     : {
-        OR: [{ aisle: null }, { aisle: { not: '__archived__' as const } }]
+        OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
       }
 
   const queryWhere = buildInventorySearchWhere(query, searchField)
@@ -65,7 +69,7 @@ export async function GET(request: Request) {
         }
       })
       const alertItems = alertCandidates
-        .filter(item => item.stock <= item.minStock)
+        .filter(item => isLowStockItem(item))
         .sort(compareLowStockUrgency)
         .slice(0, 50)
         .map(item => ({

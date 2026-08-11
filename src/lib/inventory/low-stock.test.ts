@@ -3,8 +3,31 @@ import { describe, expect, it } from 'vitest'
 import {
   getRestockBillableQuantity,
   getRestockDeficit,
-  getRestockEstimatedCost
+  getRestockEstimatedCost,
+  isArchivedInventoryItem,
+  isLowStockItem
 } from '@/src/lib/inventory/low-stock'
+
+describe('archived inventory alerts', () => {
+  it('detects archived aisle marker', () => {
+    expect(isArchivedInventoryItem({ aisle: '__archived__' })).toBe(true)
+    expect(isArchivedInventoryItem({ aisle: 'A1' })).toBe(false)
+  })
+
+  it('does not treat archived products as low-stock alerts', () => {
+    expect(
+      isLowStockItem({
+        stock: 0,
+        minStock: 20,
+        aisle: '__archived__'
+      })
+    ).toBe(false)
+  })
+
+  it('still flags active products below minimum stock', () => {
+    expect(isLowStockItem({ stock: 0, minStock: 20, aisle: null })).toBe(true)
+  })
+})
 
 describe('restock calculations', () => {
   it('computes deficit without off-by-one when stock is below minimum', () => {

@@ -21,6 +21,10 @@ export default async function InventarioPage({ searchParams }: InventarioPagePro
     redirect('/login')
   }
 
+  if (shortcut === 'ajuste' && actor.role !== 'admin') {
+    redirect('/inventario')
+  }
+
   return (
     <WorkspaceShell username={actor.username} role={actor.role}>
       <Suspense fallback={<main className='px-4 py-8 text-sm text-slate-600'>Cargando inventario…</main>}>

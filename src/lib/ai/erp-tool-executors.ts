@@ -1,4 +1,4 @@
-import { isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { ARCHIVED_AISLE, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { findInventoryByQuery } from '@/src/lib/crm/services/inventory-service'
 import {
   getFinanceDashboard,
@@ -147,12 +147,16 @@ const executeCashFlowPeriod = async (args: Record<string, unknown>) => {
 const executeLowStockCount = async () => {
   const prisma = await getPrisma()
   const rows = await prisma.inventoryItem.findMany({
+    where: {
+      OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
+    },
     select: {
       sku: true,
       productName: true,
       stock: true,
       minStock: true,
-      category: true
+      category: true,
+      aisle: true
     }
   })
 
@@ -171,7 +175,7 @@ const executeLowStockCount = async () => {
       minStock: item.minStock,
       category: item.category
     })),
-    rule: 'stock <= minStock'
+    rule: 'stock <= minStock AND aisle != __archived__'
   }
 }
 

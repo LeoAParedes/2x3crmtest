@@ -2,18 +2,40 @@ import { describe, expect, it } from 'vitest'
 
 import {
   formatDeterministicErpReply,
+  formatLocalBusinessNow,
   isErpDataQuestion,
   parseBusinessDateMention,
   selectErpToolsForQuestion,
   stampErpDbProvenance
 } from '@/src/lib/ai/erp-db-harness'
 import { DEFAULT_ALLOWED_ERP_TOOLS } from '@/src/lib/ai/erp-tool-ids'
+import { FINANCE_TIME_ZONE } from '@/src/lib/finance/period'
 
 describe('erp-db-harness', () => {
   it('detects ERP data questions', () => {
     expect(isErpDataQuestion('¿Cuánto vendimos hoy?')).toBe(true)
     expect(isErpDataQuestion('stock bajo en inventario')).toBe(true)
+    expect(isErpDataQuestion('Ventas hoy')).toBe(true)
+    expect(isErpDataQuestion('Cuantas ventas hubo agosto 10?')).toBe(true)
     expect(isErpDataQuestion('hola')).toBe(false)
+  })
+
+  it('does not treat clock or social hoy phrasing as ERP metrics', () => {
+    expect(isErpDataQuestion('Que dia y hora es hoy')).toBe(false)
+    expect(isErpDataQuestion('¿Qué hora es?')).toBe(false)
+    expect(isErpDataQuestion('¿Qué día es hoy?')).toBe(false)
+    expect(isErpDataQuestion('Nos vemos hoy')).toBe(false)
+    expect(isErpDataQuestion('hoy')).toBe(false)
+    expect(isErpDataQuestion('esta semana')).toBe(false)
+  })
+
+  it('formats local business now for clock answers', () => {
+    const label = formatLocalBusinessNow(
+      new Date('2026-08-11T12:00:00.000Z'),
+      FINANCE_TIME_ZONE
+    )
+    expect(label.toLowerCase()).toMatch(/agosto/)
+    expect(label).toMatch(/2026/)
   })
 
   it('parses agosto 10 as a local business date', () => {
@@ -27,6 +49,11 @@ describe('erp-db-harness', () => {
   it('selects live sales tools for sales questions', () => {
     const picks = selectErpToolsForQuestion('ventas de la semana', DEFAULT_ALLOWED_ERP_TOOLS)
     expect(picks.map(pick => pick.toolId)).toEqual(expect.arrayContaining(['sales_total_period']))
+  })
+
+  it('does not select sales tools for clock questions with hoy', () => {
+    const picks = selectErpToolsForQuestion('Que dia y hora es hoy', DEFAULT_ALLOWED_ERP_TOOLS)
+    expect(picks).toEqual([])
   })
 
   it('stamps supabase provenance on facts', () => {

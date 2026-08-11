@@ -15,6 +15,14 @@ export async function POST(request: Request) {
     if (message === 'CASH_SESSION_ALREADY_OPEN') {
       return jsonError('Ya tienes un turno abierto', 409, { code: message })
     }
+    if (message.startsWith('CASH_SESSION_CASHIER_OCCUPIED')) {
+      const occupiedBy = message.split(':')[1] || 'otro cajero'
+      return jsonError(
+        `Solo puede haber un cajero en turno. Ahora opera: ${occupiedBy}. El administrador no tiene este límite.`,
+        409,
+        { code: 'CASH_SESSION_CASHIER_OCCUPIED', details: { occupiedBy } }
+      )
+    }
     if (message === 'CASH_SESSION_MUST_LOGOUT') {
       return jsonError('Debes cerrar sesión después del corte antes de abrir otro turno', 409, { code: message })
     }
