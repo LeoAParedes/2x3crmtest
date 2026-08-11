@@ -5,6 +5,7 @@ import {
   formatProductCodeLookupMessage,
   normalizeProductCodeQuery,
   pickBestProductCodeMatch,
+  rankProductCodeCandidates,
   type PosLookupProduct
 } from './product-code-lookup'
 
@@ -58,6 +59,7 @@ describe('pickBestProductCodeMatch', () => {
     if (match.status === 'ambiguous') {
       expect(match.count).toBe(2)
       expect(match.samples.map(item => item.sku)).toEqual(['TOM-001', 'TOM-002'])
+      expect(match.candidates.map(item => item.sku)).toEqual(['TOM-001', 'TOM-002'])
     }
   })
 
@@ -69,6 +71,24 @@ describe('pickBestProductCodeMatch', () => {
       status: 'found',
       product: product({ id: '4', sku: 'PAN', productName: 'Pan blanco' })
     })
+  })
+})
+
+describe('rankProductCodeCandidates', () => {
+  const catalog = [
+    product({ id: '1', sku: 'TOM-001', productName: 'Tomate saladette' }),
+    product({ id: '2', sku: 'TOM-002', productName: 'Tomate bola' }),
+    product({ id: '3', sku: 'AGUA', productName: 'Agua tomate' }),
+    product({ id: '4', sku: 'ZZ-TOM', productName: 'Otro' })
+  ]
+
+  it('ranks SKU prefix ahead of name contains', () => {
+    const ranked = rankProductCodeCandidates('TOM', catalog)
+    expect(ranked.map(item => item.sku)).toEqual(['TOM-001', 'TOM-002', 'AGUA', 'ZZ-TOM'])
+  })
+
+  it('returns empty for blank query', () => {
+    expect(rankProductCodeCandidates('  ', catalog)).toEqual([])
   })
 })
 
@@ -95,8 +115,12 @@ describe('formatProductCodeLookupMessage', () => {
         samples: [
           product({ id: '1', sku: 'TOM-001', productName: 'Tomate saladette' }),
           product({ id: '2', sku: 'TOM-002', productName: 'Tomate bola' })
+        ],
+        candidates: [
+          product({ id: '1', sku: 'TOM-001', productName: 'Tomate saladette' }),
+          product({ id: '2', sku: 'TOM-002', productName: 'Tomate bola' })
         ]
       })
-    ).toContain('Varios productos coinciden')
+    ).toContain('Selecciona uno de la lista')
   })
 })

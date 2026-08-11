@@ -16,7 +16,9 @@ import {
   buildPosProductCodeSearchParams,
   formatProductCodeLookupMessage,
   normalizeProductCodeQuery,
-  pickBestProductCodeMatch
+  pickBestProductCodeMatch,
+  rankProductCodeCandidates,
+  type PosLookupProduct
 } from '@/src/lib/pos/product-code-lookup'
 import { calculateLineTotals, calculateSaleTotals, type IvaPolicy } from '@/src/lib/pos/sale-schema'
 import { printTicketText } from '@/src/lib/pos/print-ticket'
@@ -295,7 +297,10 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
   const [cobroCodeQuery, setCobroCodeQuery] = useState('')
   const [cobroCodeFeedback, setCobroCodeFeedback] = useState<string | null>(null)
   const [cobroCodeLookupPending, setCobroCodeLookupPending] = useState(false)
+  const [cobroSearchCandidates, setCobroSearchCandidates] = useState<PosLookupProduct[]>([])
   const cobroCodeLookupInFlightRef = useRef(false)
+  const cobroSuggestSeqRef = useRef(0)
+  const cobroSuggestTimeoutRef = useRef<number | null>(null)
   const [pendingRemoveIndex, setPendingRemoveIndex] = useState<number | null>(null)
   const [adminAuthSubmitting, setAdminAuthSubmitting] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null)
@@ -678,11 +683,58 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
     })
   }
 
+  const handleCobroSelectCandidate = (product: PosLookupProduct) => {
+    handleAddToCart(product)
+    setCobroCodeQuery('')
+    setCobroSearchCandidates([])
+    setCobroCodeFeedback(null)
+  }
+
+  const handleCobroCodeQueryChange = (value: string) => {
+    setCobroCodeQuery(value)
+    if (cobroCodeFeedback) setCobroCodeFeedback(null)
+    const normalized = normalizeProductCodeQuery(value)
+    if (cobroSuggestTimeoutRef.current !== null) {
+      window.clearTimeout(cobroSuggestTimeoutRef.current)
+      cobroSuggestTimeoutRef.current = null
+    }
+    if (normalized.length < 2) {
+      cobroSuggestSeqRef.current += 1
+      setCobroSearchCandidates([])
+      return
+    }
+    const seq = ++cobroSuggestSeqRef.current
+    cobroSuggestTimeoutRef.current = window.setTimeout(() => {
+      cobroSuggestTimeoutRef.current = null
+      void (async () => {
+        try {
+          const searchParams = buildPosProductCodeSearchParams(normalized)
+          const response = await fetch(`/api/pos/inventory?${searchParams.toString()}`)
+          const data = (await response.json()) as InventoryResponse
+          if (seq !== cobroSuggestSeqRef.current) return
+          if (!response.ok || !data.success) {
+            setCobroSearchCandidates([])
+            return
+          }
+          setCobroSearchCandidates(rankProductCodeCandidates(normalized, data.items))
+        } catch {
+          if (seq !== cobroSuggestSeqRef.current) return
+          setCobroSearchCandidates([])
+        }
+      })()
+    }, 220)
+  }
+
   const handleCobroCodeSubmit = async (rawCode: string) => {
     const code = normalizeProductCodeQuery(rawCode)
     if (!code) return
     if (cobroCodeLookupInFlightRef.current) return
     cobroCodeLookupInFlightRef.current = true
+    cobroSuggestSeqRef.current += 1
+    if (cobroSuggestTimeoutRef.current !== null) {
+      window.clearTimeout(cobroSuggestTimeoutRef.current)
+      cobroSuggestTimeoutRef.current = null
+    }
     setCobroCodeLookupPending(true)
     setCobroCodeFeedback(null)
     setMessage(null)
@@ -696,18 +748,38 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
         throw new Error('No fue posible buscar el código')
       }
       const match = pickBestProductCodeMatch(code, data.items)
-      if (match.status !== 'found') {
+      if (match.status === 'ambiguous') {
+        setCobroSearchCandidates(match.candidates)
+        setCobroCodeFeedback(formatProductCodeLookupMessage(code, match))
+        return
+      }
+      if (match.status === 'not_found') {
+        setCobroSearchCandidates([])
         setCobroCodeFeedback(formatProductCodeLookupMessage(code, match))
         return
       }
       handleAddToCart(match.product)
       setCobroCodeQuery('')
+      setCobroSearchCandidates([])
     } catch (error) {
+      setCobroSearchCandidates([])
       setCobroCodeFeedback(error instanceof Error ? error.message : 'Error al buscar código')
     } finally {
       cobroCodeLookupInFlightRef.current = false
       setCobroCodeLookupPending(false)
     }
+  }
+
+  const handleCobroQuantityInputChange = (index: number, value: string) => {
+    handleUpdateCartItem(index, { quantityInput: value })
+  }
+
+  const handleCobroQuantityInputCommit = (index: number, value: string) => {
+    const item = cart[index]
+    if (!item) return
+    handleUpdateCartItem(index, {
+      quantityInput: normalizeQuantityInput({ ...item, quantityInput: value })
+    })
   }
 
   const handleToggleCobroMode = () => {
@@ -1169,15 +1241,14 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
         <PosCobroMode
           cashierUsername={cashierUsername}
           codeQuery={cobroCodeQuery}
-          onCodeQueryChange={value => {
-            setCobroCodeQuery(value)
-            if (cobroCodeFeedback) setCobroCodeFeedback(null)
-          }}
+          onCodeQueryChange={handleCobroCodeQueryChange}
           onCodeSubmit={code => {
             void handleCobroCodeSubmit(code)
           }}
           codeLookupPending={cobroCodeLookupPending}
           codeFeedback={cobroCodeFeedback}
+          searchCandidates={cobroSearchCandidates}
+          onSelectCandidate={handleCobroSelectCandidate}
           lines={cart.map((item, index) => {
             const line = cartLineTotals[index]
             const lineDiscount = bestPromo?.lineDiscounts[item.inventoryItemId] || 0
@@ -1190,6 +1261,8 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
               productName: item.productName,
               sku: item.sku,
               quantityLabel,
+              quantityInput: item.quantityInput,
+              unitMode: item.unitMode,
               lineTotal: Number(((line?.lineTotalWithTax ?? 0) - lineDiscount).toFixed(2)),
               lineDiscount
             }
@@ -1222,6 +1295,8 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
           }}
           onRemoveLine={handleRequestRemoveCartItem}
           onAdjustQuantity={handleAdjustCartQuantity}
+          onQuantityInputChange={handleCobroQuantityInputChange}
+          onQuantityInputCommit={handleCobroQuantityInputCommit}
           onExitCobroMode={() => setCobroModeStore(false)}
           draftSyncLabel={draftSyncLabel}
           draftSyncStatus={draftSyncStatus}

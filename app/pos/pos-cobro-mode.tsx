@@ -1,15 +1,18 @@
 'use client'
 
-import { useEffect, useRef, type CSSProperties, type FormEvent } from 'react'
+import { useEffect, useRef, type CSSProperties, type FormEvent, type KeyboardEvent } from 'react'
 
 import { PosClock } from '@/app/pos/pos-clock'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
+import type { PosLookupProduct } from '@/src/lib/pos/product-code-lookup'
 
 type CobroLine = {
   key: string
   productName: string
   sku: string
   quantityLabel: string
+  quantityInput: string
+  unitMode: 'piece' | 'weight'
   lineTotal: number
   lineDiscount: number
 }
@@ -31,6 +34,8 @@ type PosCobroModeProps = {
   onCodeSubmit: (code: string) => void
   codeLookupPending?: boolean
   codeFeedback?: string | null
+  searchCandidates?: PosLookupProduct[]
+  onSelectCandidate?: (product: PosLookupProduct) => void
   lines: CobroLine[]
   totals: CobroTotals
   showIva: boolean
@@ -49,6 +54,8 @@ type PosCobroModeProps = {
   onCheckout: () => void
   onRemoveLine: (index: number) => void
   onAdjustQuantity: (index: number, direction: -1 | 1) => void
+  onQuantityInputChange: (index: number, value: string) => void
+  onQuantityInputCommit: (index: number, value: string) => void
   onExitCobroMode: () => void
   draftSyncLabel: string
   draftSyncStatus: 'idle' | 'syncing' | 'synced' | 'error'
@@ -93,6 +100,8 @@ export const PosCobroMode = ({
   onCodeSubmit,
   codeLookupPending = false,
   codeFeedback = null,
+  searchCandidates = [],
+  onSelectCandidate,
   lines,
   totals,
   showIva,
@@ -111,11 +120,14 @@ export const PosCobroMode = ({
   onCheckout,
   onRemoveLine,
   onAdjustQuantity,
+  onQuantityInputChange,
+  onQuantityInputCommit,
   onExitCobroMode,
   draftSyncLabel,
   draftSyncStatus
 }: PosCobroModeProps) => {
   const codeInputRef = useRef<HTMLInputElement>(null)
+  const showCandidateList = searchCandidates.length > 0
 
   useEffect(() => {
     if (codeLookupPending) return
@@ -129,6 +141,32 @@ export const PosCobroMode = ({
     const named = event.currentTarget.elements.namedItem('cobro-code-search')
     const liveValue = named instanceof HTMLInputElement ? named.value : codeQuery
     onCodeSubmit(liveValue)
+  }
+
+  const handleCandidateKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    product: PosLookupProduct
+  ) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    onSelectCandidate?.(product)
+  }
+
+  const handleQuantityKeyDown = (event: KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      onAdjustQuantity(index, 1)
+      return
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      onAdjustQuantity(index, -1)
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      onQuantityInputCommit(index, event.currentTarget.value)
+    }
   }
 
   const syncTone =
@@ -175,33 +213,72 @@ export const PosCobroMode = ({
             className='shrink-0 space-y-2 border-b border-[var(--cobro-vanilla-200)] bg-[var(--cobro-apricot-50)]/70 px-4 py-4 md:px-6'
           >
             <label htmlFor='cobro-code-search' className='text-sm font-medium text-[var(--cobro-sand-800)]'>
-              Búsqueda por código / SKU
+              Búsqueda por código / SKU o nombre
             </label>
-            <div className='flex gap-2'>
-              <input
-                ref={codeInputRef}
-                id='cobro-code-search'
-                name='cobro-code-search'
-                value={codeQuery}
-                onChange={event => onCodeQueryChange(event.target.value)}
-                autoFocus
-                autoComplete='off'
-                inputMode='text'
-                disabled={codeLookupPending}
-                placeholder='Escanea o escribe el código y Enter'
-                aria-label='Buscar producto por código'
-                aria-busy={codeLookupPending}
-                aria-describedby={codeFeedback ? 'cobro-code-search-feedback' : undefined}
-                className='min-h-14 flex-1 rounded-2xl border border-[var(--cobro-sand-200)] bg-white px-4 text-lg text-[var(--cobro-sand-900)] outline-none placeholder:text-[var(--cobro-vanilla-700)] focus:border-[var(--cobro-apricot-500)] focus:ring-2 focus:ring-[var(--cobro-apricot-300)]/50 disabled:opacity-70'
-              />
-              <button
-                type='submit'
-                disabled={codeLookupPending}
-                aria-label='Agregar producto por código'
-                className='min-h-14 min-w-14 rounded-2xl bg-[var(--cobro-emerald-500)] px-5 text-base font-bold text-[var(--cobro-emerald-950)] hover:bg-[var(--cobro-emerald-400)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cobro-emerald-300)] disabled:cursor-not-allowed disabled:opacity-50'
-              >
-                {codeLookupPending ? '…' : '+'}
-              </button>
+            <div className='relative'>
+              <div className='flex gap-2'>
+                <input
+                  ref={codeInputRef}
+                  id='cobro-code-search'
+                  name='cobro-code-search'
+                  value={codeQuery}
+                  onChange={event => onCodeQueryChange(event.target.value)}
+                  autoFocus
+                  autoComplete='off'
+                  inputMode='text'
+                  disabled={codeLookupPending}
+                  placeholder='SKU incompleto, nombre o escaneo + Enter'
+                  aria-label='Buscar producto por código o nombre'
+                  aria-busy={codeLookupPending}
+                  aria-expanded={showCandidateList}
+                  aria-controls={showCandidateList ? 'cobro-code-search-results' : undefined}
+                  aria-autocomplete='list'
+                  aria-describedby={codeFeedback ? 'cobro-code-search-feedback' : undefined}
+                  className='min-h-14 flex-1 rounded-2xl border border-[var(--cobro-sand-200)] bg-white px-4 text-lg text-[var(--cobro-sand-900)] outline-none placeholder:text-[var(--cobro-vanilla-700)] focus:border-[var(--cobro-apricot-500)] focus:ring-2 focus:ring-[var(--cobro-apricot-300)]/50 disabled:opacity-70'
+                />
+                <button
+                  type='submit'
+                  disabled={codeLookupPending}
+                  aria-label='Agregar producto por código'
+                  className='min-h-14 min-w-14 rounded-2xl bg-[var(--cobro-emerald-500)] px-5 text-base font-bold text-[var(--cobro-emerald-950)] hover:bg-[var(--cobro-emerald-400)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cobro-emerald-300)] disabled:cursor-not-allowed disabled:opacity-50'
+                >
+                  {codeLookupPending ? '…' : '+'}
+                </button>
+              </div>
+              {showCandidateList ? (
+                <ul
+                  id='cobro-code-search-results'
+                  role='listbox'
+                  aria-label='Resultados de búsqueda'
+                  className='absolute left-0 right-14 z-20 mt-2 max-h-64 overflow-y-auto rounded-2xl border border-[var(--cobro-sand-200)] bg-white shadow-lg'
+                >
+                  {searchCandidates.map(product => (
+                    <li key={product.id} role='option' aria-selected={false}>
+                      <button
+                        type='button'
+                        onClick={() => onSelectCandidate?.(product)}
+                        onKeyDown={event => handleCandidateKeyDown(event, product)}
+                        tabIndex={0}
+                        aria-label={`Agregar ${product.productName}, SKU ${product.sku}`}
+                        className='flex w-full items-start justify-between gap-3 border-b border-[var(--cobro-vanilla-100)] px-4 py-3 text-left last:border-b-0 hover:bg-[var(--cobro-apricot-50)] focus-visible:bg-[var(--cobro-apricot-50)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--cobro-apricot-500)]'
+                      >
+                        <span className='min-w-0'>
+                          <span className='block truncate text-sm font-semibold text-[var(--cobro-sand-900)]'>
+                            {product.productName}
+                          </span>
+                          <span className='block text-xs text-[var(--cobro-vanilla-700)]'>
+                            {product.sku}
+                            {product.supportsWeight ? ' · kg' : ' · pz'}
+                          </span>
+                        </span>
+                        <span className='shrink-0 text-sm font-medium tabular-nums text-[var(--cobro-emerald-700)]'>
+                          {formatMxnCurrency(product.unitPrice)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
             {codeFeedback ? (
               <p
@@ -233,57 +310,91 @@ export const PosCobroMode = ({
               </div>
             ) : (
               <ul className='space-y-2'>
-                {lines.map((line, index) => (
-                  <li
-                    key={line.key}
-                    className='rounded-2xl border border-[var(--cobro-sand-100)] bg-white px-3 py-3'
-                  >
-                    <div className='flex items-start justify-between gap-3'>
-                      <div className='min-w-0'>
-                        <p className='truncate text-base font-semibold text-[var(--cobro-sand-900)]'>
-                          {line.productName}
-                        </p>
-                        <p className='text-xs text-[var(--cobro-vanilla-700)]'>
-                          {line.sku} · {line.quantityLabel}
-                        </p>
-                        {line.lineDiscount > 0 ? (
-                          <p className='text-xs font-medium text-[var(--cobro-aqua-600)]'>
-                            Desc. −{formatMxnCurrency(line.lineDiscount)}
+                {lines.map((line, index) => {
+                  const isWeight = line.unitMode === 'weight'
+                  const quantityFieldId = `cobro-line-qty-${index}`
+                  return (
+                    <li
+                      key={line.key}
+                      className='rounded-2xl border border-[var(--cobro-sand-100)] bg-white px-3 py-3'
+                    >
+                      <div className='flex items-start justify-between gap-3'>
+                        <div className='min-w-0'>
+                          <p className='truncate text-base font-semibold text-[var(--cobro-sand-900)]'>
+                            {line.productName}
                           </p>
-                        ) : null}
+                          <p className='text-xs text-[var(--cobro-vanilla-700)]'>
+                            {line.sku} · {line.quantityLabel}
+                          </p>
+                          {line.lineDiscount > 0 ? (
+                            <p className='text-xs font-medium text-[var(--cobro-aqua-600)]'>
+                              Desc. −{formatMxnCurrency(line.lineDiscount)}
+                            </p>
+                          ) : null}
+                        </div>
+                        <p className='shrink-0 text-lg font-semibold tabular-nums text-[var(--cobro-emerald-700)]'>
+                          {formatMxnCurrency(line.lineTotal)}
+                        </p>
                       </div>
-                      <p className='shrink-0 text-lg font-semibold tabular-nums text-[var(--cobro-emerald-700)]'>
-                        {formatMxnCurrency(line.lineTotal)}
-                      </p>
-                    </div>
-                    <div className='mt-3 flex gap-2'>
-                      <button
-                        type='button'
-                        onClick={() => onAdjustQuantity(index, -1)}
-                        aria-label={`Disminuir ${line.productName}`}
-                        className='min-h-12 min-w-12 rounded-xl border border-[var(--cobro-vanilla-200)] bg-[var(--cobro-vanilla-50)] text-xl font-bold text-[var(--cobro-sand-800)] hover:bg-[var(--cobro-vanilla-100)]'
-                      >
-                        −
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => onAdjustQuantity(index, 1)}
-                        aria-label={`Aumentar ${line.productName}`}
-                        className='min-h-12 min-w-12 rounded-xl border border-[var(--cobro-vanilla-200)] bg-[var(--cobro-vanilla-50)] text-xl font-bold text-[var(--cobro-sand-800)] hover:bg-[var(--cobro-vanilla-100)]'
-                      >
-                        +
-                      </button>
-                      <button
-                        type='button'
-                        onClick={() => onRemoveLine(index)}
-                        aria-label={`Quitar ${line.productName}`}
-                        className='min-h-12 flex-1 rounded-xl border border-[#fdc49b] bg-[var(--cobro-sand-50)] text-sm font-semibold text-[var(--cobro-sand-800)] hover:bg-[var(--cobro-sand-100)]'
-                      >
-                        Quitar
-                      </button>
-                    </div>
-                  </li>
-                ))}
+                      <div className='mt-3 flex items-center gap-1.5'>
+                        <button
+                          type='button'
+                          onClick={() => onAdjustQuantity(index, -1)}
+                          aria-label={`Disminuir ${line.productName}`}
+                          className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--cobro-vanilla-200)] bg-[var(--cobro-vanilla-50)] text-xl font-bold text-[var(--cobro-sand-800)] hover:bg-[var(--cobro-vanilla-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cobro-apricot-500)]'
+                        >
+                          −
+                        </button>
+                        <div className='flex min-w-0 flex-1 items-center gap-1.5'>
+                          <label htmlFor={quantityFieldId} className='sr-only'>
+                            {isWeight
+                              ? `Peso en kilogramos de ${line.productName}`
+                              : `Cantidad en piezas de ${line.productName}`}
+                          </label>
+                          <input
+                            id={quantityFieldId}
+                            value={line.quantityInput}
+                            onChange={event => onQuantityInputChange(index, event.target.value)}
+                            onBlur={event => onQuantityInputCommit(index, event.currentTarget.value)}
+                            onKeyDown={event => handleQuantityKeyDown(event, index)}
+                            inputMode={isWeight ? 'decimal' : 'numeric'}
+                            pattern={isWeight ? '^[0-9]*[\\.,]?[0-9]*$' : '^[0-9]*$'}
+                            placeholder={isWeight ? '0.25' : '1'}
+                            aria-label={
+                              isWeight
+                                ? `Peso en kg de ${line.productName}`
+                                : `Cantidad en pz de ${line.productName}`
+                            }
+                            className='h-11 min-w-0 flex-1 rounded-xl border border-[var(--cobro-sand-200)] bg-white px-2 text-center text-base font-semibold tabular-nums text-[var(--cobro-sand-900)] outline-none focus:border-[var(--cobro-apricot-500)] focus:ring-2 focus:ring-[var(--cobro-apricot-300)]/40'
+                          />
+                          <span
+                            className='shrink-0 text-xs font-semibold uppercase tracking-wide text-[var(--cobro-vanilla-700)]'
+                            aria-hidden='true'
+                          >
+                            {isWeight ? 'kg' : 'pz'}
+                          </span>
+                        </div>
+                        <button
+                          type='button'
+                          onClick={() => onAdjustQuantity(index, 1)}
+                          aria-label={`Aumentar ${line.productName}`}
+                          className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--cobro-vanilla-200)] bg-[var(--cobro-vanilla-50)] text-xl font-bold text-[var(--cobro-sand-800)] hover:bg-[var(--cobro-vanilla-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cobro-apricot-500)]'
+                        >
+                          +
+                        </button>
+                        <button
+                          type='button'
+                          onClick={() => onRemoveLine(index)}
+                          aria-label={`Quitar ${line.productName}`}
+                          title='Quitar'
+                          className='flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--cobro-sand-200)] bg-[var(--cobro-sand-50)] text-lg font-semibold leading-none text-[var(--cobro-sand-800)] hover:bg-[var(--cobro-sand-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cobro-sand-400)]'
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </div>
