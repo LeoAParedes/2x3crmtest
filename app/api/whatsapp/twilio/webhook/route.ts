@@ -12,8 +12,7 @@ import {
   diagnoseTwilioSignature,
   isValidTwilioSignature,
   parseTwilioWebhookForm,
-  resolveTwilioWebhookUrlCandidates,
-  sendTwilioWhatsAppText
+  resolveTwilioWebhookUrlCandidates
 } from '@/src/lib/whatsapp/twilio'
 
 export const maxDuration = 60
@@ -23,7 +22,7 @@ export const maxDuration = 60
  * Configure in Twilio Console → WhatsApp Sender → "When a message comes in":
  *   POST https://<your-host>/api/whatsapp/twilio/webhook
  *
- * Prefers REST outbound send + empty TwiML ack (more reliable than TwiML-only).
+ * Replies through TwiML to let Twilio deliver with the inbound auth context.
  */
 export async function POST(request: Request) {
   const startedAt = Date.now()
@@ -93,17 +92,10 @@ export async function POST(request: Request) {
     const reply = await runCrmAgent(normalized.message)
     const replyText = (reply.reply || '').trim() || 'No pude consultar la base de datos en este momento.'
 
-    // Prefer explicit REST send so delivery failures are visible in logs.
-    const sent = await sendTwilioWhatsAppText({
-      from: inbound.to,
-      to: inbound.from,
-      body: replyText
-    })
-
     await pushConversationAudit(normalized.message, { ...reply, reply: replyText })
     await safeRecordAgentAction({
       actionType: 'agent.reply.generated',
-      status: sent.ok ? 'success' : 'failed',
+      status: 'success',
       actorType: 'agent',
       channel: 'whatsapp',
       sessionId: normalized.message.sessionId,
@@ -113,9 +105,7 @@ export async function POST(request: Request) {
         intent: reply.intent,
         runMode: reply.runMode,
         handoffRequired: Boolean(reply.handoff?.required),
-        twilioSid: sent.sid || null,
-        twilioSendOk: sent.ok,
-        twilioSendError: sent.error || null,
+        transport: 'twiml',
         elapsedMs: Date.now() - startedAt
       }
     })
@@ -125,9 +115,7 @@ export async function POST(request: Request) {
 
     appLog('info', 'Twilio webhook reply ready', {
       messageSid: inbound.messageSid,
-      twilioSendOk: sent.ok,
-      twilioSid: sent.sid || null,
-      twilioSendError: sent.error || null,
+      transport: 'twiml',
       intent: reply.intent,
       elapsedMs: Date.now() - startedAt
     })
@@ -139,12 +127,11 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         sessionId: '449600',
         runId: 'whatsapp-twilio',
-        hypothesisId: 'H2',
+        hypothesisId: 'H6',
         location: 'app/api/whatsapp/twilio/webhook/route.ts',
-        message: 'twilio reply delivery attempt',
+        message: 'twilio twiml reply prepared',
         data: {
-          twilioSendOk: sent.ok,
-          twilioSendError: sent.error || null,
+          transport: 'twiml',
           intent: reply.intent,
           elapsedMs: Date.now() - startedAt,
           replyPreview: replyText.slice(0, 160)
@@ -154,14 +141,6 @@ export async function POST(request: Request) {
     }).catch(() => {})
     // #endregion
 
-    if (sent.ok) {
-      return new Response(buildTwilioEmptyTwiml(), {
-        status: 200,
-        headers: { 'Content-Type': 'text/xml; charset=utf-8' }
-      })
-    }
-
-    // Fallback: ask Twilio to deliver via TwiML if REST send failed.
     return new Response(buildTwilioMessagingTwiml(replyText), {
       status: 200,
       headers: { 'Content-Type': 'text/xml; charset=utf-8' }
