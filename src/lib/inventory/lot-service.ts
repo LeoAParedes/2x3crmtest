@@ -176,7 +176,15 @@ export const listUnifiedWorkspaceAlerts = async () => {
   const [expiryAlerts, inventoryRows] = await Promise.all([
     listExpiryAlerts(),
     prisma.inventoryItem.findMany({
-      select: { id: true, sku: true, productName: true, stock: true, minStock: true, aisle: true },
+      select: {
+        id: true,
+        sku: true,
+        productName: true,
+        category: true,
+        stock: true,
+        minStock: true,
+        aisle: true
+      },
       take: 3000
     })
   ])
@@ -192,6 +200,7 @@ export const listUnifiedWorkspaceAlerts = async () => {
       productName: item.productName,
       stock: item.stock,
       minStock: item.minStock,
+      supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName),
       href: '/inventario'
     }))
 
@@ -239,6 +248,11 @@ export const wasteLotQuantity = async (rawInput: unknown, actor: AuthenticatedAc
       throw new Error('INSUFFICIENT_STOCK')
     }
 
+    const supportsWeight = inferWeightSupport(
+      lot.inventoryItem.category,
+      lot.inventoryItem.aisle,
+      lot.inventoryItem.productName
+    )
     const nextRemaining = lot.quantityRemaining - input.quantity
     const nextStatus = nextRemaining === 0 ? 'wasted' : 'active'
 
@@ -265,7 +279,8 @@ export const wasteLotQuantity = async (rawInput: unknown, actor: AuthenticatedAc
           source: 'lot_waste',
           lotId: lot.id,
           expiresOn: toIsoDate(lot.expiresOn),
-          valuationMethod: 'fefo'
+          valuationMethod: 'fefo',
+          supportsWeight
         })
       }
     })
@@ -283,8 +298,12 @@ export const wasteLotQuantity = async (rawInput: unknown, actor: AuthenticatedAc
           quantity: input.quantity,
           remaining: nextRemaining,
           inventoryItemId: lot.inventoryItemId,
+          sku: lot.inventoryItem.sku,
+          productName: lot.inventoryItem.productName,
           movementId: movement.id,
-          reason: input.reason
+          reason: input.reason,
+          supportsWeight,
+          expiresOn: toIsoDate(lot.expiresOn)
         }
       }
     })

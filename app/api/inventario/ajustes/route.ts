@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { getPrisma } from '@/src/lib/db/prisma'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
+import { calculateBillableAmount } from '@/src/lib/inventory/logbook-quantity'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { buildFifoLotsFromMovements, calculateWeightedAveragePrice, consumeFifoLots } from '@/src/lib/inventory/valuation'
 import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
@@ -285,7 +286,8 @@ export async function POST(request: Request) {
 
         if (item.stock > 0) {
           const unitCost = Number(item.unitPrice)
-          const totalCost = Number((unitCost * item.stock).toFixed(2))
+          const supportsWeight = inferWeightSupport(item.category, item.aisle, item.productName)
+          const totalCost = calculateBillableAmount(item.stock, unitCost, supportsWeight)
 
           await transaction.inventoryMovement.create({
             data: {
@@ -297,7 +299,8 @@ export async function POST(request: Request) {
                 valuationMethod: 'average',
                 unitCost,
                 totalCost,
-                source: 'delete_product'
+                source: 'delete_product',
+                supportsWeight
               })
             }
           })
@@ -316,9 +319,9 @@ export async function POST(request: Request) {
                 valuationMethod: 'average',
                 unitCost,
                 totalCost,
-                reason: `Salida automática previa a eliminación: ${payload.reason}`,
-                automatic: true,
-                supportsWeight: inferWeightSupport(item.category, item.aisle)
+                reason: payload.reason,
+                source: 'delete_product',
+                supportsWeight
               }
             }
           })
@@ -373,7 +376,7 @@ export async function POST(request: Request) {
               clearedStock: item.stock,
               mode: linkedSalesCount > 0 ? 'archived' : 'deleted',
               linkedSalesCount,
-              supportsWeight: inferWeightSupport(item.category, item.aisle)
+              supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName)
             }
           }
         })
@@ -512,7 +515,7 @@ export async function POST(request: Request) {
               unitCost: payload.unitCost,
               reason: payload.reason,
               nextUnitPrice,
-              supportsWeight: inferWeightSupport(item.category, item.aisle)
+              supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName)
             }
           }
         })
@@ -541,7 +544,8 @@ export async function POST(request: Request) {
       if (item.stock < payload.quantity) throw new Error('INSUFFICIENT_STOCK')
 
       let unitCost = Number(item.unitPrice)
-      let totalCost = Number((unitCost * payload.quantity).toFixed(2))
+      const supportsWeight = inferWeightSupport(item.category, item.aisle, item.productName)
+      let totalCost = calculateBillableAmount(payload.quantity, unitCost, supportsWeight)
       let nextUnitPrice = Number(item.unitPrice)
 
       if (payload.valuationMethod === 'fifo') {
@@ -564,7 +568,10 @@ export async function POST(request: Request) {
         const lots = buildFifoLotsFromMovements(valuationMovements, item.stock, Number(item.unitPrice))
         const fifoResult = consumeFifoLots(lots, payload.quantity)
         unitCost = Number(fifoResult.unitCost.toFixed(2))
-        totalCost = fifoResult.totalCost
+        // FIFO accumulates grams × $/kg; convert to billable money for weight items.
+        totalCost = supportsWeight
+          ? Number((fifoResult.totalCost / 1000).toFixed(2))
+          : fifoResult.totalCost
 
         const remainingQty = fifoResult.remainingLots.reduce((sum, lot) => sum + Math.max(0, lot.remainingQty), 0)
         if (remainingQty > 0) {
@@ -612,7 +619,7 @@ export async function POST(request: Request) {
             totalCost,
             reason: payload.reason,
             nextUnitPrice,
-            supportsWeight: inferWeightSupport(item.category, item.aisle)
+            supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName)
           }
         }
       })

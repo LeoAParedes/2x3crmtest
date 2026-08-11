@@ -1,11 +1,13 @@
 import type { PrismaClient } from '@prisma/client'
 
+import { PURCHASE_UNITS_REPAIRED_ACTION } from '@/src/lib/inventory/repair-purchase-units'
 import { WEIGHT_STOCK_NORMALIZED_ACTION } from '@/src/lib/inventory/weight-units'
 
 /** Actions that are operational noise, not audit-worthy events in bitácora. */
 export const BITACORA_HIDDEN_ACTIONS = new Set([
   'pos.draft.saved',
-  WEIGHT_STOCK_NORMALIZED_ACTION
+  WEIGHT_STOCK_NORMALIZED_ACTION,
+  PURCHASE_UNITS_REPAIRED_ACTION
 ])
 
 type PrismaLike = Pick<PrismaClient, 'systemActionLog'>

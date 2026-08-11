@@ -13,6 +13,25 @@ export const formatStockQuantityLabel = (quantity: number, supportsWeight: boole
   return `${absolute} pz`
 }
 
+/** unitCost/unitPrice are always per sellable unit: $/kg for weight, $/pz for pieces. */
+export const formatUnitCostLabel = (unitCost: number, supportsWeight: boolean) => {
+  const unit = supportsWeight ? 'kg' : 'pz'
+  return `${unitCost.toFixed(2)} MXN / ${unit}`
+}
+
+/**
+ * Money total from stored inventory quantity.
+ * Weight stock is grams; billable cost uses kilograms. Piece stock is 1:1.
+ */
+export const calculateBillableAmount = (
+  storedQuantity: number,
+  unitCost: number,
+  supportsWeight: boolean
+) => {
+  const billable = supportsWeight ? gramsToKilograms(Math.abs(storedQuantity)) : Math.abs(storedQuantity)
+  return Number((billable * unitCost).toFixed(2))
+}
+
 export const summarizeSaleQuantities = (lines: SaleQuantityLine[]) => {
   let pieceCount = 0
   let weightGrams = 0

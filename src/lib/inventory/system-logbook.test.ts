@@ -123,5 +123,6 @@ describe('system-logbook', () => {
     const entries = buildSystemLogbookEntries(rows, { category: 'inventory' })
     const entry = entries.find(item => item.id === '4')
     expect(entry?.details).toContain('Entrada: +2.500 kg')
+    expect(entry?.details).toContain('Costo: 40.00 MXN / kg')
   })
 })

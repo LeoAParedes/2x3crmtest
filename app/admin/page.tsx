@@ -22,7 +22,14 @@ type TodayHub = {
   }
   alerts: {
     totalCount: number
-    lowStock: Array<{ id: string; sku: string; productName: string; stock: number; minStock: number }>
+    lowStock: Array<{
+      id: string
+      sku: string
+      productName: string
+      stock: number
+      minStock: number
+      supportsWeight?: boolean
+    }>
     expiry: Array<{
       id: string
       sku: string
@@ -192,14 +199,18 @@ export default function AdminPage() {
                 <p className='mt-2 text-sm text-slate-500'>Sin stock bajo.</p>
               ) : (
                 <ul className='mt-2 space-y-2'>
-                  {hub.alerts.lowStock.map(item => (
-                    <li key={item.id} className='text-sm text-slate-700'>
-                      <Link href='/inventario' className='underline'>
-                        {item.productName} ({item.sku})
-                      </Link>{' '}
-                      · {item.stock}/{item.minStock}
-                    </li>
-                  ))}
+                  {hub.alerts.lowStock.map(item => {
+                    const supportsWeight = Boolean(item.supportsWeight)
+                    return (
+                      <li key={item.id} className='text-sm text-slate-700'>
+                        <Link href='/inventario' className='underline'>
+                          {item.productName} ({item.sku})
+                        </Link>{' '}
+                        · Stock {formatStockQuantityLabel(item.stock, supportsWeight)} / Mínimo{' '}
+                        {formatStockQuantityLabel(item.minStock, supportsWeight)}
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </article>

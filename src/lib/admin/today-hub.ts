@@ -2,6 +2,7 @@ import { getPrisma } from '@/src/lib/db/prisma'
 import { getCashierRuntimeState } from '@/src/lib/caja/cash-session-service'
 import { listExpiryAlerts } from '@/src/lib/inventory/lot-service'
 import { activeInventoryItemWhere, isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import { getFinanceDashboard } from '@/src/lib/finance/finance-service'
 import { FINANCE_TIME_ZONE, getPeriodBounds } from '@/src/lib/finance/period'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
@@ -15,7 +16,15 @@ export const getTodayHubDashboard = async (actor: AuthenticatedActor) => {
     listExpiryAlerts(),
     prisma.inventoryItem.findMany({
       where: activeInventoryItemWhere,
-      select: { id: true, sku: true, productName: true, stock: true, minStock: true, aisle: true },
+      select: {
+        id: true,
+        sku: true,
+        productName: true,
+        category: true,
+        stock: true,
+        minStock: true,
+        aisle: true
+      },
       take: 2000
     }),
     prisma.sale.groupBy({
@@ -46,7 +55,8 @@ export const getTodayHubDashboard = async (actor: AuthenticatedActor) => {
       sku: item.sku,
       productName: item.productName,
       stock: item.stock,
-      minStock: item.minStock
+      minStock: item.minStock,
+      supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName)
     }))
 
   const paymentMethods = {

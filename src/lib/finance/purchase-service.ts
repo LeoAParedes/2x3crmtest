@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { getPrisma } from '@/src/lib/db/prisma'
 import { FINANCE_TIME_ZONE, getTimeZoneParts } from '@/src/lib/finance/period'
+import { calculateBillableAmount } from '@/src/lib/inventory/logbook-quantity'
 import { calculateWeightedAveragePrice } from '@/src/lib/inventory/valuation'
 import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import { parseExpiresOnInput } from '@/src/lib/inventory/lot-service'
@@ -139,7 +140,6 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
 
   const expiresOn = parseExpiresOnInput(input.expiresOn)
   const prisma = await getPrisma()
-  const totalAmount = toMoney(input.quantity * input.unitCost)
 
   const result = await prisma.$transaction(async transaction => {
     let supplierId = input.supplierId
@@ -163,6 +163,10 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
     if (!item) {
       throw new Error('INVENTORY_ITEM_NOT_FOUND')
     }
+
+    const supportsWeight = inferWeightSupport(item.category, item.aisle, item.productName)
+    // Quantity is stored in grams for weight items; unitCost is always $/kg or $/pz.
+    const totalAmount = toMoney(calculateBillableAmount(input.quantity, input.unitCost, supportsWeight))
 
     const nextUnitPrice = calculateWeightedAveragePrice({
       currentStock: item.stock,
@@ -191,7 +195,8 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
           source: 'purchase',
           supplierId,
           paymentStatus: input.paymentStatus,
-          expiresOn: input.expiresOn
+          expiresOn: input.expiresOn,
+          supportsWeight
         })
       }
     })
@@ -273,7 +278,10 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
         status: 'success',
         metadata: {
           supplierId,
+          supplierName: supplier.name,
           inventoryItemId: item.id,
+          sku: item.sku,
+          productName: item.productName,
           quantity: input.quantity,
           unitCost: input.unitCost,
           totalAmount,
@@ -281,7 +289,8 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
           expenseId,
           movementId: movement.id,
           lotId: lot.id,
-          expiresOn: input.expiresOn
+          expiresOn: input.expiresOn,
+          supportsWeight
         }
       }
     })
@@ -293,7 +302,9 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
       item: updatedItem,
       supplier: refreshedSupplier,
       expenseId,
-      lot
+      lot,
+      supportsWeight,
+      totalAmount
     }
   })
 
@@ -311,7 +322,8 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
       sku: result.item.sku,
       productName: result.item.productName,
       stock: result.item.stock,
-      unitPrice: Number(result.item.unitPrice)
+      unitPrice: Number(result.item.unitPrice),
+      supportsWeight: result.supportsWeight
     },
     supplier: {
       id: result.supplier.id,

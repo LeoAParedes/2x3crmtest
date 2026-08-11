@@ -68,7 +68,10 @@ const getLogbookActionDisplayLabel = (action: string) => {
     'inventory.price.schedule': 'Precio programado',
     'inventory.min_stock.update': 'Umbral de stock bajo actualizado',
     'inventory.movement.entry': 'Entrada manual de stock',
-    'inventory.movement.exit': 'Salida manual de stock'
+    'inventory.movement.exit': 'Salida manual de stock',
+    'inventory.lot.waste': 'Merma por caducidad',
+    'finance.purchase.entry': 'Compra a proveedor',
+    'finance.supplier.create': 'Proveedor creado'
   }
   return actionLabelMap[action] || action
 }

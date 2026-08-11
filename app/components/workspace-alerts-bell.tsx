@@ -13,6 +13,7 @@ type LowStockAlert = {
   productName: string
   stock: number
   minStock: number
+  supportsWeight?: boolean
   href: string
 }
 
@@ -150,18 +151,22 @@ export const WorkspaceAlertsBell = () => {
                   </Link>
                 </li>
               ))}
-              {lowStock.map(item => (
-                <li key={`low-${item.id}`}>
-                  <Link
-                    href={item.href}
-                    onClick={() => setOpen(false)}
-                    className='block rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-left text-xs text-rose-950 hover:bg-rose-100'
-                  >
-                    <span className='font-semibold'>Stock bajo</span>: {item.productName} ({item.sku}) ·{' '}
-                    {item.stock}/{item.minStock}
-                  </Link>
-                </li>
-              ))}
+              {lowStock.map(item => {
+                const supportsWeight = Boolean(item.supportsWeight)
+                return (
+                  <li key={`low-${item.id}`}>
+                    <Link
+                      href={item.href}
+                      onClick={() => setOpen(false)}
+                      className='block rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-left text-xs text-rose-950 hover:bg-rose-100'
+                    >
+                      <span className='font-semibold'>Stock bajo</span>: {item.productName} ({item.sku}) · Stock{' '}
+                      {formatStockQuantityLabel(item.stock, supportsWeight)} / Mínimo{' '}
+                      {formatStockQuantityLabel(item.minStock, supportsWeight)}
+                    </Link>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>

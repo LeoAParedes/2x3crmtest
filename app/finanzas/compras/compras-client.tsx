@@ -324,6 +324,25 @@ export const ComprasClient = () => {
     }
   }
 
+  const entryQuantityNumber = Number(entryForm.quantity.replace(',', '.'))
+  const entryUnitCostNumber = Number(entryForm.unitCost.replace(',', '.'))
+  const entryPreview =
+    entryForm.inventoryItemId &&
+    Number.isFinite(entryQuantityNumber) &&
+    entryQuantityNumber > 0 &&
+    Number.isFinite(entryUnitCostNumber) &&
+    entryUnitCostNumber > 0
+      ? {
+          displayQty: entryForm.supportsWeight
+            ? `${entryQuantityNumber.toFixed(3)} kg`
+            : `${Math.round(entryQuantityNumber)} pz`,
+          storedQty: entryForm.supportsWeight
+            ? kilogramsToGrams(entryQuantityNumber)
+            : Math.round(entryQuantityNumber),
+          total: Number((entryQuantityNumber * entryUnitCostNumber).toFixed(2))
+        }
+      : null
+
   return (
     <main className='mx-auto max-w-6xl px-4 py-8 md:px-8'>
       <section className='flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between'>
@@ -437,10 +456,24 @@ export const ComprasClient = () => {
               <p className='mt-1 text-xs text-emerald-800'>
                 Unidad de entrada: <strong>{entryForm.supportsWeight ? 'kg' : 'pz'}</strong>
                 {entryForm.unitCost
-                  ? ` · costo sugerido ${formatMxnCurrency(Number(entryForm.unitCost) || 0)}`
+                  ? ` · costo ${formatMxnCurrency(Number(entryForm.unitCost.replace(',', '.')) || 0)} / ${
+                      entryForm.supportsWeight ? 'kg' : 'pz'
+                    }`
                   : ''}
-                {entryForm.quantity ? ` · cantidad ${entryForm.quantity} ${entryForm.supportsWeight ? 'kg' : 'pz'}` : ''}
               </p>
+              {entryPreview ? (
+                <p className='mt-2 rounded border border-emerald-300/60 bg-white/70 px-2 py-1.5 text-xs text-emerald-950'>
+                  Entrada: <strong>{entryPreview.displayQty}</strong>
+                  {' · '}
+                  Total estimado: <strong>{formatMxnCurrency(entryPreview.total)}</strong>
+                  {entryForm.supportsWeight ? (
+                    <span className='text-emerald-800'>
+                      {' '}
+                      (se guarda como {entryPreview.storedQty} g en inventario)
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -452,18 +485,18 @@ export const ComprasClient = () => {
                 inputMode='decimal'
                 value={entryForm.quantity}
                 onChange={event => setEntryForm(current => ({ ...current, quantity: event.target.value }))}
-                aria-label='Cantidad de entrada'
+                aria-label={`Cantidad de entrada en ${entryForm.supportsWeight ? 'kilogramos' : 'piezas'}`}
                 className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums'
               />
             </label>
             <label className='grid gap-1 text-xs font-medium text-slate-600'>
-              Costo unitario
+              Costo unitario ({entryForm.supportsWeight ? '$/kg' : '$/pz'})
               <input
                 type='text'
                 inputMode='decimal'
                 value={entryForm.unitCost}
                 onChange={event => setEntryForm(current => ({ ...current, unitCost: event.target.value }))}
-                aria-label='Costo unitario'
+                aria-label={`Costo unitario por ${entryForm.supportsWeight ? 'kilogramo' : 'pieza'}`}
                 className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums'
               />
             </label>
@@ -609,6 +642,9 @@ export const ComprasClient = () => {
                     Producto
                   </th>
                   <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                    Cantidad
+                  </th>
+                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
                     Proveedor
                   </th>
                   <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
@@ -625,6 +661,13 @@ export const ComprasClient = () => {
                     <td className='px-3 py-2 text-sm text-slate-800'>
                       {purchase.product.productName}
                       <span className='ml-1 text-xs text-slate-500'>{purchase.product.sku}</span>
+                      <p className='text-xs text-slate-500'>
+                        {formatMxnCurrency(purchase.unitCost)} /{' '}
+                        {purchase.product.supportsWeight ? 'kg' : 'pz'}
+                      </p>
+                    </td>
+                    <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
+                      {formatStockQuantityLabel(purchase.quantity, purchase.product.supportsWeight)}
                     </td>
                     <td className='px-3 py-2 text-sm text-slate-700'>{purchase.supplier.name}</td>
                     <td className='px-3 py-2 text-sm tabular-nums'>

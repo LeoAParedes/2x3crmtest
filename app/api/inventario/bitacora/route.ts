@@ -143,30 +143,41 @@ export async function GET(request: Request) {
       })
     ])
 
-    const inventoryEntityIds = [
+    const inventoryItemIds = [
       ...new Set(
-        logs
-          .filter(
-            log =>
-              log.entityType === 'InventoryItem' &&
-              (log.action === 'inventory.movement.entry' ||
-                log.action === 'inventory.movement.exit' ||
-                log.action === 'inventory.product.delete')
-          )
-          .map(log => log.entityId)
+        logs.flatMap(log => {
+          const ids: string[] = []
+          if (
+            log.entityType === 'InventoryItem' &&
+            (log.action === 'inventory.movement.entry' ||
+              log.action === 'inventory.movement.exit' ||
+              log.action === 'inventory.product.delete')
+          ) {
+            ids.push(log.entityId)
+          }
+          const metadata = log.metadata
+          if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+            const inventoryItemId = (metadata as Record<string, unknown>).inventoryItemId
+            if (typeof inventoryItemId === 'string') ids.push(inventoryItemId)
+          }
+          return ids
+        })
       )
     ]
 
     const inventoryItems =
-      inventoryEntityIds.length > 0
+      inventoryItemIds.length > 0
         ? await prisma.inventoryItem.findMany({
-            where: { id: { in: inventoryEntityIds } },
-            select: { id: true, category: true, aisle: true }
+            where: { id: { in: inventoryItemIds } },
+            select: { id: true, category: true, aisle: true, productName: true }
           })
         : []
 
     const weightSupportByItemId = new Map(
-      inventoryItems.map(item => [item.id, inferWeightSupport(item.category, item.aisle)] as const)
+      inventoryItems.map(
+        item =>
+          [item.id, inferWeightSupport(item.category, item.aisle, item.productName)] as const
+      )
     )
 
     const saleIdsNeedingEnrichment = [

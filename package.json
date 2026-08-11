@@ -18,6 +18,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "bootstrap:users": "tsx scripts/bootstrap-users.ts",
+    "repair:purchase-units": "tsx scripts/repair-purchase-units.ts",
     "security:audit": "npm audit --omit=dev --audit-level=high"
   },
   "keywords": [],

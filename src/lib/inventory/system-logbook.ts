@@ -1,6 +1,8 @@
 import {
+  calculateBillableAmount,
   formatSaleQuantitySummary,
   formatStockQuantityLabel,
+  formatUnitCostLabel,
   summarizeSaleQuantities,
   type SaleQuantityLine
 } from '@/src/lib/inventory/logbook-quantity'
@@ -50,12 +52,16 @@ const actionLabelMap: Record<string, string> = {
   'inventory.price.correct': 'Precio corregido',
   'inventory.price.schedule': 'Precio programado',
   'inventory.movement.entry': 'Entrada manual de stock',
-  'inventory.movement.exit': 'Salida manual de stock'
+  'inventory.movement.exit': 'Salida manual de stock',
+  'inventory.lot.waste': 'Merma por caducidad',
+  'finance.purchase.entry': 'Compra a proveedor',
+  'finance.supplier.create': 'Proveedor creado'
 }
 
 const deriveCategory = (action: string): LogbookCategory => {
   if (action.startsWith('sale.')) return 'sales'
   if (action.startsWith('inventory.')) return 'inventory'
+  if (action.startsWith('finance.purchase')) return 'inventory'
   if (action.startsWith('pos.')) return 'pos'
   if (action.startsWith('crm.') || action.includes('approval') || action.includes('handoff')) return 'crm'
   return 'system'
@@ -180,10 +186,16 @@ const resolveSupportsWeight = (
   if (metadata.unitMode === 'weight') return true
   if (metadata.unitMode === 'piece') return false
   if (typeof metadata.category === 'string') {
-    return inferWeightSupport(metadata.category, typeof metadata.aisle === 'string' ? metadata.aisle : null)
+    return inferWeightSupport(
+      metadata.category,
+      typeof metadata.aisle === 'string' ? metadata.aisle : null,
+      typeof metadata.productName === 'string' ? metadata.productName : ''
+    )
   }
-  if (entityId && weightSupportByItemId?.has(entityId)) {
-    return Boolean(weightSupportByItemId.get(entityId))
+  const inventoryItemId =
+    typeof metadata.inventoryItemId === 'string' ? metadata.inventoryItemId : entityId
+  if (inventoryItemId && weightSupportByItemId?.has(inventoryItemId)) {
+    return Boolean(weightSupportByItemId.get(inventoryItemId))
   }
   return false
 }
@@ -202,7 +214,8 @@ const buildInventoryMovementEntryDetails = (
   const reason = typeof values.reason === 'string' ? values.reason : 'Sin motivo'
   const supportsWeight = resolveSupportsWeight(values, entityId, weightSupportByItemId)
   const quantityLabel = quantity === null ? '?' : formatStockQuantityLabel(quantity, supportsWeight)
-  return `Entrada: +${quantityLabel} | Costo: ${unitCost?.toFixed(2) ?? '?'} MXN | Precio promedio: ${
+  const costLabel = unitCost === null ? '?' : formatUnitCostLabel(unitCost, supportsWeight)
+  return `Entrada: +${quantityLabel} | Costo: ${costLabel} | Precio promedio: ${
     nextUnitPrice?.toFixed(2) ?? '?'
   } MXN | Motivo: ${reason}`
 }
@@ -222,9 +235,80 @@ const buildInventoryMovementExitDetails = (
   const reason = typeof values.reason === 'string' ? values.reason : 'Sin motivo'
   const supportsWeight = resolveSupportsWeight(values, entityId, weightSupportByItemId)
   const quantityLabel = quantity === null ? '?' : formatStockQuantityLabel(quantity, supportsWeight)
-  return `Salida: -${quantityLabel} | Método: ${valuationMethod} | Costo unitario: ${
-    unitCost?.toFixed(2) ?? '?'
-  } MXN | Costo total: ${totalCost?.toFixed(2) ?? '?'} MXN | Motivo: ${reason}`
+  const costLabel = unitCost === null ? '?' : formatUnitCostLabel(unitCost, supportsWeight)
+  return `Salida: -${quantityLabel} | Método: ${valuationMethod} | Costo unitario: ${costLabel} | Costo total: ${
+    totalCost?.toFixed(2) ?? '?'
+  } MXN | Motivo: ${reason}`
+}
+
+const buildPurchaseEntryDetails = (
+  metadata: unknown,
+  weightSupportByItemId?: Map<string, boolean>
+) => {
+  const values = asRecord(metadata)
+  if (!values) return 'Compra a proveedor registrada'
+
+  const sku = typeof values.sku === 'string' ? values.sku : null
+  const productName = typeof values.productName === 'string' ? values.productName : null
+  const supplierName = typeof values.supplierName === 'string' ? values.supplierName : null
+  const quantity = typeof values.quantity === 'number' ? values.quantity : null
+  const unitCost = typeof values.unitCost === 'number' ? values.unitCost : null
+  const totalAmount = typeof values.totalAmount === 'number' ? values.totalAmount : null
+  const paymentStatus = values.paymentStatus === 'credit' ? 'Crédito' : values.paymentStatus === 'paid' ? 'Contado' : null
+  const expiresOn = typeof values.expiresOn === 'string' ? values.expiresOn : null
+  const inventoryItemId = typeof values.inventoryItemId === 'string' ? values.inventoryItemId : undefined
+  const supportsWeight = resolveSupportsWeight(values, inventoryItemId, weightSupportByItemId)
+  const quantityLabel = quantity === null ? '?' : formatStockQuantityLabel(quantity, supportsWeight)
+  const costLabel = unitCost === null ? '?' : formatUnitCostLabel(unitCost, supportsWeight)
+  let displayTotal = totalAmount
+  if (quantity !== null && unitCost !== null) {
+    const billableTotal = calculateBillableAmount(quantity, unitCost, supportsWeight)
+    const rawStoredTotal = Number((quantity * unitCost).toFixed(2))
+    // Historical weight purchases may store grams×$/kg; prefer billable kg×$/kg when that pattern matches.
+    if (
+      supportsWeight &&
+      totalAmount !== null &&
+      Math.abs(totalAmount - rawStoredTotal) <= 0.05 &&
+      Math.abs(totalAmount - billableTotal) > 0.05
+    ) {
+      displayTotal = billableTotal
+    } else if (totalAmount === null) {
+      displayTotal = billableTotal
+    }
+  }
+  const productLabel = [sku, productName].filter(Boolean).join(' · ') || 'Producto'
+  const parts = [
+    productLabel,
+    `Cantidad: ${quantityLabel}`,
+    `Costo: ${costLabel}`,
+    `Total: ${displayTotal?.toFixed(2) ?? '?'} MXN`
+  ]
+  if (supplierName) parts.push(`Proveedor: ${supplierName}`)
+  if (paymentStatus) parts.push(`Pago: ${paymentStatus}`)
+  if (expiresOn) parts.push(`Caduca: ${expiresOn}`)
+  return parts.join(' | ')
+}
+
+const buildLotWasteDetails = (
+  metadata: unknown,
+  entityId: string | undefined,
+  weightSupportByItemId?: Map<string, boolean>
+) => {
+  const values = asRecord(metadata)
+  if (!values) return 'Merma de lote registrada'
+
+  const sku = typeof values.sku === 'string' ? values.sku : null
+  const productName = typeof values.productName === 'string' ? values.productName : null
+  const quantity = typeof values.quantity === 'number' ? values.quantity : null
+  const remaining = typeof values.remaining === 'number' ? values.remaining : null
+  const reason = typeof values.reason === 'string' ? values.reason : 'Merma por caducidad'
+  const inventoryItemId = typeof values.inventoryItemId === 'string' ? values.inventoryItemId : entityId
+  const supportsWeight = resolveSupportsWeight(values, inventoryItemId, weightSupportByItemId)
+  const quantityLabel = quantity === null ? '?' : formatStockQuantityLabel(quantity, supportsWeight)
+  const remainingLabel = remaining === null ? '?' : formatStockQuantityLabel(remaining, supportsWeight)
+  const productLabel = [sku, productName].filter(Boolean).join(' · ')
+  const prefix = productLabel ? `${productLabel} | ` : ''
+  return `${prefix}Merma: -${quantityLabel} | Restante del lote: ${remainingLabel} | Motivo: ${reason}`
 }
 
 const buildPosDraftDetails = (metadata: unknown) => {
@@ -272,6 +356,12 @@ const buildDetails = (
   }
   if (action === 'inventory.movement.exit') {
     return buildInventoryMovementExitDetails(metadata, entityId, weightSupportByItemId)
+  }
+  if (action === 'finance.purchase.entry') {
+    return buildPurchaseEntryDetails(metadata, weightSupportByItemId)
+  }
+  if (action === 'inventory.lot.waste') {
+    return buildLotWasteDetails(metadata, entityId, weightSupportByItemId)
   }
   if (action === 'pos.draft.saved') return buildPosDraftDetails(metadata)
   if (action === 'inventory.product.create') return buildInventoryCreateDetails(metadata)
