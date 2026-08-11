@@ -300,6 +300,23 @@ model Expense {
   @@index([kind, spentAt])
 }
 
+model Promotion {
+  id                String    @id @default(cuid())
+  name              String
+  /// porcentaje | monto_fijo | 2x1 | bundle
+  type              String
+  value             Decimal   @db.Decimal(10, 2)
+  minPurchase       Decimal   @default(0) @db.Decimal(10, 2)
+  description       String
+  active            Boolean   @default(true)
+  expiresAt         DateTime?
+  createdByUsername String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([active, expiresAt])
+}
+
 model SystemActionLog {
   id              String   @id @default(cuid())
   actorAuthUserId String?  @db.Uuid

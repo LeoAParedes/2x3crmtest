@@ -46,7 +46,7 @@ export const authenticateCredentials = async (
     return { error: 'Usuario o contraseña incorrectos' }
   }
 
-  return { destination: role === 'admin' ? '/admin' : '/caja' }
+  return { destination: role === 'admin' ? '/admin' : '/pos' }
 }
 
 export const loginAction = async (_previousState: LoginState, formData: FormData): Promise<LoginState> => {

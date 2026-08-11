@@ -24,7 +24,7 @@ describe('authenticateCredentials', () => {
       }
     )
 
-    expect(result).toEqual({ destination: '/caja' })
+    expect(result).toEqual({ destination: '/pos' })
   })
 
   it('rejects a persisted legacy role after valid credentials', async () => {

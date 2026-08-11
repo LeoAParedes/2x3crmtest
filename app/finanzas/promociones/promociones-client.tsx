@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
-type PromoType = 'porcentaje' | 'monto_fijo' | '2x1' | 'bundle'
+import { PROMO_TYPES, type PromoType } from '@/src/lib/finance/promotions-schema'
 
 type Promotion = {
   id: string
@@ -13,30 +13,9 @@ type Promotion = {
   description: string
   active: boolean
   expiresAt: string | null
+  createdByUsername: string
+  createdAt: string
 }
-
-const EXAMPLE_PROMOTIONS: Promotion[] = [
-  {
-    id: '1',
-    name: 'Descuento de bienvenida',
-    type: 'porcentaje',
-    value: 10,
-    minPurchase: 0,
-    description: '10 % de descuento en la primera compra del día',
-    active: true,
-    expiresAt: null
-  },
-  {
-    id: '2',
-    name: 'Compra mínima $200',
-    type: 'monto_fijo',
-    value: 20,
-    minPurchase: 200,
-    description: '$20 de descuento en compras de $200 o más',
-    active: false,
-    expiresAt: null
-  }
-]
 
 const promoTypeLabels: Record<PromoType, string> = {
   porcentaje: 'Porcentaje (%)',
@@ -46,12 +25,147 @@ const promoTypeLabels: Record<PromoType, string> = {
 }
 
 export const PromocionesClient = () => {
-  const [promotions] = useState<Promotion[]>(EXAMPLE_PROMOTIONS)
+  const [promotions, setPromotions] = useState<Promotion[]>([])
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [promoType, setPromoType] = useState<PromoType>('porcentaje')
   const [value, setValue] = useState('')
+  const [minPurchase, setMinPurchase] = useState('0')
   const [description, setDescription] = useState('')
-  const [showForm, setShowForm] = useState(false)
+  const [active, setActive] = useState(true)
+  const [expiresAt, setExpiresAt] = useState('')
+
+  const loadPromotions = useCallback(async (soft = false) => {
+    if (!soft) setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/finanzas/promociones')
+      const payload = (await response.json()) as {
+        success?: boolean
+        promotions?: Promotion[]
+        message?: string
+      }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible cargar promociones')
+      }
+      setPromotions(payload.promotions || [])
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Error de carga')
+    } finally {
+      if (!soft) setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadPromotions(false)
+    const intervalId = window.setInterval(() => {
+      void loadPromotions(true)
+    }, 30000)
+    return () => window.clearInterval(intervalId)
+  }, [loadPromotions])
+
+  const resetForm = () => {
+    setName('')
+    setPromoType('porcentaje')
+    setValue('')
+    setMinPurchase('0')
+    setDescription('')
+    setActive(true)
+    setExpiresAt('')
+  }
+
+  const handleCreatePromotion = async () => {
+    if (saving) return
+    setSaving(true)
+    setError(null)
+    setMessage(null)
+
+    const parsedValue = Number(value.replace(',', '.'))
+    const parsedMinPurchase = Number(minPurchase.replace(',', '.'))
+    if (!name.trim() || name.trim().length < 2) {
+      setError('El nombre debe tener al menos 2 caracteres')
+      setSaving(false)
+      return
+    }
+    if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+      setError('Indica un valor válido')
+      setSaving(false)
+      return
+    }
+    if (!description.trim() || description.trim().length < 2) {
+      setError('La descripción debe tener al menos 2 caracteres')
+      setSaving(false)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/finanzas/promociones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          type: promoType,
+          value: parsedValue,
+          minPurchase: Number.isFinite(parsedMinPurchase) ? parsedMinPurchase : 0,
+          description: description.trim(),
+          active,
+          expiresAt: expiresAt ? new Date(`${expiresAt}T23:59:59`).toISOString() : null
+        })
+      })
+      const payload = (await response.json()) as { success?: boolean; message?: string }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible crear la promoción')
+      }
+      setMessage('Promoción creada correctamente')
+      setShowForm(false)
+      resetForm()
+      await loadPromotions(true)
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : 'Error al crear')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleToggleActive = async (promotion: Promotion) => {
+    setError(null)
+    try {
+      const response = await fetch(`/api/finanzas/promociones/${promotion.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !promotion.active })
+      })
+      const payload = (await response.json()) as { success?: boolean; message?: string }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible actualizar la promoción')
+      }
+      await loadPromotions(true)
+    } catch (toggleError) {
+      setError(toggleError instanceof Error ? toggleError.message : 'Error al actualizar')
+    }
+  }
+
+  const handleDeletePromotion = async (promotion: Promotion) => {
+    if (!window.confirm(`¿Eliminar la promoción "${promotion.name}"?`)) return
+    setError(null)
+    try {
+      const response = await fetch(`/api/finanzas/promociones/${promotion.id}`, {
+        method: 'DELETE'
+      })
+      const payload = (await response.json()) as { success?: boolean; message?: string }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible eliminar la promoción')
+      }
+      setMessage('Promoción eliminada')
+      await loadPromotions(true)
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Error al eliminar')
+    }
+  }
 
   const activeCount = promotions.filter(promo => promo.active).length
   const inactiveCount = promotions.length - activeCount
@@ -63,9 +177,6 @@ export const PromocionesClient = () => {
           <h1 className='text-2xl font-semibold text-slate-950'>Descuentos y promociones</h1>
           <p className='mt-1 text-sm text-slate-600'>
             Administra promociones activas, descuentos por porcentaje o monto, y paquetes de productos.
-          </p>
-          <p className='mt-1 text-xs text-amber-700'>
-            Módulo de configuración — la aplicación automática en POS se activa con la integración de descuentos.
           </p>
         </div>
         <button
@@ -96,7 +207,6 @@ export const PromocionesClient = () => {
       {showForm ? (
         <section className='mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
           <h2 className='text-lg font-semibold text-slate-950'>Nueva promoción</h2>
-          <p className='mt-1 text-sm text-slate-600'>Define el nombre, tipo y valor del descuento.</p>
           <div className='mt-5 grid gap-4 sm:grid-cols-2'>
             <label className='grid gap-1 text-sm text-slate-700'>
               Nombre de la promoción
@@ -117,9 +227,9 @@ export const PromocionesClient = () => {
                 aria-label='Tipo de descuento'
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               >
-                {(Object.entries(promoTypeLabels) as Array<[PromoType, string]>).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
+                {PROMO_TYPES.map(type => (
+                  <option key={type} value={type}>
+                    {promoTypeLabels[type]}
                   </option>
                 ))}
               </select>
@@ -132,12 +242,23 @@ export const PromocionesClient = () => {
                 step='0.01'
                 value={value}
                 onChange={event => setValue(event.target.value)}
-                placeholder='0'
                 aria-label='Valor del descuento'
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               />
             </label>
             <label className='grid gap-1 text-sm text-slate-700'>
+              Compra mínima (MXN)
+              <input
+                type='number'
+                min='0'
+                step='0.01'
+                value={minPurchase}
+                onChange={event => setMinPurchase(event.target.value)}
+                aria-label='Compra mínima'
+                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+              />
+            </label>
+            <label className='grid gap-1 text-sm text-slate-700 sm:col-span-2'>
               Descripción
               <input
                 type='text'
@@ -148,24 +269,43 @@ export const PromocionesClient = () => {
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               />
             </label>
+            <label className='grid gap-1 text-sm text-slate-700'>
+              Expira
+              <input
+                type='date'
+                value={expiresAt}
+                onChange={event => setExpiresAt(event.target.value)}
+                aria-label='Fecha de expiración'
+                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+              />
+            </label>
+            <label className='flex items-center gap-2 self-end text-sm text-slate-700'>
+              <input
+                type='checkbox'
+                checked={active}
+                onChange={event => setActive(event.target.checked)}
+                aria-label='Promoción activa'
+              />
+              Activa al crear
+            </label>
           </div>
-          <p className='mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800'>
-            La persistencia de promociones estará disponible en la próxima actualización del módulo de descuentos. Por
-            ahora puedes diseñar y documentar las reglas aquí.
-          </p>
           <div className='mt-4 flex gap-3'>
             <button
               type='button'
-              disabled={!name.trim() || !value}
+              disabled={saving || !name.trim() || !value || !description.trim()}
+              onClick={() => void handleCreatePromotion()}
               aria-label='Guardar promoción'
               className='h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
             >
-              Guardar promoción
+              {saving ? 'Guardando…' : 'Guardar promoción'}
             </button>
             <button
               type='button'
               aria-label='Cancelar'
-              onClick={() => setShowForm(false)}
+              onClick={() => {
+                setShowForm(false)
+                resetForm()
+              }}
               className='h-10 rounded-lg border border-slate-300 px-4 text-sm text-slate-700'
             >
               Cancelar
@@ -186,6 +326,7 @@ export const PromocionesClient = () => {
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Valor</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Descripción</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Estado</th>
+              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Acciones</th>
             </tr>
           </thead>
           <tbody className='divide-y divide-slate-100'>
@@ -206,11 +347,46 @@ export const PromocionesClient = () => {
                     {promo.active ? 'Activa' : 'Inactiva'}
                   </span>
                 </td>
+                <td className='px-3 py-2 text-sm'>
+                  <div className='flex gap-2'>
+                    <button
+                      type='button'
+                      onClick={() => void handleToggleActive(promo)}
+                      aria-label={`${promo.active ? 'Desactivar' : 'Activar'} ${promo.name}`}
+                      className='rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50'
+                    >
+                      {promo.active ? 'Desactivar' : 'Activar'}
+                    </button>
+                    <button
+                      type='button'
+                      onClick={() => void handleDeletePromotion(promo)}
+                      aria-label={`Eliminar ${promo.name}`}
+                      className='rounded-lg border border-rose-200 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50'
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        {loading ? <p className='px-4 py-4 text-sm text-slate-500'>Cargando promociones…</p> : null}
+        {!loading && !promotions.length ? (
+          <p className='px-4 py-4 text-sm text-slate-500'>Sin promociones definidas aún.</p>
+        ) : null}
       </section>
+
+      {message ? (
+        <p aria-live='polite' className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p role='alert' className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
+          {error}
+        </p>
+      ) : null}
     </main>
   )
 }

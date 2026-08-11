@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
 import {
+  EXPENSE_CATEGORIES,
   expenseCategoryLabels,
   type ExpenseCategory
 } from '@/src/lib/finance/expense-schema'
@@ -46,35 +47,91 @@ export const PasivoClient = () => {
   const [period, setPeriod] = useState<Period>('month')
   const [expenses, setExpenses] = useState<ExpenseRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [category, setCategory] = useState<ExpenseCategory>('proveedores')
+  const [description, setDescription] = useState('')
+  const [amount, setAmount] = useState('')
+  const [expenseKind, setExpenseKind] = useState<'fixed' | 'operating'>('operating')
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await fetch(`/api/finanzas/expenses?period=${period}`)
-        const payload = (await response.json()) as ExpensesResponse
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.message || 'No fue posible cargar pasivo corriente')
-        }
-        if (!cancelled) {
-          setExpenses(payload.expenses || [])
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Error de carga')
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
+  const loadExpenses = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch(`/api/finanzas/expenses?period=${period}`)
+      const payload = (await response.json()) as ExpensesResponse
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible cargar pasivo corriente')
       }
-    }
-    void load()
-    return () => {
-      cancelled = true
+      setExpenses(payload.expenses || [])
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Error de carga')
+    } finally {
+      setLoading(false)
     }
   }, [period])
+
+  useEffect(() => {
+    void loadExpenses()
+  }, [loadExpenses])
+
+  const handleCreateExpense = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (saving) return
+    setSaving(true)
+    setMessage(null)
+    setError(null)
+
+    const parsedAmount = Number(amount.replace(',', '.'))
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setError('Ingresa un monto válido mayor a cero')
+      setSaving(false)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/finanzas/expenses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category,
+          description: description.trim(),
+          amount: parsedAmount,
+          kind: expenseKind
+        })
+      })
+      const payload = (await response.json()) as { success?: boolean; message?: string }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible registrar el gasto')
+      }
+      setDescription('')
+      setAmount('')
+      setMessage('Gasto registrado correctamente')
+      await loadExpenses()
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Error al guardar')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteExpense = async (id: string) => {
+    if (!window.confirm('¿Eliminar este gasto?')) return
+    setError(null)
+    setMessage(null)
+    try {
+      const response = await fetch(`/api/finanzas/expenses/${id}`, { method: 'DELETE' })
+      const payload = (await response.json()) as { success?: boolean; message?: string }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible eliminar el gasto')
+      }
+      setMessage('Gasto eliminado')
+      await loadExpenses()
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Error al eliminar')
+    }
+  }
 
   const totalLiabilities = expenses.reduce((sum, expense) => sum + expense.amount, 0)
 
@@ -154,6 +211,73 @@ export const PasivoClient = () => {
         </article>
       </section>
 
+      <section className='mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
+        <h2 className='text-sm font-semibold text-slate-900'>Registrar gasto</h2>
+        <form className='mt-4 grid gap-3 sm:grid-cols-2' onSubmit={handleCreateExpense}>
+          <label className='grid gap-1 text-sm text-slate-700'>
+            Tipo
+            <select
+              value={expenseKind}
+              onChange={event => setExpenseKind(event.target.value as 'fixed' | 'operating')}
+              aria-label='Tipo de gasto'
+              className='h-10 rounded-lg border border-slate-300 px-3'
+            >
+              <option value='fixed'>Fijo / producción</option>
+              <option value='operating'>Corriente</option>
+            </select>
+          </label>
+          <label className='grid gap-1 text-sm text-slate-700'>
+            Categoría
+            <select
+              value={category}
+              onChange={event => setCategory(event.target.value as ExpenseCategory)}
+              aria-label='Categoría del gasto'
+              className='h-10 rounded-lg border border-slate-300 px-3'
+            >
+              {EXPENSE_CATEGORIES.map(item => (
+                <option key={item} value={item}>
+                  {expenseCategoryLabels[item]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className='grid gap-1 text-sm text-slate-700 sm:col-span-2'>
+            Descripción
+            <input
+              type='text'
+              required
+              minLength={2}
+              value={description}
+              onChange={event => setDescription(event.target.value)}
+              aria-label='Descripción del gasto'
+              className='h-10 rounded-lg border border-slate-300 px-3'
+            />
+          </label>
+          <label className='grid gap-1 text-sm text-slate-700'>
+            Monto (MXN)
+            <input
+              type='text'
+              inputMode='decimal'
+              required
+              value={amount}
+              onChange={event => setAmount(event.target.value)}
+              aria-label='Monto del gasto'
+              className='h-10 rounded-lg border border-slate-300 px-3'
+            />
+          </label>
+          <div className='flex items-end'>
+            <button
+              type='submit'
+              disabled={saving}
+              aria-label='Guardar gasto'
+              className='h-10 w-full rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
+            >
+              {saving ? 'Guardando…' : 'Registrar gasto'}
+            </button>
+          </div>
+        </form>
+      </section>
+
       {categorySummaries.length > 0 ? (
         <section className='mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
           {categorySummaries.map(item => (
@@ -173,9 +297,7 @@ export const PasivoClient = () => {
       <section className='mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm'>
         <div className='border-b border-slate-200 px-4 py-3'>
           <h2 className='text-sm font-semibold text-slate-900'>Gastos del periodo</h2>
-          <p className='text-xs text-slate-500'>
-            Ordenados de más reciente a más antiguo.
-          </p>
+          <p className='text-xs text-slate-500'>Ordenados de más reciente a más antiguo.</p>
         </div>
         <table className='min-w-full divide-y divide-slate-200'>
           <thead className='bg-slate-50'>
@@ -186,6 +308,7 @@ export const PasivoClient = () => {
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Monto</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Fecha</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Registrado por</th>
+              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Acción</th>
             </tr>
           </thead>
           <tbody className='divide-y divide-slate-100'>
@@ -211,18 +334,31 @@ export const PasivoClient = () => {
                   {new Date(expense.spentAt).toLocaleString('es-MX')}
                 </td>
                 <td className='px-3 py-2 text-sm text-slate-600'>{expense.createdByUsername}</td>
+                <td className='px-3 py-2 text-sm'>
+                  <button
+                    type='button'
+                    onClick={() => void handleDeleteExpense(expense.id)}
+                    aria-label={`Eliminar gasto ${expense.description}`}
+                    className='rounded-lg border border-rose-200 px-2 py-1 text-xs font-medium text-rose-700 hover:bg-rose-50'
+                  >
+                    Eliminar
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         {loading ? <p className='px-4 py-4 text-sm text-slate-500'>Cargando…</p> : null}
         {!loading && !expenses.length ? (
-          <p className='px-4 py-4 text-sm text-slate-500'>
-            Sin gastos registrados en este periodo.
-          </p>
+          <p className='px-4 py-4 text-sm text-slate-500'>Sin gastos registrados en este periodo.</p>
         ) : null}
       </section>
 
+      {message ? (
+        <p aria-live='polite' className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>
+          {message}
+        </p>
+      ) : null}
       {error ? (
         <p role='alert' className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
           {error}

@@ -339,3 +339,29 @@ export const createExpense = async (rawInput: unknown, actor: AuthenticatedActor
     createdAt: expense.createdAt.toISOString()
   }
 }
+
+export const deleteExpense = async (id: string, actor: AuthenticatedActor) => {
+  const prisma = await getPrisma()
+  const existing = await prisma.expense.findUnique({ where: { id } })
+  if (!existing) {
+    throw new Error('EXPENSE_NOT_FOUND')
+  }
+
+  await prisma.expense.delete({ where: { id } })
+
+  await prisma.systemActionLog.create({
+    data: {
+      actorAuthUserId: actor.userId,
+      actorUsername: actor.username,
+      actorRole: actor.role,
+      action: 'finance.expense.delete',
+      entityType: 'Expense',
+      entityId: id,
+      status: 'success',
+      metadata: {
+        category: existing.category,
+        amount: Number(existing.amount)
+      }
+    }
+  })
+}

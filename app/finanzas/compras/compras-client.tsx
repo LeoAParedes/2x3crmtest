@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 
@@ -32,46 +32,142 @@ type RestockItem = InventoryItem & {
   estimatedCost: number
 }
 
+type PurchaseFormState = {
+  inventoryItemId: string
+  productName: string
+  quantity: string
+  unitCost: string
+  reason: string
+  registerExpense: boolean
+}
+
 export const ComprasClient = () => {
   const [restockItems, setRestockItems] = useState<RestockItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [purchaseForm, setPurchaseForm] = useState<PurchaseFormState | null>(null)
 
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const response = await fetch('/api/inventario?pageSize=200&page=1')
-        const payload = (await response.json()) as InventoryResponse
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.message || 'No fue posible cargar inventario')
-        }
-        if (!cancelled) {
-          const lowStock = (payload.items || [])
-            .filter(item => item.stock <= item.minStock)
-            .map(item => ({
-              ...item,
-              deficit: Math.max(0, item.minStock - item.stock + 1),
-              estimatedCost: item.unitPrice * Math.max(1, item.minStock - item.stock + 1)
-            }))
-            .sort((left, right) => right.deficit - left.deficit)
-          setRestockItems(lowStock)
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Error de carga')
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
+  const loadRestock = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/pos/inventory?pageSize=200&page=1')
+      const payload = (await response.json()) as InventoryResponse
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible cargar inventario')
       }
-    }
-    void load()
-    return () => {
-      cancelled = true
+      const lowStock = (payload.items || [])
+        .filter(item => item.stock <= item.minStock)
+        .map(item => ({
+          ...item,
+          deficit: Math.max(0, item.minStock - item.stock + 1),
+          estimatedCost: item.unitPrice * Math.max(1, item.minStock - item.stock + 1)
+        }))
+        .sort((left, right) => right.deficit - left.deficit)
+      setRestockItems(lowStock)
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Error de carga')
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    void loadRestock()
+  }, [loadRestock])
+
+  const handleOpenPurchaseForm = (item: RestockItem) => {
+    setMessage(null)
+    setError(null)
+    setPurchaseForm({
+      inventoryItemId: item.id,
+      productName: item.productName,
+      quantity: String(item.deficit),
+      unitCost: String(item.unitPrice),
+      reason: 'Compra a proveedor',
+      registerExpense: true
+    })
+  }
+
+  const handleClosePurchaseForm = () => {
+    setPurchaseForm(null)
+  }
+
+  const handleSubmitPurchase = async () => {
+    if (!purchaseForm || submitting) return
+    setSubmitting(true)
+    setError(null)
+    setMessage(null)
+
+    const quantity = Number(purchaseForm.quantity.replace(',', '.'))
+    const unitCost = Number(purchaseForm.unitCost.replace(',', '.'))
+    if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isInteger(quantity)) {
+      setError('Indica una cantidad entera válida mayor a cero')
+      setSubmitting(false)
+      return
+    }
+    if (!Number.isFinite(unitCost) || unitCost <= 0) {
+      setError('Indica un costo unitario válido mayor a cero')
+      setSubmitting(false)
+      return
+    }
+    if (purchaseForm.reason.trim().length < 3) {
+      setError('El motivo debe tener al menos 3 caracteres')
+      setSubmitting(false)
+      return
+    }
+
+    try {
+      const adjustmentResponse = await fetch('/api/inventario/ajustes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operation: 'stock_entry',
+          inventoryItemId: purchaseForm.inventoryItemId,
+          quantity,
+          unitCost,
+          reason: purchaseForm.reason.trim()
+        })
+      })
+      const adjustmentPayload = (await adjustmentResponse.json()) as {
+        success?: boolean
+        message?: string
+      }
+      if (!adjustmentResponse.ok || !adjustmentPayload.success) {
+        throw new Error(adjustmentPayload.message || 'No fue posible registrar la entrada de stock')
+      }
+
+      if (purchaseForm.registerExpense) {
+        const totalAmount = quantity * unitCost
+        const expenseResponse = await fetch('/api/finanzas/expenses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            category: 'proveedores',
+            description: purchaseForm.reason.trim(),
+            amount: totalAmount,
+            kind: 'operating'
+          })
+        })
+        const expensePayload = (await expenseResponse.json()) as { success?: boolean; message?: string }
+        if (!expenseResponse.ok || !expensePayload.success) {
+          throw new Error(
+            expensePayload.message || 'Stock actualizado, pero no se pudo registrar el gasto asociado'
+          )
+        }
+      }
+
+      setMessage('Compra registrada — stock actualizado')
+      setPurchaseForm(null)
+      await loadRestock()
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Error al registrar compra')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   const estimatedRestockCost = restockItems.reduce((sum, item) => sum + item.estimatedCost, 0)
 
@@ -80,7 +176,7 @@ export const ComprasClient = () => {
       <section className='border-b border-slate-200 pb-5'>
         <h1 className='text-2xl font-semibold text-slate-950'>Compras y Proveedores</h1>
         <p className='mt-1 text-sm text-slate-600'>
-          Lista de restock sugerida por productos en o bajo el mínimo de existencias.
+          Lista de restock sugerida y registro de compras que actualizan inventario y gastos.
         </p>
       </section>
 
@@ -112,6 +208,93 @@ export const ComprasClient = () => {
         </article>
       </section>
 
+      {purchaseForm ? (
+        <section className='mt-6 rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm'>
+          <h2 className='text-lg font-semibold text-slate-950'>Registrar compra</h2>
+          <p className='mt-1 text-sm text-slate-600'>Producto: {purchaseForm.productName}</p>
+          <div className='mt-4 grid gap-3 sm:grid-cols-2'>
+            <label className='grid gap-1 text-sm text-slate-700'>
+              Cantidad
+              <input
+                type='number'
+                min='1'
+                step='1'
+                value={purchaseForm.quantity}
+                onChange={event =>
+                  setPurchaseForm(current =>
+                    current ? { ...current, quantity: event.target.value } : current
+                  )
+                }
+                aria-label='Cantidad comprada'
+                className='h-10 rounded-lg border border-slate-300 px-3'
+              />
+            </label>
+            <label className='grid gap-1 text-sm text-slate-700'>
+              Costo unitario (MXN)
+              <input
+                type='number'
+                min='0.01'
+                step='0.01'
+                value={purchaseForm.unitCost}
+                onChange={event =>
+                  setPurchaseForm(current =>
+                    current ? { ...current, unitCost: event.target.value } : current
+                  )
+                }
+                aria-label='Costo unitario'
+                className='h-10 rounded-lg border border-slate-300 px-3'
+              />
+            </label>
+            <label className='grid gap-1 text-sm text-slate-700 sm:col-span-2'>
+              Motivo
+              <input
+                type='text'
+                value={purchaseForm.reason}
+                onChange={event =>
+                  setPurchaseForm(current =>
+                    current ? { ...current, reason: event.target.value } : current
+                  )
+                }
+                aria-label='Motivo de la compra'
+                className='h-10 rounded-lg border border-slate-300 px-3'
+              />
+            </label>
+            <label className='flex items-center gap-2 text-sm text-slate-700 sm:col-span-2'>
+              <input
+                type='checkbox'
+                checked={purchaseForm.registerExpense}
+                onChange={event =>
+                  setPurchaseForm(current =>
+                    current ? { ...current, registerExpense: event.target.checked } : current
+                  )
+                }
+                aria-label='Registrar como gasto en proveedores'
+              />
+              Registrar también como gasto en proveedores
+            </label>
+          </div>
+          <div className='mt-4 flex gap-2'>
+            <button
+              type='button'
+              onClick={() => void handleSubmitPurchase()}
+              disabled={submitting}
+              aria-label='Confirmar compra'
+              className='h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
+            >
+              {submitting ? 'Registrando…' : 'Confirmar compra'}
+            </button>
+            <button
+              type='button'
+              onClick={handleClosePurchaseForm}
+              aria-label='Cancelar compra'
+              className='h-10 rounded-lg border border-slate-300 px-4 text-sm text-slate-700'
+            >
+              Cancelar
+            </button>
+          </div>
+        </section>
+      ) : null}
+
       <section className='mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm'>
         <div className='border-b border-slate-200 px-4 py-3'>
           <h2 className='text-sm font-semibold text-slate-900'>Lista de restock sugerida</h2>
@@ -129,6 +312,7 @@ export const ComprasClient = () => {
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Mínimo</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Unidades a pedir</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Costo est.</th>
+              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Acción</th>
             </tr>
           </thead>
           <tbody className='divide-y divide-slate-100'>
@@ -145,6 +329,16 @@ export const ComprasClient = () => {
                 <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
                   {formatMxnCurrency(item.estimatedCost)}
                 </td>
+                <td className='px-3 py-2 text-sm'>
+                  <button
+                    type='button'
+                    onClick={() => handleOpenPurchaseForm(item)}
+                    aria-label={`Registrar compra de ${item.productName}`}
+                    className='rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800 hover:bg-emerald-100'
+                  >
+                    Registrar compra
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -157,6 +351,11 @@ export const ComprasClient = () => {
         ) : null}
       </section>
 
+      {message ? (
+        <p aria-live='polite' className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>
+          {message}
+        </p>
+      ) : null}
       {error ? (
         <p role='alert' className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
           {error}
