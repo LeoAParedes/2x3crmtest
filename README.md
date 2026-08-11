@@ -1,44 +1,57 @@
-# 2x3crmtest
+# 2x3 Operaciones (`2x3crmtest`)
 
-ERP de supermercado **2x3 Operaciones** (versión `1.0.0`).
+ERP de supermercado para operación diaria de caja, inventario, finanzas y consultas por WhatsApp/web vía el agente **DavinciAi**.
 
-## Documentación
+**Producción:** [https://2x3crmtest.vercel.app](https://2x3crmtest.vercel.app)  
+**Repositorio:** [github.com/LeoAParedes/2x3crmtest](https://github.com/LeoAParedes/2x3crmtest)
 
-- [Base de conocimiento](docs/README.md) — índice por tarea y por rol
-- [Manual de usuario](docs/manual-usuario/manual-usuario-erp-supermercado.md) — cómo lograr objetivos en el sistema (ISO/IEC/IEEE 26514)
-- [Manual técnico](docs/manual-tecnico/manual-tecnico-erp-supermercado.md) — arquitectura, APIs y despliegue
-- [Control de configuración documental](docs/calidad/control-configuracion-documental.md) — versiones y aprobación (ISO/IEC 29110)
+---
 
-## Requisitos
+## Credenciales de acceso
 
-- Docker Desktop en ejecución
-- Un proyecto de Supabase con Auth habilitado
-- Node.js 20+ y npm (solo para migrar la base de datos y crear los usuarios iniciales)
+Usuarios bootstrap (Supabase Auth + perfil Prisma). Emails locales del entorno:
 
-## Configuración
+| Usuario | Rol | Email | Contraseña |
+|---------|-----|-------|------------|
+| `admin` | Administrador | `admin@2x3crmtest.local` | `DavinciAi` |
+| `cajero` | Cajero | `cajero@2x3crmtest.local` | `DavinciAi` |
 
-1. Copia el archivo de ejemplo:
+Se crean o sincronizan con `npm run bootstrap:users` (usa `BOOTSTRAP_ADMIN_PASSWORD` y `BOOTSTRAP_CASHIER_PASSWORD` en `.env`).
 
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+---
 
-2. Completa en `.env` los valores de Supabase:
+## Cómo correr el proyecto
 
-   ```dotenv
-   NEXT_PUBLIC_SUPABASE_URL=https://TU_PROYECTO.supabase.co
-   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=tu_publishable_key
-   SUPABASE_SERVICE_ROLE_KEY=tu_service_role_key
-   DATABASE_URL=tu_connection_string_de_supabase
-   BOOTSTRAP_ADMIN_PASSWORD=tu_password_admin
-   BOOTSTRAP_CASHIER_PASSWORD=tu_password_cajero
-   ```
+### Requisitos
 
-3. En Supabase, configura `http://localhost:3000` como **Site URL** y como URL de redirección permitida.
+- Node.js 20+
+- Docker Desktop (opcional, para correr la app en contenedor)
+- Proyecto Supabase con Auth y PostgreSQL
 
-## Preparar la base de datos
+### 1. Variables de entorno
 
-Instala las dependencias, aplica las migraciones y crea los usuarios iniciales:
+```powershell
+Copy-Item .env.example .env
+```
+
+Completa al menos:
+
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+DATABASE_URL=
+DIRECT_URL=
+BOOTSTRAP_ADMIN_PASSWORD=DavinciAi
+BOOTSTRAP_CASHIER_PASSWORD=DavinciAi
+OPENAI_API_KEY=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+```
+
+En Supabase Auth: Site URL y redirect `http://localhost:3000` (y la URL de Vercel en producción).
+
+### 2. Base de datos y usuarios
 
 ```powershell
 npm install
@@ -46,26 +59,105 @@ npm run prisma:deploy
 npm run bootstrap:users
 ```
 
-Ejecuta `npm run bootstrap:users` una sola vez por entorno, o de nuevo únicamente si necesitas sincronizar esas cuentas.
+### 3. Desarrollo local
 
-## Ejecutar con Docker
+```powershell
+npm run dev
+```
 
-Construye e inicia la aplicación:
+Abre [http://localhost:3000](http://localhost:3000).
+
+### 4. Docker
 
 ```powershell
 docker compose up --build -d
 ```
 
-Abre [http://localhost:3000](http://localhost:3000).
-
-Para consultar el estado del contenedor:
+### 5. Tests / calidad
 
 ```powershell
-docker compose ps
+npm test
+npm run lint
+npm run typecheck
 ```
 
-Para detenerlo:
+---
 
-```powershell
-docker compose down
-```
+## Esquema de base de datos (Prisma / PostgreSQL)
+
+Persistencia en **Supabase PostgreSQL** vía **Prisma**. Modelos principales:
+
+| Dominio | Modelos |
+|---------|---------|
+| Auth / RBAC | `UserProfile` (`admin` \| `cashier`), gate de turno (`cashierGate`) |
+| POS / caja | `CashSession`, `Sale`, `SaleItem`, `PosSettings` |
+| Inventario | `InventoryItem`, `InventoryLot`, `InventoryMovement` |
+| Compras | `Supplier`, `ProductSupplier`, `Purchase` |
+| Finanzas | `Expense`, `FinanceAccount`, `Receivable`, `Payment`, `PaymentPromise` |
+| Promociones | `Promotion`, `PromotionProduct`, `PromotionBundleItem` |
+| CRM / agente | `Customer`, `CustomerChannel`, `Conversation`, `ConversationMessage`, `AgentAction`, `HandoffTicket` |
+| Órdenes legacy/canal | `Order`, `OrderItem`, `ReturnCase` |
+| Auditoría / AI | `SystemActionLog`, `ApprovalRequest`, `MastraSettings`, `ProcessedEvent` |
+
+Fuente de verdad: `prisma/schema.prisma`. Migraciones en `prisma/migrations/`.
+
+Flujo operativo típico: **abrir turno (`CashSession`) → cobro POS (`Sale` + descuento de stock) → bitácora → corte de caja**.
+
+---
+
+## Decisiones técnicas
+
+### Plantilla de partida
+
+El sistema partió de un **repositorio CRM privado previo** del mismo autor. De ahí se reutilizó la arquitectura de integración Twilio/WhatsApp, el ordenamiento de clases/componentes y la base de estilos (Tailwind + shell de portal), adaptados a un ERP de supermercado.
+
+### Stack
+
+| Capa | Elección |
+|------|----------|
+| App | Next.js (App Router) + TypeScript + Tailwind |
+| Auth | Supabase Auth + perfiles Prisma (RBAC `admin` / `cashier`) |
+| Datos | PostgreSQL (Supabase) + Prisma |
+| AI | Mastra + OpenAI (`gpt-4.1-mini` por defecto en `MastraSettings`) |
+| Mensajería | Twilio WhatsApp (producción) + Meta Business Suite |
+| Deploy | Vercel + Docker Compose local |
+
+### Twilio + Meta
+
+Se eligió **Twilio** como canal de mensajería en producción por ser el camino más sencillo de implementar junto con **Meta Business Suite**. Se adquirió el **plan de USD 20**.
+
+### Cursor Desktop (desarrollo)
+
+Suscripción a **Cursor Desktop** con uso aproximado:
+
+- **~83%** API integrada del plan
+- **~15%** Grok Composer 2.5 (uso incluido del plan a menor costo relativo)
+
+### OpenAI + Mastra + harness
+
+Se adquirieron **USD 5 de API OpenAI** para el modelo que opera con **Mastra**, conectado a la base en Supabase, de modo que el operador (DavinciAi) tenga información real del sistema.
+
+Se configuró un **harness especializado** para que el modelo:
+
+1. Evalúe el esquema de base de datos / herramientas ERP permitidas
+2. Formule respuestas con **datos reales de uso** (ventas, stock, gastos, etc.), no inventados
+
+Configuración operativa en `MastraSettings` y herramientas en el código AI del proyecto (`src/lib/ai/`, rutas WhatsApp bajo `app/api/whatsapp/`).
+
+---
+
+## Módulos de la aplicación
+
+- **POS** — cobro, IVA, promociones en ticket, efectivo/tarjeta/crédito
+- **Caja** — apertura, corte, gates de cajero
+- **Inventario** — catálogo, ajustes, merma/caducidad, importación CSV
+- **Finanzas** — periodos, egresos, fondos, pasivo, compras/proveedores, promociones
+- **Bitácora** — auditoría y reimpresión
+- **CRM / DavinciAi** — chat web y WhatsApp con lectura de métricas ERP
+- **Configuración** — IVA, chatbot, cajeros, turno
+
+---
+
+## Documento ejecutivo
+
+Resumen de 1–2 páginas (qué hace el sistema y qué sigue): [`resumen-ejecutivo.pdf`](./resumen-ejecutivo.pdf)
