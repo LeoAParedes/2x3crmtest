@@ -6,6 +6,7 @@ import type { MastraSettings } from '@/src/lib/crm/mastra-settings'
 import {
   formatDeterministicErpReply,
   isErpDataQuestion,
+  parseBusinessDateMention,
   runDeterministicErpDbReply
 } from '@/src/lib/ai/erp-db-harness'
 import { executeErpTool, type ErpToolFactResult } from '@/src/lib/ai/erp-tool-executors'
@@ -110,6 +111,23 @@ export const runDavinciErpAgent = async (
   }
 
   const requiresDbFacts = isErpDataQuestion(message.message)
+  const explicitBusinessDate = parseBusinessDateMention(message.message)
+  if (requiresDbFacts && explicitBusinessDate) {
+    const deterministic = await runDeterministicErpDbReply(message.message, allowedTools)
+    writeAgentDebugLog({
+      hypothesisId: 'H7',
+      location: 'davinci-agent.ts:explicit-date',
+      message: 'deterministic DB reply for explicit business date',
+      data: {
+        channel: message.channel,
+        label: explicitBusinessDate.label,
+        isoDate: explicitBusinessDate.isoDate,
+        usedTools: deterministic.usedTools
+      }
+    })
+    return buildDbOnlyReply(deterministic.reply, deterministic.usedTools, settings)
+  }
+
   const tools = toOpenAiTools(allowedTools)
   const messages: OpenAiChatMessage[] = [
     { role: 'system', content: buildSystemPrompt(settings) },
