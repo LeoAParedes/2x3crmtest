@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import {
   Area,
   AreaChart,
@@ -21,7 +21,10 @@ import {
   expenseCategoryLabels,
   type ExpenseCategory
 } from '@/src/lib/finance/expense-schema'
-import type { FinancePeriod } from '@/src/lib/finance/period'
+import {
+  CASH_FLOW_WINDOW_OPTIONS,
+  type CashFlowWindowDays
+} from '@/src/lib/finance/period'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 
 type SalesBucket = { label: string; sales: number }
@@ -45,32 +48,6 @@ type TopProduct = {
   insight?: string
 }
 
-type SummaryResponse = {
-  success: boolean
-  period: FinancePeriod
-  generatedAt?: string
-  salesTotals: {
-    day: { total: number; count: number }
-    week: { total: number; count: number }
-    month: { total: number; count: number }
-  }
-  cashFlow: {
-    ingresos: number
-    egresos: number
-    neto: number
-    ganancia?: number
-    gananciaNegative?: boolean
-    salesCount: number
-    expenseCount: number
-    averageTicket?: number
-  }
-  timeZone?: string
-  salesSeries: SalesBucket[]
-  cashFlowSeries: CashFlowBucket[]
-  comparison: ComparisonPoint[]
-  topProducts: TopProduct[]
-}
-
 type ExpenseRow = {
   id: string
   category: string
@@ -81,16 +58,90 @@ type ExpenseRow = {
   createdByUsername: string
 }
 
-type ExpensesResponse = {
+type PeriodosResponse = {
   success: boolean
+  generatedAt?: string
+  timeZone?: string
+  panels: {
+    sales: {
+      label: string
+      range: { start: string; end: string }
+      totals: { total: number; count: number }
+      series: SalesBucket[]
+    }
+    cashFlow: {
+      label: string
+      days: number
+      range: { start: string; end: string }
+      ingresos: number
+      egresos: number
+      neto: number
+      ganancia: number
+      gananciaNegative: boolean
+      salesCount: number
+      expenseCount: number
+      averageTicket: number
+      series: CashFlowBucket[]
+      comparison: ComparisonPoint[]
+    }
+    leaderboard: {
+      label: string
+      range: { start: string; end: string }
+      topProducts: TopProduct[]
+    }
+  }
   expenses: ExpenseRow[]
 }
 
-const periodOptions: Array<{ value: FinancePeriod; label: string }> = [
-  { value: 'day', label: 'Día' },
-  { value: 'week', label: 'Semana' },
-  { value: 'month', label: 'Mes' }
-]
+type PanelId = 'sales' | 'cashFlow' | 'leaderboard' | 'comparison' | 'expensesList' | 'kpi'
+
+type PeriodosPrefs = {
+  cashFlowDays: CashFlowWindowDays
+  visible: Record<PanelId, boolean>
+  collapsed: Record<PanelId, boolean>
+}
+
+const PREFS_KEY = 'finanzas-periodos-prefs-v1'
+
+const defaultPrefs = (): PeriodosPrefs => ({
+  cashFlowDays: 15,
+  visible: {
+    sales: true,
+    cashFlow: true,
+    leaderboard: true,
+    comparison: true,
+    expensesList: true,
+    kpi: true
+  },
+  collapsed: {
+    sales: false,
+    cashFlow: false,
+    leaderboard: false,
+    comparison: false,
+    expensesList: false,
+    kpi: false
+  }
+})
+
+const readPrefs = (): PeriodosPrefs => {
+  if (typeof window === 'undefined') return defaultPrefs()
+  try {
+    const raw = window.localStorage.getItem(PREFS_KEY)
+    if (!raw) return defaultPrefs()
+    const parsed = JSON.parse(raw) as Partial<PeriodosPrefs>
+    const base = defaultPrefs()
+    const days = parsed.cashFlowDays
+    return {
+      cashFlowDays: CASH_FLOW_WINDOW_OPTIONS.includes(days as CashFlowWindowDays)
+        ? (days as CashFlowWindowDays)
+        : 15,
+      visible: { ...base.visible, ...(parsed.visible || {}) },
+      collapsed: { ...base.collapsed, ...(parsed.collapsed || {}) }
+    }
+  } catch {
+    return defaultPrefs()
+  }
+}
 
 const chartColors = {
   sales: '#0f766e',
@@ -102,8 +153,6 @@ const chartColors = {
   axis: '#64748b'
 }
 
-const emptyTotals = { total: 0, count: 0 }
-
 const formatAxisMoney = (value: number) => {
   if (value >= 1000) return `$${(value / 1000).toFixed(1)}k`
   return `$${Math.round(value)}`
@@ -114,52 +163,114 @@ const formatTooltipMoney = (value: unknown) => formatMxnCurrency(Number(value ??
 const categoryLabel = (category: string) =>
   expenseCategoryLabels[category as ExpenseCategory] || category
 
+const panelLabels: Record<PanelId, string> = {
+  kpi: 'Tarjetas de resumen',
+  sales: 'Ventas del periodo',
+  cashFlow: 'Ingresos, egresos y ganancia',
+  leaderboard: 'Leaderboard por cantidad',
+  comparison: 'Resumen comparación',
+  expensesList: 'Gastos del periodo'
+}
+
+type CollapsibleCardProps = {
+  id: PanelId
+  title: string
+  subtitle?: string
+  collapsed: boolean
+  onToggle: () => void
+  children: ReactNode
+}
+
+const CollapsibleCard = ({ id, title, subtitle, collapsed, onToggle, children }: CollapsibleCardProps) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    onToggle()
+  }
+
+  return (
+    <article className='border border-slate-200 bg-white'>
+      <button
+        type='button'
+        aria-expanded={!collapsed}
+        aria-controls={`panel-${id}`}
+        aria-label={`${collapsed ? 'Expandir' : 'Colapsar'} ${title}`}
+        tabIndex={0}
+        onClick={onToggle}
+        onKeyDown={handleKeyDown}
+        className='flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50'
+      >
+        <div>
+          <h2 className='text-sm font-semibold text-slate-900'>{title}</h2>
+          {subtitle ? <p className='mt-0.5 text-xs text-slate-500'>{subtitle}</p> : null}
+        </div>
+        <span className='mt-0.5 text-slate-500' aria-hidden='true'>
+          {collapsed ? '▸' : '▾'}
+        </span>
+      </button>
+      {!collapsed ? (
+        <div id={`panel-${id}`} className='border-t border-slate-100 px-4 pb-4 pt-3'>
+          {children}
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
 export const FinancePeriodosClient = () => {
-  const [period, setPeriod] = useState<FinancePeriod>('day')
+  const [prefs, setPrefs] = useState<PeriodosPrefs>(defaultPrefs)
+  const [prefsReady, setPrefsReady] = useState(false)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
   const [useCustomRange, setUseCustomRange] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
-  const [summary, setSummary] = useState<SummaryResponse | null>(null)
-  const [expenses, setExpenses] = useState<ExpenseRow[]>([])
+  const [data, setData] = useState<PeriodosResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showExpenseForm, setShowExpenseForm] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [category, setCategory] = useState<ExpenseCategory>('proveedores')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [expenseKind, setExpenseKind] = useState<'fixed' | 'operating'>('operating')
 
   useEffect(() => {
+    const loaded = readPrefs()
+    queueMicrotask(() => {
+      setPrefs(loaded)
+      setPrefsReady(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!prefsReady) return
+    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+  }, [prefs, prefsReady])
+
+  useEffect(() => {
+    if (!prefsReady) return
     let cancelled = false
 
     const load = async (soft = false) => {
       if (!soft) setLoading(true)
       try {
-        const [summaryResponse, expensesResponse] = await Promise.all([
-          fetch(
-            useCustomRange && customFrom && customTo
-              ? `/api/finanzas/summary?period=${period}&from=${customFrom}&to=${customTo}`
-              : `/api/finanzas/summary?period=${period}`
-          ),
-          fetch(`/api/finanzas/expenses?period=${period}`)
-        ])
-        if (cancelled) return
-
-        const summaryPayload = (await summaryResponse.json()) as SummaryResponse & { message?: string }
-        const expensesPayload = (await expensesResponse.json()) as ExpensesResponse & { message?: string }
-        if (cancelled) return
-
-        if (!summaryResponse.ok || !summaryPayload.success) {
-          throw new Error(summaryPayload.message || 'No fue posible cargar el resumen financiero')
+        const params = new URLSearchParams({
+          mode: 'periodos',
+          cashFlowDays: String(prefs.cashFlowDays)
+        })
+        if (useCustomRange && customFrom && customTo) {
+          params.set('from', customFrom)
+          params.set('to', customTo)
         }
-        if (!expensesResponse.ok || !expensesPayload.success) {
-          throw new Error(expensesPayload.message || 'No fue posible cargar gastos')
+        const response = await fetch(`/api/finanzas/summary?${params.toString()}`)
+        if (cancelled) return
+        const payload = (await response.json()) as PeriodosResponse & { message?: string }
+        if (!response.ok || !payload.success || !payload.panels) {
+          throw new Error(payload.message || 'No fue posible cargar el resumen financiero')
         }
-
-        setSummary(summaryPayload)
-        setExpenses(expensesPayload.expenses)
+        setData(payload)
         setError(null)
       } catch (loadError) {
         if (!cancelled) {
@@ -185,20 +296,7 @@ export const FinancePeriodosClient = () => {
       window.clearInterval(intervalId)
       window.removeEventListener('focus', handleFocus)
     }
-  }, [period, refreshKey, useCustomRange, customFrom, customTo])
-
-  const handlePeriodChange = (nextPeriod: FinancePeriod) => {
-    if (nextPeriod === period) return
-    setLoading(true)
-    setMessage(null)
-    setPeriod(nextPeriod)
-  }
-
-  const handlePeriodKeyDown = (event: KeyboardEvent<HTMLButtonElement>, nextPeriod: FinancePeriod) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    handlePeriodChange(nextPeriod)
-  }
+  }, [prefsReady, prefs.cashFlowDays, refreshKey, useCustomRange, customFrom, customTo])
 
   const handleCreateExpense = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -232,7 +330,7 @@ export const FinancePeriodosClient = () => {
       setDescription('')
       setAmount('')
       setMessage('Gasto registrado correctamente')
-      setLoading(true)
+      setShowExpenseForm(false)
       setRefreshKey(current => current + 1)
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Error al guardar')
@@ -241,25 +339,27 @@ export const FinancePeriodosClient = () => {
     }
   }
 
-  const salesTotals = summary?.salesTotals || {
-    day: emptyTotals,
-    week: emptyTotals,
-    month: emptyTotals
+  const handleToggleCollapsed = (id: PanelId) => {
+    setPrefs(current => ({
+      ...current,
+      collapsed: { ...current.collapsed, [id]: !current.collapsed[id] }
+    }))
   }
-  const cashFlow = summary?.cashFlow || {
-    ingresos: 0,
-    egresos: 0,
-    neto: 0,
-    ganancia: 0,
-    gananciaNegative: false,
-    salesCount: 0,
-    expenseCount: 0,
-    averageTicket: 0
+
+  const handleToggleVisible = (id: PanelId) => {
+    setPrefs(current => ({
+      ...current,
+      visible: { ...current.visible, [id]: !current.visible[id] }
+    }))
   }
-  const ganancia = cashFlow.ganancia ?? cashFlow.neto
-  const topProducts = summary?.topProducts || []
-  const salesSeries = summary?.salesSeries || []
-  const cashFlowSeries = (summary?.cashFlowSeries || []).map(bucket => {
+
+  const handleCashFlowDaysChange = (days: CashFlowWindowDays) => {
+    setPrefs(current => ({ ...current, cashFlowDays: days }))
+  }
+
+  const panels = data?.panels
+  const salesSeries = panels?.sales.series || []
+  const cashFlowSeries = (panels?.cashFlow.series || []).map(bucket => {
     const computedGanancia =
       typeof bucket.ganancia === 'number'
         ? bucket.ganancia
@@ -271,379 +371,160 @@ export const FinancePeriodosClient = () => {
       gananciaNegative: computedGanancia < 0
     }
   })
-  const comparison = summary?.comparison || []
+  const comparison = panels?.cashFlow.comparison || []
+  const topProducts = panels?.leaderboard.topProducts || []
+  const expenses = data?.expenses || []
+  const ganancia = panels?.cashFlow.ganancia ?? 0
 
   return (
     <main className='mx-auto max-w-7xl px-4 py-8 md:px-8'>
-      <section className='flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between'>
-        <div>
-          <h1 className='text-2xl font-semibold text-slate-950'>Periodos</h1>
-          <p className='mt-1 text-sm text-slate-600'>
-            Ingresos, egresos y ganancia por periodo (zona Pacífico, día desde 00:00).
-          </p>
-          <p className='mt-1 text-xs text-emerald-700'>
-            En vivo · {summary?.timeZone || 'America/Los_Angeles'} · actualiza cada 15s
-            {summary?.generatedAt
-              ? ` · ${new Date(summary.generatedAt).toLocaleTimeString('es-MX', {
-                  timeZone: summary.timeZone || 'America/Los_Angeles'
-                })}`
-              : ''}
-          </p>
-        </div>
-        <div
-          className='inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1'
-          role='group'
-          aria-label='Periodo financiero'
-        >
-          {periodOptions.map(option => {
-            const isActive = !useCustomRange && period === option.value
-            return (
-              <button
-                key={option.value}
-                type='button'
-                aria-pressed={isActive}
-                tabIndex={0}
-                aria-label={`Ver periodo ${option.label}`}
-                onClick={() => {
-                  setUseCustomRange(false)
-                  handlePeriodChange(option.value)
-                }}
-                onKeyDown={event => handlePeriodKeyDown(event, option.value)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                  isActive ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {option.label}
-              </button>
-            )
-          })}
-        </div>
+      <section className='border-b border-slate-200 pb-5'>
+        <h1 className='text-2xl font-semibold text-slate-950'>Periodos</h1>
+        <p className='mt-1 text-sm text-slate-600'>
+          Ventas por rango · P&L a quincena · leaderboard del mes (Pacífico).
+        </p>
+        <p className='mt-1 text-xs text-emerald-700'>
+          En vivo · {data?.timeZone || 'America/Los_Angeles'} · actualiza cada 15s
+          {data?.generatedAt
+            ? ` · ${new Date(data.generatedAt).toLocaleTimeString('es-MX', {
+                timeZone: data.timeZone || 'America/Los_Angeles'
+              })}`
+            : ''}
+        </p>
       </section>
 
-      <section className='mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3'>
-        <label className='grid gap-1 text-xs font-medium text-slate-600'>
-          Desde
-          <input
-            type='date'
-            value={customFrom}
-            onChange={event => setCustomFrom(event.target.value)}
-            aria-label='Fecha desde'
-            className='h-9 rounded-lg border border-slate-300 px-2 text-sm'
-          />
-        </label>
-        <label className='grid gap-1 text-xs font-medium text-slate-600'>
-          Hasta
-          <input
-            type='date'
-            value={customTo}
-            onChange={event => setCustomTo(event.target.value)}
-            aria-label='Fecha hasta'
-            className='h-9 rounded-lg border border-slate-300 px-2 text-sm'
-          />
-        </label>
-        <button
-          type='button'
-          aria-label='Aplicar rango personalizado'
-          disabled={!customFrom || !customTo}
-          onClick={() => {
-            setUseCustomRange(true)
-            setRefreshKey(current => current + 1)
-          }}
-          className='h-9 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white disabled:opacity-50'
-        >
-          Aplicar rango
-        </button>
-        {useCustomRange ? (
-          <p className='text-xs text-emerald-700'>
-            Rango activo: {customFrom} → {customTo}
-          </p>
-        ) : null}
-      </section>
-
-      <section className='mt-6 grid gap-3 sm:grid-cols-3' aria-label='Ventas por periodo'>
-        {(
-          [
-            { key: 'day', label: 'Ventas del día', data: salesTotals.day },
-            { key: 'week', label: 'Ventas de la semana', data: salesTotals.week },
-            { key: 'month', label: 'Ventas del mes', data: salesTotals.month }
-          ] as const
-        ).map(card => (
-          <article key={card.key} className='border border-slate-200 bg-white px-4 py-3'>
-            <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>{card.label}</p>
-            <p className='mt-2 text-2xl font-semibold tabular-nums text-slate-950'>
-              {formatMxnCurrency(card.data.total)}
-            </p>
-            <p className='mt-1 text-xs text-slate-500'>{card.data.count} ventas</p>
-          </article>
-        ))}
-      </section>
-
-      <section className='mt-4 grid gap-3 sm:grid-cols-4' aria-label='Flujo de caja'>
-        <article className='border border-slate-200 bg-white px-4 py-3'>
-          <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Ingresos (periodo)</p>
-          <p className='mt-2 text-xl font-semibold tabular-nums text-emerald-800'>
-            {formatMxnCurrency(cashFlow.ingresos)}
-          </p>
-          <p className='mt-1 text-xs text-slate-500'>{cashFlow.salesCount} ventas completadas</p>
-        </article>
-        <article className='border border-slate-200 bg-white px-4 py-3'>
-          <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Egresos (periodo)</p>
-          <p className='mt-2 text-xl font-semibold tabular-nums text-slate-600'>
-            {formatMxnCurrency(cashFlow.egresos)}
-          </p>
-          <p className='mt-1 text-xs text-slate-500'>{cashFlow.expenseCount} gastos</p>
-        </article>
-        <article className='border border-slate-200 bg-white px-4 py-3'>
-          <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Ganancia</p>
-          <p
-            className={`mt-2 text-xl font-semibold tabular-nums ${
-              ganancia >= 0 ? 'text-emerald-700' : 'text-rose-700'
-            }`}
+      <section className='mt-4 flex flex-wrap items-end justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3'>
+        <div className='flex flex-wrap items-end gap-3'>
+          <label className='grid gap-1 text-xs font-medium text-slate-600'>
+            Desde
+            <input
+              type='date'
+              value={customFrom}
+              onChange={event => setCustomFrom(event.target.value)}
+              aria-label='Fecha desde'
+              className='h-9 rounded-lg border border-slate-300 px-2 text-sm'
+            />
+          </label>
+          <label className='grid gap-1 text-xs font-medium text-slate-600'>
+            Hasta
+            <input
+              type='date'
+              value={customTo}
+              onChange={event => setCustomTo(event.target.value)}
+              aria-label='Fecha hasta'
+              className='h-9 rounded-lg border border-slate-300 px-2 text-sm'
+            />
+          </label>
+          <button
+            type='button'
+            aria-label='Aplicar rango a ventas'
+            disabled={!customFrom || !customTo}
+            onClick={() => {
+              setUseCustomRange(true)
+              setRefreshKey(current => current + 1)
+            }}
+            className='h-9 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white disabled:opacity-50'
           >
-            {formatMxnCurrency(ganancia)}
-          </p>
-          <p className='mt-1 text-xs text-slate-500'>Ingresos − egresos</p>
-        </article>
-        <article className='border border-slate-200 bg-white px-4 py-3'>
-          <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Ticket promedio</p>
-          <p className='mt-2 text-xl font-semibold tabular-nums text-slate-950'>
-            {formatMxnCurrency(cashFlow.averageTicket || 0)}
-          </p>
-          <p className='mt-1 text-xs text-slate-500'>Ingreso ÷ ventas del periodo</p>
-        </article>
-      </section>
+            Aplicar a ventas
+          </button>
+          {useCustomRange ? (
+            <button
+              type='button'
+              aria-label='Usar últimos 7 días en ventas'
+              onClick={() => {
+                setUseCustomRange(false)
+                setRefreshKey(current => current + 1)
+              }}
+              className='h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-700'
+            >
+              Últimos 7 días
+            </button>
+          ) : (
+            <p className='pb-2 text-xs text-slate-500'>Ventas: últimos 7 días</p>
+          )}
+        </div>
 
-      <section className='mt-6 grid gap-6 xl:grid-cols-2'>
-        <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Ventas en el periodo</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Tendencia de recaudación</p>
-          <div className='mt-3 h-64'>
-            {salesSeries.length ? (
-              <ResponsiveContainer width='100%' height='100%'>
-                <AreaChart data={salesSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id='salesFill' x1='0' y1='0' x2='0' y2='1'>
-                      <stop offset='0%' stopColor={chartColors.sales} stopOpacity={0.28} />
-                      <stop offset='100%' stopColor={chartColors.sales} stopOpacity={0.02} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' vertical={false} />
-                  <XAxis dataKey='label' tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} />
-                  <YAxis
-                    tickFormatter={formatAxisMoney}
-                    tick={{ fill: chartColors.axis, fontSize: 11 }}
-                    tickLine={false}
-                    width={48}
-                  />
-                  <Tooltip formatter={formatTooltipMoney} labelFormatter={label => `Periodo: ${label}`} />
-                  <Area
-                    type='monotone'
-                    dataKey='sales'
-                    name='Ventas'
-                    stroke={chartColors.sales}
-                    fill='url(#salesFill)'
-                    strokeWidth={2}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className='flex h-full items-center justify-center text-sm text-slate-500'>
-                {loading ? 'Cargando ventas…' : 'Sin ventas en este periodo.'}
+        <div className='relative flex items-center gap-2'>
+          <button
+            type='button'
+            aria-label='Registrar gasto'
+            aria-expanded={showExpenseForm}
+            onClick={() => {
+              setShowExpenseForm(current => !current)
+              setShowSettings(false)
+            }}
+            className='h-9 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800'
+          >
+            Registrar gasto
+          </button>
+          <button
+            type='button'
+            aria-label='Preferencias de gráficas'
+            aria-expanded={showSettings}
+            onClick={() => {
+              setShowSettings(current => !current)
+              setShowExpenseForm(false)
+            }}
+            className='flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50'
+          >
+            <span aria-hidden='true' className='text-lg leading-none'>
+              ⚙
+            </span>
+          </button>
+
+          {showSettings ? (
+            <div
+              className='absolute right-0 top-11 z-20 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-lg'
+              role='dialog'
+              aria-label='Preferencias de gráficas'
+            >
+              <p className='text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                Comparación de gastos
               </p>
-            )}
-          </div>
-        </article>
-
-        <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Ingresos, egresos y ganancia</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>
-            Egreso en gris · ganancia en verde · pérdida en rojo (eje Y siempre positivo)
-          </p>
-          <div className='mt-3 h-64'>
-            {cashFlowSeries.length ? (
-              <ResponsiveContainer width='100%' height='100%'>
-                <BarChart data={cashFlowSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' vertical={false} />
-                  <XAxis dataKey='label' tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} />
-                  <YAxis
-                    tickFormatter={formatAxisMoney}
-                    tick={{ fill: chartColors.axis, fontSize: 11 }}
-                    tickLine={false}
-                    width={48}
-                  />
-                  <Tooltip
-                    formatter={(value, name, item) => {
-                      const payload = item?.payload as CashFlowBucket | undefined
-                      if (name === 'Ganancia' && payload) {
-                        return formatMxnCurrency(payload.ganancia ?? Number(value ?? 0))
-                      }
-                      return formatTooltipMoney(value)
-                    }}
-                    labelFormatter={label => `Periodo: ${label}`}
-                  />
-                  <Legend />
-                  <Bar dataKey='ingresos' name='Ingresos' fill={chartColors.income} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey='egresos' name='Egresos' fill={chartColors.expense} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey='gananciaPlot' name='Ganancia' radius={[3, 3, 0, 0]}>
-                    {cashFlowSeries.map(bucket => (
-                      <Cell
-                        key={`ganancia-${bucket.label}`}
-                        fill={bucket.gananciaNegative ? chartColors.loss : chartColors.profit}
+              <div className='mt-2 flex gap-1'>
+                {CASH_FLOW_WINDOW_OPTIONS.map(days => (
+                  <button
+                    key={days}
+                    type='button'
+                    aria-pressed={prefs.cashFlowDays === days}
+                    aria-label={`Usar ${days} días`}
+                    onClick={() => handleCashFlowDaysChange(days)}
+                    className={`flex-1 rounded-md px-2 py-1.5 text-xs font-medium ${
+                      prefs.cashFlowDays === days
+                        ? 'bg-emerald-600 text-white'
+                        : 'border border-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {days === 15 ? 'Quincena' : `${days}d`}
+                  </button>
+                ))}
+              </div>
+              <p className='mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                Mostrar / ocultar
+              </p>
+              <ul className='mt-2 space-y-1'>
+                {(Object.keys(panelLabels) as PanelId[]).map(id => (
+                  <li key={id}>
+                    <label className='flex cursor-pointer items-center gap-2 text-sm text-slate-700'>
+                      <input
+                        type='checkbox'
+                        checked={prefs.visible[id]}
+                        onChange={() => handleToggleVisible(id)}
+                        aria-label={`Mostrar ${panelLabels[id]}`}
                       />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className='flex h-full items-center justify-center text-sm text-slate-500'>
-                {loading ? 'Cargando flujo…' : 'Sin movimientos en este periodo.'}
-              </p>
-            )}
-          </div>
-        </article>
-      </section>
-
-      <section className='mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]'>
-        <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Leaderboard por cantidad</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Top productos + hora pico y día más fuerte</p>
-          <div className='mt-3 h-72'>
-            {topProducts.length ? (
-              <ResponsiveContainer width='100%' height='100%'>
-                <BarChart
-                  data={topProducts}
-                  layout='vertical'
-                  margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
-                >
-                  <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' horizontal={false} />
-                  <XAxis
-                    type='number'
-                    tickFormatter={formatAxisMoney}
-                    tick={{ fill: chartColors.axis, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    type='category'
-                    dataKey='productName'
-                    width={120}
-                    tick={{ fill: chartColors.axis, fontSize: 11 }}
-                    tickLine={false}
-                  />
-                  <Tooltip formatter={formatTooltipMoney} labelFormatter={label => String(label)} />
-                  <Bar dataKey='revenue' name='Ingreso' radius={[0, 3, 3, 0]}>
-                    {topProducts.map(product => (
-                      <Cell key={product.sku} fill={chartColors.sales} fillOpacity={1 - (product.rank - 1) * 0.08} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className='flex h-full items-center justify-center text-sm text-slate-500'>
-                {loading ? 'Cargando productos…' : 'Sin productos vendidos en este periodo.'}
-              </p>
-            )}
-          </div>
-          {topProducts.length ? (
-            <div className='mt-3 overflow-x-auto'>
-              <table className='min-w-full divide-y divide-slate-200'>
-                <thead className='bg-slate-50'>
-                  <tr>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                      #
-                    </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                      Producto
-                    </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                      Cantidad
-                    </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                      Pico
-                    </th>
-                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                      Ingreso
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className='divide-y divide-slate-100'>
-                  {topProducts.map(product => (
-                    <tr key={product.sku}>
-                      <td className='px-3 py-2 text-sm text-slate-600'>{product.rank}</td>
-                      <td className='px-3 py-2 text-sm text-slate-800'>
-                        <span className='font-medium'>{product.productName}</span>
-                        <span className='ml-2 text-xs text-slate-500'>{product.sku}</span>
-                      </td>
-                      <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>{product.quantityDisplay}</td>
-                      <td className='px-3 py-2 text-xs text-slate-600'>
-                        {product.insight || `${product.peakHourLabel || '—'} · ${product.peakDayLabel || '—'}`}
-                      </td>
-                      <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
-                        {formatMxnCurrency(product.revenue)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      {panelLabels[id]}
+                    </label>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
-        </article>
-
-        <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Resumen del periodo</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Ingresos, egresos y ganancia (|y| positivo)</p>
-          <div className='mt-3 h-56'>
-            {comparison.some(point => point.value > 0) ? (
-              <ResponsiveContainer width='100%' height='100%'>
-                <BarChart data={comparison} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' vertical={false} />
-                  <XAxis dataKey='name' tick={{ fill: chartColors.axis, fontSize: 12 }} tickLine={false} />
-                  <YAxis
-                    tickFormatter={formatAxisMoney}
-                    tick={{ fill: chartColors.axis, fontSize: 11 }}
-                    tickLine={false}
-                    width={48}
-                  />
-                  <Tooltip
-                    formatter={(value, _name, item) => {
-                      const point = item?.payload as ComparisonPoint | undefined
-                      if (point?.name === 'Ganancia' && typeof point.signedValue === 'number') {
-                        return formatMxnCurrency(point.signedValue)
-                      }
-                      return formatTooltipMoney(value)
-                    }}
-                  />
-                  <Bar dataKey='value' name='Monto' radius={[3, 3, 0, 0]}>
-                    {comparison.map(point => (
-                      <Cell
-                        key={point.name}
-                        fill={
-                          point.name === 'Ingresos'
-                            ? chartColors.income
-                            : point.name === 'Egresos'
-                              ? chartColors.expense
-                              : point.negative
-                                ? chartColors.loss
-                                : chartColors.profit
-                        }
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className='flex h-full items-center justify-center text-sm text-slate-500'>
-                {loading ? 'Cargando…' : 'Sin datos para comparar.'}
-              </p>
-            )}
-          </div>
-        </article>
+        </div>
       </section>
 
-      <section className='mt-6 grid gap-6 lg:grid-cols-[0.9fr_1.1fr]'>
-        <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Registrar gasto</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Plantillas rápidas para fijos y corrientes</p>
-          <div className='mt-3 flex flex-wrap gap-2'>
+      {showExpenseForm ? (
+        <section className='mt-3 rounded-xl border border-slate-900/10 bg-slate-50 p-4' aria-label='Formulario de gasto'>
+          <div className='flex flex-wrap gap-2'>
             {EXPENSE_TEMPLATES.map(template => (
               <button
                 key={`${template.category}-${template.description}`}
@@ -654,13 +535,13 @@ export const FinancePeriodosClient = () => {
                   setExpenseKind(template.kind)
                 }}
                 aria-label={`Usar plantilla ${template.description}`}
-                className='rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50'
+                className='rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50'
               >
                 {template.description}
               </button>
             ))}
           </div>
-          <form className='mt-4 space-y-3' onSubmit={handleCreateExpense}>
+          <form className='mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4' onSubmit={handleCreateExpense}>
             <div>
               <label htmlFor='expense-kind' className='text-xs font-medium text-slate-600'>
                 Tipo
@@ -683,7 +564,7 @@ export const FinancePeriodosClient = () => {
                 id='expense-category'
                 value={category}
                 onChange={event => setCategory(event.target.value as ExpenseCategory)}
-                className='mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900'
+                className='mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm'
                 aria-label='Categoría del gasto'
               >
                 {EXPENSE_CATEGORIES.map(item => (
@@ -705,9 +586,8 @@ export const FinancePeriodosClient = () => {
                 maxLength={240}
                 value={description}
                 onChange={event => setDescription(event.target.value)}
-                className='mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900'
+                className='mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm'
                 aria-label='Descripción del gasto'
-                placeholder='Ej. Pago de renta mensual'
               />
             </div>
             <div>
@@ -721,65 +601,357 @@ export const FinancePeriodosClient = () => {
                 required
                 value={amount}
                 onChange={event => setAmount(event.target.value)}
-                className='mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm tabular-nums text-slate-900'
+                className='mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm tabular-nums'
                 aria-label='Monto del gasto en pesos'
-                placeholder='0.00'
               />
             </div>
-            <button
-              type='submit'
-              disabled={saving}
-              className='w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60'
-              aria-label='Guardar gasto'
-            >
-              {saving ? 'Guardando…' : 'Registrar gasto'}
-            </button>
+            <div className='sm:col-span-2 lg:col-span-4'>
+              <button
+                type='submit'
+                disabled={saving}
+                className='h-10 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white disabled:opacity-60'
+                aria-label='Guardar gasto'
+              >
+                {saving ? 'Guardando…' : 'Guardar gasto'}
+              </button>
+            </div>
           </form>
-        </article>
+        </section>
+      ) : null}
 
-        <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Gastos del periodo</h2>
-          <div className='mt-3 overflow-x-auto'>
-            <table className='min-w-full divide-y divide-slate-200'>
-              <thead className='bg-slate-50'>
-                <tr>
-                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                    Categoría
-                  </th>
-                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                    Descripción
-                  </th>
-                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                    Monto
-                  </th>
-                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                    Fecha
-                  </th>
-                </tr>
-              </thead>
-              <tbody className='divide-y divide-slate-100'>
-                {expenses.map(expense => (
-                  <tr key={expense.id}>
-                    <td className='px-3 py-2 text-sm text-slate-700'>{categoryLabel(expense.category)}</td>
-                    <td className='px-3 py-2 text-sm text-slate-700'>{expense.description}</td>
-                    <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
-                      {formatMxnCurrency(expense.amount)}
-                    </td>
-                    <td className='px-3 py-2 text-sm text-slate-700'>
-                      {new Date(expense.spentAt).toLocaleString('es-MX')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!expenses.length ? (
-              <p className='px-3 py-4 text-sm text-slate-500'>
-                {loading ? 'Cargando gastos…' : 'Sin gastos registrados en este periodo.'}
-              </p>
-            ) : null}
-          </div>
-        </article>
+      {prefs.visible.kpi ? (
+        <div className='mt-4'>
+          <CollapsibleCard
+            id='kpi'
+            title='Resumen P&L'
+            subtitle={panels?.cashFlow.label || 'Quincena'}
+            collapsed={prefs.collapsed.kpi}
+            onToggle={() => handleToggleCollapsed('kpi')}
+          >
+            <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+              <div className='border border-slate-200 bg-white px-3 py-2'>
+                <p className='text-[11px] uppercase tracking-wide text-slate-500'>Ingresos</p>
+                <p className='mt-1 text-lg font-semibold tabular-nums text-emerald-800'>
+                  {formatMxnCurrency(panels?.cashFlow.ingresos || 0)}
+                </p>
+                <p className='text-xs text-slate-500'>{panels?.cashFlow.salesCount || 0} ventas</p>
+              </div>
+              <div className='border border-slate-200 bg-white px-3 py-2'>
+                <p className='text-[11px] uppercase tracking-wide text-slate-500'>Egresos</p>
+                <p className='mt-1 text-lg font-semibold tabular-nums text-slate-600'>
+                  {formatMxnCurrency(panels?.cashFlow.egresos || 0)}
+                </p>
+                <p className='text-xs text-slate-500'>{panels?.cashFlow.expenseCount || 0} gastos</p>
+              </div>
+              <div className='border border-slate-200 bg-white px-3 py-2'>
+                <p className='text-[11px] uppercase tracking-wide text-slate-500'>Ganancia</p>
+                <p
+                  className={`mt-1 text-lg font-semibold tabular-nums ${
+                    ganancia >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                  }`}
+                >
+                  {formatMxnCurrency(ganancia)}
+                </p>
+              </div>
+              <div className='border border-slate-200 bg-white px-3 py-2'>
+                <p className='text-[11px] uppercase tracking-wide text-slate-500'>Ventas (panel)</p>
+                <p className='mt-1 text-lg font-semibold tabular-nums text-slate-950'>
+                  {formatMxnCurrency(panels?.sales.totals.total || 0)}
+                </p>
+                <p className='text-xs text-slate-500'>{panels?.sales.label}</p>
+              </div>
+            </div>
+          </CollapsibleCard>
+        </div>
+      ) : null}
+
+      <section className='mt-4 grid gap-4 xl:grid-cols-2'>
+        {prefs.visible.sales ? (
+          <CollapsibleCard
+            id='sales'
+            title='Ventas del periodo'
+            subtitle={panels?.sales.label || 'Últimos 7 días'}
+            collapsed={prefs.collapsed.sales}
+            onToggle={() => handleToggleCollapsed('sales')}
+          >
+            <div className='h-64'>
+              {salesSeries.length ? (
+                <ResponsiveContainer width='100%' height='100%'>
+                  <AreaChart data={salesSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id='salesFill' x1='0' y1='0' x2='0' y2='1'>
+                        <stop offset='0%' stopColor={chartColors.sales} stopOpacity={0.28} />
+                        <stop offset='100%' stopColor={chartColors.sales} stopOpacity={0.02} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' vertical={false} />
+                    <XAxis dataKey='label' tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} />
+                    <YAxis
+                      tickFormatter={formatAxisMoney}
+                      tick={{ fill: chartColors.axis, fontSize: 11 }}
+                      tickLine={false}
+                      width={48}
+                    />
+                    <Tooltip formatter={formatTooltipMoney} />
+                    <Area
+                      type='monotone'
+                      dataKey='sales'
+                      name='Ventas'
+                      stroke={chartColors.sales}
+                      fill='url(#salesFill)'
+                      strokeWidth={2}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className='flex h-full items-center justify-center text-sm text-slate-500'>
+                  {loading ? 'Cargando ventas…' : 'Sin ventas en este periodo.'}
+                </p>
+              )}
+            </div>
+          </CollapsibleCard>
+        ) : null}
+
+        {prefs.visible.cashFlow ? (
+          <CollapsibleCard
+            id='cashFlow'
+            title='Ingresos, egresos y ganancia'
+            subtitle={`${panels?.cashFlow.label || 'Quincena'} · egreso gris · ganancia verde/rojo`}
+            collapsed={prefs.collapsed.cashFlow}
+            onToggle={() => handleToggleCollapsed('cashFlow')}
+          >
+            <div className='h-64'>
+              {cashFlowSeries.length ? (
+                <ResponsiveContainer width='100%' height='100%'>
+                  <BarChart data={cashFlowSeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' vertical={false} />
+                    <XAxis dataKey='label' tick={{ fill: chartColors.axis, fontSize: 11 }} tickLine={false} />
+                    <YAxis
+                      tickFormatter={formatAxisMoney}
+                      tick={{ fill: chartColors.axis, fontSize: 11 }}
+                      tickLine={false}
+                      width={48}
+                    />
+                    <Tooltip
+                      formatter={(value, name, item) => {
+                        const payload = item?.payload as CashFlowBucket | undefined
+                        if (name === 'Ganancia' && payload) {
+                          return formatMxnCurrency(payload.ganancia ?? Number(value ?? 0))
+                        }
+                        return formatTooltipMoney(value)
+                      }}
+                    />
+                    <Legend />
+                    <Bar dataKey='ingresos' name='Ingresos' fill={chartColors.income} radius={[3, 3, 0, 0]} />
+                    <Bar dataKey='egresos' name='Egresos' fill={chartColors.expense} radius={[3, 3, 0, 0]} />
+                    <Bar dataKey='gananciaPlot' name='Ganancia' radius={[3, 3, 0, 0]}>
+                      {cashFlowSeries.map(bucket => (
+                        <Cell
+                          key={`ganancia-${bucket.label}`}
+                          fill={bucket.gananciaNegative ? chartColors.loss : chartColors.profit}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className='flex h-full items-center justify-center text-sm text-slate-500'>
+                  {loading ? 'Cargando flujo…' : 'Sin movimientos en este periodo.'}
+                </p>
+              )}
+            </div>
+          </CollapsibleCard>
+        ) : null}
       </section>
+
+      <section className='mt-4 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]'>
+        {prefs.visible.leaderboard ? (
+          <CollapsibleCard
+            id='leaderboard'
+            title='Leaderboard por cantidad'
+            subtitle={panels?.leaderboard.label || 'Último mes'}
+            collapsed={prefs.collapsed.leaderboard}
+            onToggle={() => handleToggleCollapsed('leaderboard')}
+          >
+            <div className='h-72'>
+              {topProducts.length ? (
+                <ResponsiveContainer width='100%' height='100%'>
+                  <BarChart data={topProducts} layout='vertical' margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+                    <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' horizontal={false} />
+                    <XAxis
+                      type='number'
+                      tickFormatter={formatAxisMoney}
+                      tick={{ fill: chartColors.axis, fontSize: 11 }}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      type='category'
+                      dataKey='productName'
+                      width={120}
+                      tick={{ fill: chartColors.axis, fontSize: 11 }}
+                      tickLine={false}
+                    />
+                    <Tooltip formatter={formatTooltipMoney} />
+                    <Bar dataKey='revenue' name='Ingreso' radius={[0, 3, 3, 0]}>
+                      {topProducts.map(product => (
+                        <Cell
+                          key={product.sku}
+                          fill={chartColors.sales}
+                          fillOpacity={1 - (product.rank - 1) * 0.08}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className='flex h-full items-center justify-center text-sm text-slate-500'>
+                  {loading ? 'Cargando productos…' : 'Sin productos vendidos en el mes.'}
+                </p>
+              )}
+            </div>
+            {topProducts.length ? (
+              <div className='mt-3 overflow-x-auto'>
+                <table className='min-w-full divide-y divide-slate-200'>
+                  <thead className='bg-slate-50'>
+                    <tr>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>#</th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                        Producto
+                      </th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                        Cantidad
+                      </th>
+                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                        Ingreso
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className='divide-y divide-slate-100'>
+                    {topProducts.map(product => (
+                      <tr key={product.sku}>
+                        <td className='px-3 py-2 text-sm text-slate-600'>{product.rank}</td>
+                        <td className='px-3 py-2 text-sm text-slate-800'>{product.productName}</td>
+                        <td className='px-3 py-2 text-sm tabular-nums'>{product.quantityDisplay}</td>
+                        <td className='px-3 py-2 text-sm tabular-nums'>
+                          {formatMxnCurrency(product.revenue)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+          </CollapsibleCard>
+        ) : null}
+
+        {prefs.visible.comparison ? (
+          <CollapsibleCard
+            id='comparison'
+            title='Resumen comparación'
+            subtitle={`Persistente: ${prefs.cashFlowDays === 15 ? 'quincena' : `${prefs.cashFlowDays} días`}`}
+            collapsed={prefs.collapsed.comparison}
+            onToggle={() => handleToggleCollapsed('comparison')}
+          >
+            <div className='h-56'>
+              {comparison.some(point => point.value > 0) ? (
+                <ResponsiveContainer width='100%' height='100%'>
+                  <BarChart data={comparison} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke={chartColors.grid} strokeDasharray='3 3' vertical={false} />
+                    <XAxis dataKey='name' tick={{ fill: chartColors.axis, fontSize: 12 }} tickLine={false} />
+                    <YAxis
+                      tickFormatter={formatAxisMoney}
+                      tick={{ fill: chartColors.axis, fontSize: 11 }}
+                      tickLine={false}
+                      width={48}
+                    />
+                    <Tooltip
+                      formatter={(value, _name, item) => {
+                        const point = item?.payload as ComparisonPoint | undefined
+                        if (point?.name === 'Ganancia' && typeof point.signedValue === 'number') {
+                          return formatMxnCurrency(point.signedValue)
+                        }
+                        return formatTooltipMoney(value)
+                      }}
+                    />
+                    <Bar dataKey='value' name='Monto' radius={[3, 3, 0, 0]}>
+                      {comparison.map(point => (
+                        <Cell
+                          key={point.name}
+                          fill={
+                            point.name === 'Ingresos'
+                              ? chartColors.income
+                              : point.name === 'Egresos'
+                                ? chartColors.expense
+                                : point.negative
+                                  ? chartColors.loss
+                                  : chartColors.profit
+                          }
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className='flex h-full items-center justify-center text-sm text-slate-500'>
+                  {loading ? 'Cargando…' : 'Sin datos para comparar.'}
+                </p>
+              )}
+            </div>
+          </CollapsibleCard>
+        ) : null}
+      </section>
+
+      {prefs.visible.expensesList ? (
+        <div className='mt-4'>
+          <CollapsibleCard
+            id='expensesList'
+            title='Gastos del periodo'
+            subtitle={panels?.cashFlow.label || 'Quincena'}
+            collapsed={prefs.collapsed.expensesList}
+            onToggle={() => handleToggleCollapsed('expensesList')}
+          >
+            <div className='overflow-x-auto'>
+              <table className='min-w-full divide-y divide-slate-200'>
+                <thead className='bg-slate-50'>
+                  <tr>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                      Categoría
+                    </th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                      Descripción
+                    </th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                      Monto
+                    </th>
+                    <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>
+                      Fecha
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className='divide-y divide-slate-100'>
+                  {expenses.map(expense => (
+                    <tr key={expense.id}>
+                      <td className='px-3 py-2 text-sm text-slate-700'>{categoryLabel(expense.category)}</td>
+                      <td className='px-3 py-2 text-sm text-slate-700'>{expense.description}</td>
+                      <td className='px-3 py-2 text-sm tabular-nums'>{formatMxnCurrency(expense.amount)}</td>
+                      <td className='px-3 py-2 text-sm text-slate-700'>
+                        {new Date(expense.spentAt).toLocaleString('es-MX', {
+                          timeZone: data?.timeZone || 'America/Los_Angeles'
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!expenses.length ? (
+                <p className='px-3 py-4 text-sm text-slate-500'>
+                  {loading ? 'Cargando gastos…' : 'Sin gastos en esta ventana.'}
+                </p>
+              ) : null}
+            </div>
+          </CollapsibleCard>
+        </div>
+      ) : null}
 
       {message ? (
         <p aria-live='polite' className='mt-4 border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'>

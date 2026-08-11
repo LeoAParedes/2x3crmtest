@@ -4,7 +4,9 @@ import {
   FINANCE_TIME_ZONE,
   formatBucketKey,
   getPeriodBounds,
+  getRollingBounds,
   isFinancePeriod,
+  resolveSeriesPeriod,
   zonedWallTimeToUtc
 } from '@/src/lib/finance/period'
 
@@ -25,14 +27,30 @@ describe('finance period helpers', () => {
   })
 
   it('starts week on Monday in Pacific time', () => {
-    // Monday Aug 10 2026 12:00 Pacific
     const monday = zonedWallTimeToUtc(2026, 8, 10, 12, 0, 0, FINANCE_TIME_ZONE)
     const weekFromMonday = getPeriodBounds('week', monday, FINANCE_TIME_ZONE)
     expect(formatBucketKey(weekFromMonday.start, 'week', FINANCE_TIME_ZONE)).toMatch(/10/)
 
-    // Wednesday Aug 12 2026
     const wednesday = zonedWallTimeToUtc(2026, 8, 12, 12, 0, 0, FINANCE_TIME_ZONE)
     const weekFromWednesday = getPeriodBounds('week', wednesday, FINANCE_TIME_ZONE)
     expect(weekFromWednesday.start.toISOString()).toBe(weekFromMonday.start.toISOString())
+  })
+
+  it('builds rolling 7-day and quincena windows from Pacific midnight', () => {
+    const now = zonedWallTimeToUtc(2026, 8, 10, 18, 0, 0, FINANCE_TIME_ZONE)
+    const week = getRollingBounds(7, now, FINANCE_TIME_ZONE)
+    expect(week.days).toBe(7)
+    expect(formatBucketKey(week.start, 'week', FINANCE_TIME_ZONE)).toMatch(/04/)
+
+    const quincena = getRollingBounds(15, now, FINANCE_TIME_ZONE)
+    expect(quincena.days).toBe(15)
+    expect(quincena.end.toISOString()).toBe(now.toISOString())
+  })
+
+  it('uses daily buckets for multi-day ranges', () => {
+    const start = zonedWallTimeToUtc(2026, 8, 1, 0, 0, 0, FINANCE_TIME_ZONE)
+    const end = zonedWallTimeToUtc(2026, 8, 10, 12, 0, 0, FINANCE_TIME_ZONE)
+    expect(resolveSeriesPeriod(start, end, FINANCE_TIME_ZONE)).toBe('week')
+    expect(resolveSeriesPeriod(start, start, FINANCE_TIME_ZONE)).toBe('day')
   })
 })

@@ -116,6 +116,43 @@ export const getCustomBounds = (fromDate: string, toDate: string, timeZone = FIN
   return { start, end }
 }
 
+/**
+ * Rolling window ending now: includes today + (days-1) previous calendar days,
+ * starting at local midnight of the first day (Pacific).
+ */
+export const getRollingBounds = (days: number, now = new Date(), timeZone = FINANCE_TIME_ZONE) => {
+  const safeDays = Math.max(1, Math.min(Math.floor(days), 90))
+  const parts = getTimeZoneParts(now, timeZone)
+  const startAnchor = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - (safeDays - 1)))
+  const start = zonedWallTimeToUtc(
+    startAnchor.getUTCFullYear(),
+    startAnchor.getUTCMonth() + 1,
+    startAnchor.getUTCDate(),
+    0,
+    0,
+    0,
+    timeZone
+  )
+  return { start, end: now, days: safeDays }
+}
+
+/** Prefer hourly buckets for a single calendar day; otherwise daily labels. */
+export const resolveSeriesPeriod = (start: Date, end: Date, timeZone = FINANCE_TIME_ZONE): FinancePeriod => {
+  const startParts = getTimeZoneParts(start, timeZone)
+  const endParts = getTimeZoneParts(end, timeZone)
+  const sameDay =
+    startParts.year === endParts.year &&
+    startParts.month === endParts.month &&
+    startParts.day === endParts.day
+  return sameDay ? 'day' : 'week'
+}
+
+export const CASH_FLOW_WINDOW_OPTIONS = [7, 15, 30] as const
+export type CashFlowWindowDays = (typeof CASH_FLOW_WINDOW_OPTIONS)[number]
+
+export const isCashFlowWindowDays = (value: unknown): value is CashFlowWindowDays =>
+  typeof value === 'number' && (CASH_FLOW_WINDOW_OPTIONS as readonly number[]).includes(value)
+
 export const formatBucketKey = (date: Date, period: FinancePeriod, timeZone = FINANCE_TIME_ZONE) => {
   if (period === 'day') {
     return new Intl.DateTimeFormat('es-MX', {

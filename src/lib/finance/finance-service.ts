@@ -5,6 +5,9 @@ import {
   formatBucketKey,
   getAllPeriodBounds,
   getPeriodBounds,
+  getRollingBounds,
+  resolveSeriesPeriod,
+  type CashFlowWindowDays,
   type FinancePeriod
 } from '@/src/lib/finance/period'
 import { createExpenseSchema, type CreateExpenseInput } from '@/src/lib/finance/expense-schema'
@@ -257,6 +260,7 @@ export const getFinanceDashboard = async (
   const now = new Date()
   const allBounds = getAllPeriodBounds(now)
   const selected = customRange || getPeriodBounds(period, now)
+  const seriesPeriod = customRange ? resolveSeriesPeriod(selected.start, selected.end) : period
 
   const [daySales, weekSales, monthSales, periodIncome, periodExpenses, salesSeries, cashFlowSeries, topProducts] =
     await Promise.all([
@@ -265,8 +269,8 @@ export const getFinanceDashboard = async (
       sumSalesInRange(allBounds.month.start, allBounds.month.end),
       sumSalesInRange(selected.start, selected.end),
       sumExpensesInRange(selected.start, selected.end),
-      buildSalesSeries(period, selected.start, selected.end),
-      buildCashFlowSeries(period, selected.start, selected.end),
+      buildSalesSeries(seriesPeriod, selected.start, selected.end),
+      buildCashFlowSeries(seriesPeriod, selected.start, selected.end),
       buildTopProducts(selected.start, selected.end)
     ])
 
@@ -314,9 +318,104 @@ export const getFinanceDashboard = async (
   }
 }
 
-export const listExpenses = async (period: FinancePeriod) => {
+export type PeriodosDashboardInput = {
+  /** Custom sales range from date picker; otherwise last 7 days. */
+  salesRange?: { start: Date; end: Date }
+  /** Preferred cash-flow / comparison window (default quincena = 15). */
+  cashFlowDays?: CashFlowWindowDays
+}
+
+/** Periodos page: sales / cash-flow / leaderboard each use their own window. */
+export const getPeriodosDashboard = async (input: PeriodosDashboardInput = {}) => {
+  const now = new Date()
+  const salesBounds = input.salesRange || getRollingBounds(7, now)
+  const cashFlowDays = input.cashFlowDays || 15
+  const cashFlowBounds = getRollingBounds(cashFlowDays, now)
+  const leaderboardBounds = getPeriodBounds('month', now)
+
+  const salesSeriesPeriod = resolveSeriesPeriod(salesBounds.start, salesBounds.end)
+  const cashFlowSeriesPeriod = resolveSeriesPeriod(cashFlowBounds.start, cashFlowBounds.end)
+
+  const [
+    salesTotals,
+    salesSeries,
+    cashIncome,
+    cashExpenses,
+    cashFlowSeries,
+    topProducts,
+    weekSales,
+    monthSales,
+    daySales
+  ] = await Promise.all([
+    sumSalesInRange(salesBounds.start, salesBounds.end),
+    buildSalesSeries(salesSeriesPeriod, salesBounds.start, salesBounds.end),
+    sumSalesInRange(cashFlowBounds.start, cashFlowBounds.end),
+    sumExpensesInRange(cashFlowBounds.start, cashFlowBounds.end),
+    buildCashFlowSeries(cashFlowSeriesPeriod, cashFlowBounds.start, cashFlowBounds.end),
+    buildTopProducts(leaderboardBounds.start, leaderboardBounds.end),
+    sumSalesInRange(getRollingBounds(7, now).start, now),
+    sumSalesInRange(getPeriodBounds('month', now).start, now),
+    sumSalesInRange(getPeriodBounds('day', now).start, now)
+  ])
+
+  const averageTicket = cashIncome.count > 0 ? toMoney(cashIncome.total / cashIncome.count) : 0
+  const ganancia = toMoney(cashIncome.total - cashExpenses.total)
+
+  return {
+    mode: 'periodos' as const,
+    timeZone: FINANCE_TIME_ZONE,
+    generatedAt: now.toISOString(),
+    panels: {
+      sales: {
+        label: input.salesRange ? 'Rango seleccionado' : 'Últimos 7 días',
+        range: { start: salesBounds.start.toISOString(), end: salesBounds.end.toISOString() },
+        totals: salesTotals,
+        series: salesSeries
+      },
+      cashFlow: {
+        label: cashFlowDays === 15 ? 'Quincena' : cashFlowDays === 7 ? 'Últimos 7 días' : 'Últimos 30 días',
+        days: cashFlowDays,
+        range: { start: cashFlowBounds.start.toISOString(), end: cashFlowBounds.end.toISOString() },
+        ingresos: cashIncome.total,
+        egresos: cashExpenses.total,
+        neto: ganancia,
+        ganancia,
+        gananciaNegative: ganancia < 0,
+        salesCount: cashIncome.count,
+        expenseCount: cashExpenses.count,
+        averageTicket,
+        series: cashFlowSeries,
+        comparison: [
+          { name: 'Ingresos', value: cashIncome.total },
+          { name: 'Egresos', value: cashExpenses.total },
+          {
+            name: 'Ganancia',
+            value: Math.abs(ganancia),
+            signedValue: ganancia,
+            negative: ganancia < 0
+          }
+        ]
+      },
+      leaderboard: {
+        label: 'Último mes',
+        range: {
+          start: leaderboardBounds.start.toISOString(),
+          end: leaderboardBounds.end.toISOString()
+        },
+        topProducts
+      }
+    },
+    /** Compat cards for overview strip */
+    salesTotals: {
+      day: daySales,
+      week: weekSales,
+      month: monthSales
+    }
+  }
+}
+
+export const listExpensesInRange = async (start: Date, end: Date) => {
   const prisma = await getPrisma()
-  const { start, end } = getPeriodBounds(period)
   const expenses = await prisma.expense.findMany({
     where: { spentAt: { gte: start, lte: end } },
     orderBy: { spentAt: 'desc' },
@@ -333,6 +432,11 @@ export const listExpenses = async (period: FinancePeriod) => {
     createdByUsername: expense.createdByUsername,
     createdAt: expense.createdAt.toISOString()
   }))
+}
+
+export const listExpenses = async (period: FinancePeriod) => {
+  const { start, end } = getPeriodBounds(period)
+  return listExpensesInRange(start, end)
 }
 
 export const createExpense = async (rawInput: unknown, actor: AuthenticatedActor) => {
