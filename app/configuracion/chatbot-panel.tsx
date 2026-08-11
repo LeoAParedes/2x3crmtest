@@ -23,6 +23,23 @@ type SettingsResponse = {
   providerStatus: { llmConfigured: boolean }
 }
 
+type MetaStatusResponse = {
+  metaSubscription?: {
+    ok: boolean
+    tokenAppId: string | null
+    tokenAppName: string | null
+    tokenAppIsSubscribed: boolean | null
+    hasOnlyMetaInternalTestApp: boolean
+    phoneDisplayNumber: string | null
+    subscribedApps: Array<{ id: string; name: string; isMetaInternalTestApp: boolean }>
+    hints: string[]
+  }
+  webhookDebug?: {
+    lastHit: { stage: string; at: string } | null
+  }
+  hints?: string[]
+}
+
 const appOrigin =
   typeof window !== 'undefined' ? window.location.origin : 'https://2x3crmtest.vercel.app'
 
@@ -33,6 +50,8 @@ export const ChatbotPanel = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [metaStatus, setMetaStatus] = useState<MetaStatusResponse | null>(null)
+  const [metaBusy, setMetaBusy] = useState(false)
 
   const handleLoad = useCallback(async () => {
     setLoading(true)
@@ -96,6 +115,58 @@ export const ChatbotPanel = () => {
     })
   }
 
+  const handleCheckMetaStatus = async () => {
+    setMetaBusy(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/whatsapp/status?meta=1')
+      const payload = (await response.json()) as MetaStatusResponse
+      if (!response.ok) {
+        throw new Error('No fue posible consultar el estado de Meta')
+      }
+      setMetaStatus(payload)
+      setMessage(
+        payload.metaSubscription?.tokenAppIsSubscribed
+          ? 'Tu app ya está suscrita al WABA'
+          : 'Tu app aún NO está suscrita al WABA (Messaging verde no basta)'
+      )
+    } catch (checkError) {
+      setError(checkError instanceof Error ? checkError.message : 'Error al consultar Meta')
+    } finally {
+      setMetaBusy(false)
+    }
+  }
+
+  const handleSubscribeMetaApp = async () => {
+    setMetaBusy(true)
+    setError(null)
+    setMessage(null)
+    try {
+      const response = await fetch('/api/whatsapp/subscribe', { method: 'POST' })
+      const payload = (await response.json()) as {
+        success?: boolean
+        message?: string
+        subscription?: MetaStatusResponse['metaSubscription']
+      }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible suscribir la app al WABA')
+      }
+      setMetaStatus(current => ({
+        ...current,
+        metaSubscription: payload.subscription
+      }))
+      setMessage(
+        payload.subscription?.tokenAppIsSubscribed
+          ? 'App suscrita al WABA. Ya puedes escribir al número de prueba.'
+          : 'Subscribe ejecutado, pero Graph aún no lista tu app. Revisa el token/app en Meta.'
+      )
+    } catch (subscribeError) {
+      setError(subscribeError instanceof Error ? subscribeError.message : 'Error al suscribir')
+    } finally {
+      setMetaBusy(false)
+    }
+  }
+
   if (loading) {
     return <p className='text-sm text-slate-500'>Cargando DavinciAi…</p>
   }
@@ -119,6 +190,8 @@ export const ChatbotPanel = () => {
   if (!settings) return null
 
   const evolutionWebhook = `${appOrigin}/api/whatsapp/evolution/webhook`
+  const metaWebhook = `${appOrigin}/api/whatsapp/webhook`
+  const metaSub = metaStatus?.metaSubscription
 
   return (
     <div className='space-y-6'>
@@ -266,6 +339,78 @@ export const ChatbotPanel = () => {
             </p>
           ) : null}
         </div>
+      </section>
+
+      <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-sm text-slate-700'>
+        <h3 className='text-base font-semibold text-slate-900'>Meta WhatsApp Cloud — diagnóstico</h3>
+        <p className='mt-2'>
+          Si en Meta ves Messaging en verde pero el bot no responde, casi siempre el WABA está ligado a la app
+          interna de Meta (<span className='font-mono text-xs'>WA DevX…</span>) y no a la tuya.
+        </p>
+        <code className='mt-3 block break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800'>
+          Webhook: {metaWebhook}
+        </code>
+        <div className='mt-4 flex flex-wrap gap-3'>
+          <button
+            type='button'
+            onClick={() => void handleCheckMetaStatus()}
+            disabled={metaBusy}
+            aria-label='Comprobar suscripción Meta WABA'
+            className='h-10 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50'
+          >
+            Comprobar estado Meta
+          </button>
+          <button
+            type='button'
+            onClick={() => void handleSubscribeMetaApp()}
+            disabled={metaBusy}
+            aria-label='Suscribir app al WABA de Meta'
+            className='h-10 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
+          >
+            Suscribir app al WABA
+          </button>
+        </div>
+        {metaSub ? (
+          <div className='mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700'>
+            <p>
+              App del token:{' '}
+              <strong>
+                {metaSub.tokenAppName || 'desconocida'} ({metaSub.tokenAppId || 'sin id'})
+              </strong>
+            </p>
+            <p>
+              Suscrita al WABA:{' '}
+              <strong className={metaSub.tokenAppIsSubscribed ? 'text-emerald-700' : 'text-rose-700'}>
+                {metaSub.tokenAppIsSubscribed ? 'Sí' : 'No'}
+              </strong>
+            </p>
+            <p>Número Business: {metaSub.phoneDisplayNumber || '—'}</p>
+            <p>
+              Apps en Graph:{' '}
+              {metaSub.subscribedApps.map(app => `${app.name}${app.isMetaInternalTestApp ? ' (Meta interna)' : ''}`).join(', ') ||
+                'ninguna'}
+            </p>
+            {metaStatus?.webhookDebug?.lastHit ? (
+              <p>
+                Último webhook: {metaStatus.webhookDebug.lastHit.stage} @ {metaStatus.webhookDebug.lastHit.at}
+              </p>
+            ) : (
+              <p className='text-amber-800'>Sin POST de webhook reciente en esta instancia.</p>
+            )}
+          </div>
+        ) : null}
+        <ol className='mt-4 list-decimal space-y-2 pl-5 text-slate-600'>
+          <li>Pulsa <strong>Suscribir app al WABA</strong> (requiere sesión admin).</li>
+          <li>Pulsa <strong>Comprobar estado Meta</strong> hasta ver “Suscrita al WABA: Sí”.</li>
+          <li>
+            En Meta Developers, asegúrate de estar en <strong>la misma app</strong> del token (no en el playground
+            DevX). Ruta típica: App → WhatsApp → API Setup / Configuration → Webhook callback = la URL de arriba,
+            campo <code className='font-mono text-xs'>messages</code> marcado.
+          </li>
+          <li>
+            Escribe a <strong>+1 555-204-7381</strong> desde tu número de prueba.
+          </li>
+        </ol>
       </section>
 
       <section className='rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-700'>

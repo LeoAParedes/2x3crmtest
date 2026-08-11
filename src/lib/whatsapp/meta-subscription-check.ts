@@ -26,6 +26,9 @@ export type MetaSubscriptionCheck = {
   businessAccountId: string | null
   phoneDisplayNumber: string | null
   phoneVerifiedName: string | null
+  tokenAppId: string | null
+  tokenAppName: string | null
+  tokenAppIsSubscribed: boolean | null
   subscribedApps: Array<{ id: string; name: string; isMetaInternalTestApp: boolean }>
   hasOnlyMetaInternalTestApp: boolean
   messagesFieldLikelyActive: boolean | null
@@ -105,10 +108,20 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
 
   let phoneDisplayNumber: string | null = null
   let phoneVerifiedName: string | null = null
+  let tokenAppId: string | null = null
+  let tokenAppName: string | null = null
   let subscribedApps: MetaSubscriptionCheck['subscribedApps'] = []
 
   if (!env.metaAccessToken) {
     hints.push('Falta META_ACCESS_TOKEN para inspeccionar suscripciones en Graph API.')
+  } else {
+    const appInfo = await graphGet<{ id?: string; name?: string }>('/app?fields=id,name')
+    if (appInfo.error) {
+      graphErrors.push(`token_app: ${appInfo.error}`)
+    } else {
+      tokenAppId = appInfo.data?.id || null
+      tokenAppName = appInfo.data?.name || null
+    }
   }
 
   if (phoneNumberId) {
@@ -140,17 +153,24 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
 
   const hasOnlyMetaInternalTestApp =
     subscribedApps.length > 0 && subscribedApps.every(app => app.isMetaInternalTestApp)
-  const hasUserAppSubscribed = subscribedApps.some(app => !app.isMetaInternalTestApp)
+  const tokenAppIsSubscribed = tokenAppId
+    ? subscribedApps.some(app => app.id === tokenAppId)
+    : null
+  const hasUserAppSubscribed = Boolean(tokenAppIsSubscribed) || subscribedApps.some(app => !app.isMetaInternalTestApp)
+
+  if (tokenAppId && tokenAppName) {
+    hints.push(`Tu META_ACCESS_TOKEN pertenece a la app "${tokenAppName}" (id ${tokenAppId}).`)
+  }
 
   if (subscribedApps.length === 0) {
     hints.push(
-      'WABA sin apps suscritas: en Meta Developers → tu app → WhatsApp → Configuration, configura el webhook y suscribe messages.'
+      'WABA sin apps suscritas. Usa el botón "Suscribir app al WABA" en Configuración → Chatbot, o en Meta Developers abre esa misma app.'
     )
   }
 
-  if (hasOnlyMetaInternalTestApp) {
+  if (hasOnlyMetaInternalTestApp || tokenAppIsSubscribed === false) {
     hints.push(
-      'El WABA solo tiene suscrita la app interna de Meta (WA DevX Webhook Events 1P App). Por eso ves el payload de prueba en Meta, pero NINGÚN mensaje llega a 2x3crmtest.vercel.app. Suscribe TU app: Meta Developers → tu app → WhatsApp → Configuration → Webhook → Subscribe, campo messages ON. O usa POST /api/whatsapp/subscribe como admin.'
+      'Messaging en verde en Meta NO basta si Graph solo lista "WA DevX Webhook Events 1P App". Esa es la app de prueba de Meta. Debes suscribir TU app al WABA (botón en Configuración → Chatbot, o Graph POST /{waba-id}/subscribed_apps con tu token).'
     )
   }
 
@@ -160,14 +180,17 @@ export const checkMetaWhatsAppSubscription = async (): Promise<MetaSubscriptionC
 
   return {
     checkedAt: new Date().toISOString(),
-    ok: graphErrors.length === 0 && hasUserAppSubscribed,
+    ok: graphErrors.length === 0 && Boolean(tokenAppIsSubscribed),
     phoneNumberId,
     businessAccountId,
     phoneDisplayNumber,
     phoneVerifiedName,
+    tokenAppId,
+    tokenAppName,
+    tokenAppIsSubscribed,
     subscribedApps,
     hasOnlyMetaInternalTestApp,
-    messagesFieldLikelyActive: hasUserAppSubscribed,
+    messagesFieldLikelyActive: Boolean(tokenAppIsSubscribed),
     graphErrors,
     hints
   }
