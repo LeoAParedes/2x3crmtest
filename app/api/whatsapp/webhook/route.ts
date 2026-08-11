@@ -67,6 +67,17 @@ export async function POST(request: Request) {
     stage: 'received',
     hasSignatureHeader: Boolean(signatureHeader)
   })
+  await safeRecordAgentAction({
+    actionType: 'whatsapp.webhook.received',
+    status: 'pending',
+    actorType: 'system',
+    channel: 'whatsapp',
+    metadata: {
+      bodyBytes: rawBody.length,
+      hasSignatureHeader: Boolean(signatureHeader),
+      hasMetaAppSecret: Boolean(env.metaAppSecret)
+    }
+  })
 
   const signatureValid = isValidMetaSignature(rawBody, signatureHeader)
   debugWebhookLog('webhook/route.ts:POST', 'Meta signature validation', {

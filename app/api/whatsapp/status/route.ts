@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server'
 
 import { env, hasLlmProviderConfig, hasMetaProviderConfig } from '@/src/lib/config/env'
+import { checkMetaWhatsAppSubscription } from '@/src/lib/whatsapp/meta-subscription-check'
 import { getWebhookDebugState } from '@/src/lib/whatsapp/webhook-debug-state'
 
-export async function GET() {
+export async function GET(request: Request) {
   const webhookDebug = getWebhookDebugState()
+  const { searchParams } = new URL(request.url)
+  const includeMeta = searchParams.get('meta') === '1'
+
+  const metaSubscription = includeMeta ? await checkMetaWhatsAppSubscription() : null
 
   return NextResponse.json({
     status: 'ok',
@@ -26,6 +31,7 @@ export async function GET() {
       lastHit: webhookDebug.lastHit,
       recentHits: webhookDebug.recentHits
     },
+    metaSubscription,
     hints: [
       !env.metaAppSecret
         ? 'META_APP_SECRET falta: Meta POST al webhook devuelve 401 y el agente nunca corre.'
@@ -35,8 +41,9 @@ export async function GET() {
         : null,
       !hasLlmProviderConfig ? 'Falta OPENAI_API_KEY para respuestas DavinciAi.' : null,
       !webhookDebug.lastHit
-        ? 'Sin POST reciente en esta instancia: Meta puede no estar entregando mensajes, o el cold start perdió el historial.'
-        : null
+        ? 'Sin POST reciente en esta instancia: Meta no está entregando mensajes a Vercel (revisa suscripción messages y números de prueba).'
+        : null,
+      ...(metaSubscription?.hints || [])
     ].filter(Boolean)
   })
 }
