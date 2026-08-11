@@ -10,6 +10,7 @@ import { markEventProcessed, wasEventProcessed } from '@/src/lib/security/idempo
 import { consumeRateLimit } from '@/src/lib/security/rate-limit'
 import { sendMetaTextMessage } from '@/src/lib/whatsapp/meta-client'
 import { isValidMetaSignature } from '@/src/lib/whatsapp/meta-signature'
+import { recordWebhookDebugHit } from '@/src/lib/whatsapp/webhook-debug-state'
 
 const debugWebhookLog = (
   location: string,
@@ -62,6 +63,10 @@ export async function POST(request: Request) {
     hasMetaAppSecret: Boolean(env.metaAppSecret),
     hasMetaProviderConfig
   }, 'A')
+  recordWebhookDebugHit({
+    stage: 'received',
+    hasSignatureHeader: Boolean(signatureHeader)
+  })
 
   const signatureValid = isValidMetaSignature(rawBody, signatureHeader)
   debugWebhookLog('webhook/route.ts:POST', 'Meta signature validation', {
@@ -70,6 +75,12 @@ export async function POST(request: Request) {
   }, 'B')
 
   if (!signatureValid) {
+    recordWebhookDebugHit({
+      stage: 'signature_failed',
+      signatureValid: false,
+      hasSignatureHeader: Boolean(signatureHeader),
+      reason: env.metaAppSecret ? 'signature_mismatch_or_bad_header' : 'meta_app_secret_missing'
+    })
     await safeRecordAgentAction({
       actionType: 'whatsapp.webhook.signature_failed',
       status: 'failed',
@@ -95,6 +106,11 @@ export async function POST(request: Request) {
       messageCount: messages.length,
       firstMessageType: messages[0]?.message.message?.slice(0, 40) || null
     }, 'C')
+    recordWebhookDebugHit({
+      stage: 'normalized',
+      signatureValid: true,
+      messageCount: messages.length
+    })
 
     const agentSettings = await getMastraSettings()
     debugWebhookLog('webhook/route.ts:POST', 'Agent settings loaded', {
@@ -127,6 +143,13 @@ export async function POST(request: Request) {
         intent: reply.intent,
         replyChars: reply.reply.length
       }, 'E')
+      recordWebhookDebugHit({
+        stage: 'agent_replied',
+        signatureValid: true,
+        messageCount: 1,
+        runMode: reply.runMode,
+        intent: reply.intent
+      })
 
       await pushConversationAudit(inbound.message, reply)
       await safeRecordAgentAction({
@@ -153,6 +176,13 @@ export async function POST(request: Request) {
         reason: outbound.reason || null,
         providerMessageId: outbound.providerMessageId || null
       }, 'F')
+      recordWebhookDebugHit({
+        stage: 'outbound',
+        signatureValid: true,
+        outboundSent: outbound.sent,
+        runMode: reply.runMode,
+        reason: outbound.reason
+      })
 
       if (!outbound.sent) {
         await safeRecordAgentAction({
@@ -173,6 +203,7 @@ export async function POST(request: Request) {
     return jsonOk({ success: true, received: true })
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'unknown error'
+    recordWebhookDebugHit({ stage: 'error', signatureValid: true, reason })
     debugWebhookLog('webhook/route.ts:POST', 'Meta webhook processing error', { reason }, 'C')
     appLog('error', 'Meta webhook processing error', { reason })
     return jsonError('Webhook payload invalid', 400)
