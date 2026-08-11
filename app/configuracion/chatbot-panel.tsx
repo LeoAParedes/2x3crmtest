@@ -23,39 +23,6 @@ type SettingsResponse = {
   providerStatus: { llmConfigured: boolean }
 }
 
-type MetaStatusResponse = {
-  ai?: {
-    openAiKeyFormatValid?: boolean
-    openAiKeyPresent?: boolean
-  }
-  blockers?: {
-    openAiKeyInvalid?: boolean
-    recipientNotInAllowedList?: boolean
-  }
-  metaSubscription?: {
-    ok: boolean
-    tokenAppId: string | null
-    tokenAppName: string | null
-    tokenAppIsSubscribed: boolean | null
-    messagesFieldSubscribed: boolean | null
-    hasOnlyMetaInternalTestApp: boolean
-    phoneDisplayNumber: string | null
-    subscribedApps: Array<{ id: string; name: string; isMetaInternalTestApp: boolean }>
-    appWebhookSubscriptions?: Array<{
-      object?: string
-      callbackUrl?: string
-      active?: boolean
-      fields: string[]
-    }>
-    hints: string[]
-  }
-  webhookDebug?: {
-    lastHit: { stage: string; at: string; reason?: string; outboundSent?: boolean } | null
-    lastOutbound?: { stage: string; at: string; reason?: string; outboundSent?: boolean } | null
-  }
-  hints?: string[]
-}
-
 const appOrigin =
   typeof window !== 'undefined' ? window.location.origin : 'https://2x3crmtest.vercel.app'
 
@@ -66,8 +33,9 @@ export const ChatbotPanel = () => {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [metaStatus, setMetaStatus] = useState<MetaStatusResponse | null>(null)
-  const [metaBusy, setMetaBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const twilioWebhook = `${appOrigin}/api/whatsapp/twilio/webhook`
 
   const handleLoad = useCallback(async () => {
     setLoading(true)
@@ -110,7 +78,7 @@ export const ChatbotPanel = () => {
       }
       setSettings(payload.settings)
       setLlmConfigured(payload.providerStatus?.llmConfigured ?? false)
-      setMessage('Configuración del chatbot guardada')
+      setMessage('Guardado')
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Error al guardar')
     } finally {
@@ -131,61 +99,18 @@ export const ChatbotPanel = () => {
     })
   }
 
-  const handleCheckMetaStatus = async () => {
-    setMetaBusy(true)
-    setError(null)
+  const handleCopyWebhook = async () => {
     try {
-      const response = await fetch('/api/whatsapp/status?meta=1')
-      const payload = (await response.json()) as MetaStatusResponse
-      if (!response.ok) {
-        throw new Error('No fue posible consultar el estado de Meta')
-      }
-      setMetaStatus(payload)
-      setMessage(
-        payload.metaSubscription?.tokenAppIsSubscribed
-          ? 'Tu app ya está suscrita al WABA'
-          : 'Tu app aún NO está suscrita al WABA (Messaging verde no basta)'
-      )
-    } catch (checkError) {
-      setError(checkError instanceof Error ? checkError.message : 'Error al consultar Meta')
-    } finally {
-      setMetaBusy(false)
-    }
-  }
-
-  const handleSubscribeMetaApp = async () => {
-    setMetaBusy(true)
-    setError(null)
-    setMessage(null)
-    try {
-      const response = await fetch('/api/whatsapp/subscribe', { method: 'POST' })
-      const payload = (await response.json()) as {
-        success?: boolean
-        message?: string
-        callbackUri?: string
-        subscription?: MetaStatusResponse['metaSubscription']
-      }
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.message || 'No fue posible suscribir la app al WABA')
-      }
-      setMetaStatus(current => ({
-        ...current,
-        metaSubscription: payload.subscription
-      }))
-      setMessage(
-        payload.subscription?.tokenAppIsSubscribed
-          ? `App suscrita con callback ${payload.callbackUri || ''}. Escribe a +1 555-204-7381.`
-          : 'Subscribe ejecutado, pero Graph aún no lista tu app. Revisa el token/app en Meta.'
-      )
-    } catch (subscribeError) {
-      setError(subscribeError instanceof Error ? subscribeError.message : 'Error al suscribir')
-    } finally {
-      setMetaBusy(false)
+      await navigator.clipboard.writeText(twilioWebhook)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setError('No se pudo copiar la URL')
     }
   }
 
   if (loading) {
-    return <p className='text-sm text-slate-500'>Cargando DavinciAi…</p>
+    return <p className='text-sm text-slate-500'>Cargando…</p>
   }
 
   if (error && !settings) {
@@ -206,27 +131,17 @@ export const ChatbotPanel = () => {
 
   if (!settings) return null
 
-  const evolutionWebhook = `${appOrigin}/api/whatsapp/evolution/webhook`
-  const metaWebhook = `${appOrigin}/api/whatsapp/webhook`
-  const metaSub = metaStatus?.metaSubscription
-
   return (
     <div className='space-y-6'>
       <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
         <div className='flex flex-wrap items-start justify-between gap-3'>
-          <div>
-            <h2 className='text-lg font-semibold text-slate-950'>DavinciAi — Chatbot ERP</h2>
-            <p className='mt-1 text-sm text-slate-600'>
-              Agente omnicanal para web y WhatsApp. Consulta métricas reales del ERP mediante herramientas
-              de solo lectura (sin SQL arbitrario).
-            </p>
-          </div>
+          <h2 className='text-lg font-semibold text-slate-950'>DavinciAi</h2>
           <Link
             href='/crm'
             className='inline-flex h-9 items-center rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50'
             aria-label='Abrir consola de chat web'
           >
-            Consola web /crm
+            Consola web
           </Link>
         </div>
 
@@ -237,9 +152,7 @@ export const ChatbotPanel = () => {
               : 'border-amber-200 bg-amber-50 text-amber-900'
           }`}
         >
-          {llmConfigured
-            ? 'OPENAI_API_KEY detectada — el modelo puede responder.'
-            : 'Falta OPENAI_API_KEY en el entorno. Define la variable y redespliega.'}
+          {llmConfigured ? 'OPENAI_API_KEY lista' : 'Falta OPENAI_API_KEY en Vercel'}
         </div>
 
         <label className='mt-4 flex items-center gap-3 text-sm text-slate-700'>
@@ -267,9 +180,9 @@ export const ChatbotPanel = () => {
         </label>
 
         <label className='mt-4 grid gap-1 text-sm text-slate-700'>
-          Instrucciones del sistema
+          Instrucciones
           <textarea
-            rows={8}
+            rows={6}
             value={settings.instructions}
             onChange={event =>
               setSettings(current => (current ? { ...current, instructions: event.target.value } : current))
@@ -291,7 +204,7 @@ export const ChatbotPanel = () => {
               }
               aria-label='Permitir acciones de escritura del agente'
             />
-            Permitir acciones de escritura (devoluciones, handoff)
+            Acciones de escritura
           </label>
           <label className='flex items-center gap-2 text-sm text-slate-700'>
             <input
@@ -304,18 +217,12 @@ export const ChatbotPanel = () => {
               }
               aria-label='Permitir acciones financieras del agente'
             />
-            Permitir acciones financieras automáticas
+            Acciones financieras
           </label>
         </div>
 
         <fieldset className='mt-5 grid gap-3 rounded-xl border border-slate-200 p-4'>
-          <legend className='px-1 text-sm font-semibold text-slate-900'>
-            Consultas a la base de datos (herramientas ERP permitidas)
-          </legend>
-          <p className='text-xs text-slate-500'>
-            El chatbot solo puede usar estas herramientas para leer ventas, inventario, flujo de caja y gastos.
-            Ejemplo: «¿cuánto vendimos hoy?» o «productos con stock bajo».
-          </p>
+          <legend className='px-1 text-sm font-semibold text-slate-900'>Herramientas ERP</legend>
           <div className='grid gap-2 sm:grid-cols-2'>
             {ERP_TOOL_IDS.map(toolId => (
               <label key={toolId} className='flex items-start gap-3 text-sm text-slate-700'>
@@ -343,7 +250,7 @@ export const ChatbotPanel = () => {
             aria-label='Guardar configuración del chatbot'
             className='h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
           >
-            {saving ? 'Guardando…' : 'Guardar chatbot'}
+            {saving ? 'Guardando…' : 'Guardar'}
           </button>
           {message ? (
             <p role='status' className='text-sm font-medium text-emerald-700'>
@@ -358,134 +265,29 @@ export const ChatbotPanel = () => {
         </div>
       </section>
 
-      <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm text-sm text-slate-700'>
-        <h3 className='text-base font-semibold text-slate-900'>Meta WhatsApp Cloud — diagnóstico</h3>
-        <p className='mt-2'>
-          El webhook ya puede recibir mensajes. Si no te llega respuesta, revisa estos 2 bloqueos confirmados en
-          producción: <strong>OPENAI_API_KEY inválida</strong> y <strong>número no permitido en Meta (#131030)</strong>.
-        </p>
-        {metaStatus?.blockers ? (
-          <ul className='mt-3 list-disc space-y-1 pl-5 text-xs'>
-            <li className={metaStatus.blockers.openAiKeyInvalid ? 'text-rose-700' : 'text-emerald-700'}>
-              OPENAI_API_KEY formato sk-: {metaStatus.blockers.openAiKeyInvalid ? 'No (corrige en Vercel + Redeploy)' : 'Sí'}
-            </li>
-            <li className={metaStatus.blockers.recipientNotInAllowedList ? 'text-rose-700 font-semibold' : 'text-emerald-700'}>
-              Destinatario en lista To de Meta:{' '}
-              {metaStatus.blockers.recipientNotInAllowedList
-                ? 'NO (#131030) — este es el bloqueo actual: Meta recibe tu mensaje y ChatGPT responde, pero no puede enviarte la respuesta'
-                : 'OK / sin fallo reciente'}
-            </li>
-          </ul>
-        ) : null}
-        <code className='mt-3 block break-all rounded-lg bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800'>
-          Webhook: {metaWebhook}
-        </code>
-        <div className='mt-4 flex flex-wrap gap-3'>
-          <button
-            type='button'
-            onClick={() => void handleCheckMetaStatus()}
-            disabled={metaBusy}
-            aria-label='Comprobar suscripción Meta WABA'
-            className='h-10 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50'
-          >
-            Comprobar estado Meta
-          </button>
-          <button
-            type='button'
-            onClick={() => void handleSubscribeMetaApp()}
-            disabled={metaBusy}
-            aria-label='Suscribir app al WABA de Meta'
-            className='h-10 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
-          >
-            Suscribir app al WABA
-          </button>
-        </div>
-        {metaSub ? (
-          <div className='mt-4 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700'>
-            <p>
-              App del token:{' '}
-              <strong>
-                {metaSub.tokenAppName || 'desconocida'} ({metaSub.tokenAppId || 'sin id'})
-              </strong>
-            </p>
-            <p>
-              Suscrita al WABA:{' '}
-              <strong className={metaSub.tokenAppIsSubscribed ? 'text-emerald-700' : 'text-rose-700'}>
-                {metaSub.tokenAppIsSubscribed ? 'Sí' : 'No'}
-              </strong>
-            </p>
-            <p>
-              Campo webhook messages:{' '}
-              <strong
-                className={
-                  metaSub.messagesFieldSubscribed ? 'text-emerald-700' : 'text-rose-700'
-                }
-              >
-                {metaSub.messagesFieldSubscribed == null
-                  ? 'desconocido'
-                  : metaSub.messagesFieldSubscribed
-                    ? 'Sí'
-                    : 'No'}
-              </strong>
-            </p>
-            <p>Número Business: {metaSub.phoneDisplayNumber || '—'}</p>
-            <p>
-              Apps en Graph:{' '}
-              {metaSub.subscribedApps.map(app => `${app.name}${app.isMetaInternalTestApp ? ' (Meta interna)' : ''}`).join(', ') ||
-                'ninguna'}
-            </p>
-            {metaStatus?.webhookDebug?.lastHit ? (
-              <p>
-                Último webhook: {metaStatus.webhookDebug.lastHit.stage} @ {metaStatus.webhookDebug.lastHit.at}
-              </p>
-            ) : (
-              <p className='text-amber-800'>Sin POST de webhook reciente en esta instancia.</p>
-            )}
+      <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
+        <h3 className='text-base font-semibold text-slate-900'>WhatsApp (Twilio)</h3>
+        <label className='mt-4 grid gap-1 text-sm text-slate-700'>
+          Webhook URL
+          <div className='flex flex-col gap-2 sm:flex-row'>
+            <code className='block min-w-0 flex-1 break-all rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-800'>
+              {twilioWebhook}
+            </code>
+            <button
+              type='button'
+              onClick={() => void handleCopyWebhook()}
+              aria-label='Copiar webhook de Twilio'
+              className='h-10 shrink-0 rounded-lg border border-slate-300 px-4 text-sm font-medium text-slate-800 hover:bg-slate-50'
+            >
+              {copied ? 'Copiado' : 'Copiar'}
+            </button>
           </div>
-        ) : null}
-        <ol className='mt-4 list-decimal space-y-2 pl-5 text-slate-600'>
-          <li>
-            En Vercel → Environment Variables, pon <code className='font-mono text-xs'>OPENAI_API_KEY</code> con una
-            key real que empiece por <code className='font-mono text-xs'>sk-</code> (no pegues texto de ayuda) y haz
-            Redeploy.
-          </li>
-          <li>
-            En Meta Developers → app <strong>crmtest</strong> → WhatsApp → API Setup → lista <strong>To</strong>,
-            agrega tu WhatsApp y confírmalo.
-          </li>
-          <li>
-            Escribe a <strong>+1 555-204-7381</strong> y pulsa <strong>Comprobar estado Meta</strong>.
-          </li>
-        </ol>
-      </section>
-
-      <section className='rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-700'>
-        <h3 className='text-base font-semibold text-slate-900'>Evolution API — WhatsApp</h3>
-        <p className='mt-2'>
-          Canal recomendado. No requiere Twilio ni Meta Cloud. Configura las variables en Vercel y apunta el
-          webhook de tu instancia Evolution a esta URL:
-        </p>
-        <code className='mt-3 block break-all rounded-lg bg-white px-3 py-2 font-mono text-xs text-slate-800'>
-          {evolutionWebhook}
-        </code>
-        <ol className='mt-4 list-decimal space-y-2 pl-5 text-slate-600'>
-          <li>Crea o conecta la instancia en Evolution (<code className='font-mono text-xs'>EVOLUTION_INSTANCE</code>).</li>
-          <li>
-            Define en Vercel: <code className='font-mono text-xs'>EVOLUTION_API_URL</code>,{' '}
-            <code className='font-mono text-xs'>EVOLUTION_API_KEY</code>,{' '}
-            <code className='font-mono text-xs'>EVOLUTION_INSTANCE</code> y{' '}
-            <code className='font-mono text-xs'>OPENAI_API_KEY</code>.
-          </li>
-          <li>
-            En Evolution, webhook URL = la de arriba, eventos mínimos:{' '}
-            <code className='font-mono text-xs'>MESSAGES_UPSERT</code>.
-          </li>
-          <li>Escanea QR hasta estado <strong>open</strong>.</li>
-          <li>Prueba por WhatsApp: «¿cuánto vendimos hoy?» — debe responder con cifra real del ERP.</li>
-        </ol>
+        </label>
         <p className='mt-3 text-xs text-slate-500'>
-          Otros canales: Meta <code className='font-mono'>/api/whatsapp/webhook</code> · Twilio{' '}
-          <code className='font-mono'>/api/whatsapp/twilio/webhook</code>
+          Twilio → WhatsApp Sender → Incoming messages → HTTP POST. Vars en Vercel:{' '}
+          <code className='font-mono'>TWILIO_AUTH_TOKEN</code>,{' '}
+          <code className='font-mono'>TWILIO_ACCOUNT_SID</code>,{' '}
+          <code className='font-mono'>OPENAI_API_KEY</code>.
         </p>
       </section>
     </div>
