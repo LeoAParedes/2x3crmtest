@@ -4,12 +4,32 @@ export type LowStockComparable = {
   stock: number
   minStock: number
   aisle?: string | null
+  sku?: string | null
+  productName?: string | null
 }
 
 export const DEFAULT_MIN_STOCK = 20
 
-export const isArchivedInventoryItem = (item: { aisle?: string | null }) =>
-  item.aisle === ARCHIVED_AISLE
+/** Soft-deleted catalog rows: aisle marker, renamed SKU, or [Archivado] label. */
+export const isArchivedInventoryItem = (item: {
+  aisle?: string | null
+  sku?: string | null
+  productName?: string | null
+}) => {
+  if (item.aisle === ARCHIVED_AISLE) return true
+  if (typeof item.sku === 'string' && /-archived-/i.test(item.sku)) return true
+  if (typeof item.productName === 'string' && /\[archivado\]/i.test(item.productName)) return true
+  return false
+}
+
+/** Prisma filter for non-archived InventoryItem rows. */
+export const activeInventoryItemWhere = {
+  AND: [
+    { OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }] },
+    { NOT: { sku: { contains: '-archived-' } } },
+    { NOT: { productName: { contains: '[Archivado]' } } }
+  ]
+}
 
 /** Low-stock alerts never include archived catalog rows. */
 export const isLowStockItem = (item: LowStockComparable) => {

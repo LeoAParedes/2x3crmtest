@@ -14,6 +14,7 @@ Cada fila es evidencia auditable de cambio. Completar **Validó** y **Aprobó** 
 
 | Fecha | Soft. | Doc. | ID DOC | Cambio (qué / por qué) | Redactó | Validó | Aprobó |
 |-------|-------|------|--------|------------------------|---------|--------|--------|
+| 2026-08-11 | 1.0.0 | 1.2.0-MU | DOC-MU-001 | Documenta implementación completa POS cajero (commit 5fde201): modo cobro, sesión exclusiva, sync borrador, auth admin al quitar línea, crédito, turnos, promos en ticket | Equipo docs / asistente | Leonardo Antonio Paredes | Leonardo Antonio Paredes |
 | 2026-08-11 | 1.0.0 | 1.1.0-MU | DOC-MU-001 | Regeneración completa: liga pública https://2x3crmtest.vercel.app, lotes/caducidad, promos POS, turnos 06–14/14–22, crédito, dashboard Hoy | Equipo docs / asistente | _Pendiente_ | _Pendiente_ |
 | 2026-08-11 | 1.0.0 | 1.0.0-MU | DOC-MU-001 | Reescritura completa del manual de usuario: de enfoque de pantalla a enfoque de tareas (ISO/IEC/IEEE 26514), con audiencia, prerrequisitos, onboarding, troubleshooting, glosario e índice | Equipo docs / asistente | _Pendiente_ | _Pendiente_ |
 | 2026-08-11 | 1.0.0 | 1.0.0 | DOC-GE-001 | Alta de guía de estilo documental (lenguaje sencillo, WCAG, estructura de procedimientos) | Equipo docs / asistente | _Pendiente_ | _Pendiente_ |

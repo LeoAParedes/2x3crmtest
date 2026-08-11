@@ -1124,7 +1124,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         lines.push(`Se registrará salida automática de ${stockLabel}`)
         lines.push('Después se eliminará el producto del catálogo')
       } else {
-        lines.push('Inventario actual: 0 unidades')
+        lines.push('Inventario actual: 0 pz')
         lines.push('Se eliminará el producto del catálogo')
       }
     }

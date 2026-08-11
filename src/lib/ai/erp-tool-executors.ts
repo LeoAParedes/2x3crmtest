@@ -1,4 +1,4 @@
-import { ARCHIVED_AISLE, isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { activeInventoryItemWhere, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { findInventoryByQuery } from '@/src/lib/crm/services/inventory-service'
 import {
   getFinanceDashboard,
@@ -147,9 +147,7 @@ const executeCashFlowPeriod = async (args: Record<string, unknown>) => {
 const executeLowStockCount = async () => {
   const prisma = await getPrisma()
   const rows = await prisma.inventoryItem.findMany({
-    where: {
-      OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
-    },
+    where: activeInventoryItemWhere,
     select: {
       sku: true,
       productName: true,

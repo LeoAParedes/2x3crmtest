@@ -7,7 +7,8 @@ import {
   getTimeZoneParts,
   zonedWallTimeToUtc
 } from '@/src/lib/finance/period'
-import { ARCHIVED_AISLE, isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { ARCHIVED_AISLE, activeInventoryItemWhere, isArchivedInventoryItem, isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -33,6 +34,7 @@ export type InventoryLotView = {
   expiresOn: string
   status: string
   alertKind: LotAlertKind | null
+  supportsWeight: boolean
 }
 
 const toIsoDate = (date: Date, timeZone = FINANCE_TIME_ZONE) => {
@@ -72,48 +74,72 @@ export const listActiveLots = async (inventoryItemId?: string) => {
     where: {
       quantityRemaining: { gt: 0 },
       status: 'active',
-      inventoryItem: {
-        OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
-      },
+      inventoryItem: activeInventoryItemWhere,
       ...(inventoryItemId ? { inventoryItemId } : {})
     },
     orderBy: [{ expiresOn: 'asc' }, { receivedAt: 'asc' }],
     include: {
-      inventoryItem: { select: { sku: true, productName: true, aisle: true } }
+      inventoryItem: { select: { sku: true, productName: true, aisle: true, category: true } }
     },
     take: 500
   })
 
-  return lots.map(lot => {
-    const alertKind = classifyLotAlert(lot.expiresOn)
-    return {
-      id: lot.id,
-      purchaseId: lot.purchaseId,
-      inventoryItemId: lot.inventoryItemId,
-      sku: lot.inventoryItem.sku,
-      productName: lot.inventoryItem.productName,
-      quantityReceived: lot.quantityReceived,
-      quantityRemaining: lot.quantityRemaining,
-      expiresOn: toIsoDate(lot.expiresOn),
-      status: lot.status,
-      alertKind
-    } satisfies InventoryLotView
-  })
+  return lots
+    .filter(lot => !isArchivedInventoryItem(lot.inventoryItem))
+    .map(lot => {
+      const alertKind = classifyLotAlert(lot.expiresOn)
+      return {
+        id: lot.id,
+        purchaseId: lot.purchaseId,
+        inventoryItemId: lot.inventoryItemId,
+        sku: lot.inventoryItem.sku,
+        productName: lot.inventoryItem.productName,
+        quantityReceived: lot.quantityReceived,
+        quantityRemaining: lot.quantityRemaining,
+        expiresOn: toIsoDate(lot.expiresOn),
+        status: lot.status,
+        alertKind,
+        supportsWeight: inferWeightSupport(
+          lot.inventoryItem.category,
+          lot.inventoryItem.aisle,
+          lot.inventoryItem.productName
+        )
+      } satisfies InventoryLotView
+    })
 }
 
 export const listExpiryAlerts = async () => {
   const lots = await listActiveLots()
-  return lots.filter(lot => lot.alertKind !== null)
+  return lots.filter(lot => lot.alertKind !== null && !isArchivedInventoryItem(lot))
+}
+
+/** Heal leftover active lots attached to already-archived catalog rows. */
+export const closeLotsForArchivedItems = async () => {
+  const prisma = await getPrisma()
+  await prisma.inventoryLot.updateMany({
+    where: {
+      status: 'active',
+      quantityRemaining: { gt: 0 },
+      OR: [
+        { inventoryItem: { aisle: ARCHIVED_AISLE } },
+        { inventoryItem: { sku: { contains: '-archived-' } } },
+        { inventoryItem: { productName: { contains: '[Archivado]' } } }
+      ]
+    },
+    data: {
+      quantityRemaining: 0,
+      status: 'wasted'
+    }
+  })
 }
 
 export const listUnifiedWorkspaceAlerts = async () => {
+  await closeLotsForArchivedItems()
   const prisma = await getPrisma()
   const [expiryAlerts, inventoryRows] = await Promise.all([
     listExpiryAlerts(),
     prisma.inventoryItem.findMany({
-      where: {
-        OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
-      },
+      where: activeInventoryItemWhere,
       select: { id: true, sku: true, productName: true, stock: true, minStock: true, aisle: true },
       take: 2000
     })
@@ -133,15 +159,18 @@ export const listUnifiedWorkspaceAlerts = async () => {
       href: '/inventario'
     }))
 
-  const expiry = expiryAlerts.map(lot => ({
-    kind: lot.alertKind === 'expired' ? ('expired' as const) : ('expiring' as const),
-    id: lot.id,
-    sku: lot.sku,
-    productName: lot.productName,
-    quantityRemaining: lot.quantityRemaining,
-    expiresOn: lot.expiresOn,
-    href: `/inventario/merma-caducidad?lotId=${lot.id}`
-  }))
+  const expiry = expiryAlerts
+    .filter(lot => !isArchivedInventoryItem(lot))
+    .map(lot => ({
+      kind: lot.alertKind === 'expired' ? ('expired' as const) : ('expiring' as const),
+      id: lot.id,
+      sku: lot.sku,
+      productName: lot.productName,
+      quantityRemaining: lot.quantityRemaining,
+      supportsWeight: lot.supportsWeight,
+      expiresOn: lot.expiresOn,
+      href: `/inventario/merma-caducidad?lotId=${lot.id}`
+    }))
 
   return {
     timeZone: FINANCE_TIME_ZONE,

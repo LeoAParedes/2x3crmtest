@@ -1,9 +1,13 @@
 export const GRAMS_PER_KG = 1000
 
 /** Weight inventory is stored in grams; POS/import UIs speak kilograms. */
-export const inferWeightSupport = (category: string, aisle: string | null | undefined) => {
-  const fingerprint = `${category} ${aisle || ''}`.toLowerCase()
-  return /(granel|peso|kg|fruta|verdura|vegetal|carn|res|pollo|cerdo|pesc|marisc|legumbr|ra[ií]z|tub[eé]rc)/.test(
+export const inferWeightSupport = (
+  category: string,
+  aisle: string | null | undefined,
+  productName = ''
+) => {
+  const fingerprint = `${category} ${aisle || ''} ${productName}`.toLowerCase()
+  return /(granel|peso|kg|fruta|verdura|vegetal|carn|res|pollo|cerdo|pesc|marisc|legumbr|ra[ií]z|tub[eé]rc|salm[oó]n|filete|at[uú]n)/.test(
     fingerprint
   )
 }

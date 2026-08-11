@@ -126,7 +126,7 @@ export const listRecentPurchases = async (limit = 20) => {
     product: {
       sku: purchase.inventoryItem.sku,
       productName: purchase.inventoryItem.productName,
-      supportsWeight: inferWeightSupport(purchase.inventoryItem.category, purchase.inventoryItem.aisle)
+      supportsWeight: inferWeightSupport(purchase.inventoryItem.category, purchase.inventoryItem.aisle, purchase.inventoryItem.productName)
     }
   }))
 }

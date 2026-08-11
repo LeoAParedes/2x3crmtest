@@ -15,6 +15,7 @@ describe('weight inventory units', () => {
     expect(inferWeightSupport('Frutas y Verduras', null)).toBe(true)
     expect(inferWeightSupport('Carnes y Pescados', null)).toBe(true)
     expect(inferWeightSupport('Bebidas', null)).toBe(false)
+    expect(inferWeightSupport('Perecederos', null, 'Salmón fresco')).toBe(true)
   })
 
   it('converts CSV kilogram stock to grams and leaves piece stock alone', () => {

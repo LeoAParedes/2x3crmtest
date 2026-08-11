@@ -335,7 +335,25 @@ export async function POST(request: Request) {
               aisle: '__archived__'
             }
           })
+          // Close leftover lots so archived SKUs never keep expiry alerts alive.
+          await transaction.inventoryLot.updateMany({
+            where: {
+              inventoryItemId: payload.inventoryItemId,
+              status: 'active'
+            },
+            data: {
+              quantityRemaining: 0,
+              status: 'wasted'
+            }
+          })
         } else {
+          await transaction.inventoryLot.updateMany({
+            where: { inventoryItemId: payload.inventoryItemId },
+            data: {
+              quantityRemaining: 0,
+              status: 'wasted'
+            }
+          })
           await transaction.inventoryItem.delete({
             where: { id: payload.inventoryItemId }
           })

@@ -227,11 +227,12 @@ export const ComprasClient = () => {
       productName: item.productName,
       sku: item.sku,
       supportsWeight: item.supportsWeight,
-      unitCost: current.unitCost || String(item.unitPrice),
-      quantity: current.quantity || (item.supportsWeight ? '0.100' : '1')
+      unitCost: String(item.unitPrice),
+      quantity: item.supportsWeight ? '0.100' : '1'
     }))
     setSearchQuery('')
     setSearchResults([])
+    setError(null)
   }
 
   const handleSelectProductKeyDown = (event: KeyboardEvent<HTMLButtonElement>, item: InventoryItem) => {
@@ -413,7 +414,8 @@ export const ComprasClient = () => {
                           <span className='ml-2 text-xs text-slate-500'>{item.sku}</span>
                         </span>
                         <span className='tabular-nums text-xs text-slate-600'>
-                          Stock {item.stock} · {formatMxnCurrency(item.unitPrice)}
+                          {formatStockQuantityLabel(item.stock, item.supportsWeight)} ·{' '}
+                          {item.supportsWeight ? 'kg' : 'pz'} · {formatMxnCurrency(item.unitPrice)}
                         </span>
                       </button>
                     </li>
@@ -428,9 +430,18 @@ export const ComprasClient = () => {
           )}
 
           {entryForm.inventoryItemId ? (
-            <p className='mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900'>
-              Seleccionado: <strong>{entryForm.productName}</strong> ({entryForm.sku})
-            </p>
+            <div className='mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900'>
+              <p>
+                Seleccionado: <strong>{entryForm.productName}</strong> ({entryForm.sku})
+              </p>
+              <p className='mt-1 text-xs text-emerald-800'>
+                Unidad de entrada: <strong>{entryForm.supportsWeight ? 'kg' : 'pz'}</strong>
+                {entryForm.unitCost
+                  ? ` · costo sugerido ${formatMxnCurrency(Number(entryForm.unitCost) || 0)}`
+                  : ''}
+                {entryForm.quantity ? ` · cantidad ${entryForm.quantity} ${entryForm.supportsWeight ? 'kg' : 'pz'}` : ''}
+              </p>
+            </div>
           ) : null}
 
           <div className='mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>

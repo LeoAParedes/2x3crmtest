@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
 
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
+import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
 
 type TodayHub = {
   success: boolean
@@ -27,6 +28,7 @@ type TodayHub = {
       sku: string
       productName: string
       quantityRemaining: number
+      supportsWeight?: boolean
       expiresOn: string
       alertKind: string | null
     }>
@@ -177,7 +179,8 @@ export default function AdminPage() {
                       <Link href={`/inventario/merma-caducidad?lotId=${item.id}`} className='underline'>
                         {item.productName} ({item.sku})
                       </Link>{' '}
-                      · {item.expiresOn} · {item.quantityRemaining} uds
+                      · {item.expiresOn} ·{' '}
+                      {formatStockQuantityLabel(item.quantityRemaining, Boolean(item.supportsWeight))}
                     </li>
                   ))}
                 </ul>

@@ -1,7 +1,7 @@
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { getPrisma } from '@/src/lib/db/prisma'
 import {
-  ARCHIVED_AISLE,
+  activeInventoryItemWhere,
   compareLowStockUrgency,
   isLowStockItem
 } from '@/src/lib/inventory/low-stock'
@@ -36,11 +36,7 @@ export async function GET(request: Request) {
   const skip = (page - 1) * pageSize
   const orderField = sortFieldMap[sortBy] || sortFieldMap.productName
 
-  const archiveWhere = includeArchived
-    ? undefined
-    : {
-        OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
-      }
+  const archiveWhere = includeArchived ? undefined : activeInventoryItemWhere
 
   const queryWhere = buildInventorySearchWhere(query, searchField)
   const where = archiveWhere && queryWhere ? { AND: [archiveWhere, queryWhere] } : archiveWhere || queryWhere
@@ -81,7 +77,7 @@ export async function GET(request: Request) {
           minStock: item.minStock,
           unitPrice: Number(item.unitPrice),
           aisle: item.aisle,
-          supportsWeight: inferWeightSupport(item.category, item.aisle)
+          supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName)
         }))
 
       return jsonOk({
@@ -125,7 +121,7 @@ export async function GET(request: Request) {
         minStock: item.minStock,
         unitPrice: Number(item.unitPrice),
         aisle: item.aisle,
-        supportsWeight: inferWeightSupport(item.category, item.aisle),
+        supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName),
         ivaRate: item.ivaRate === null ? null : Number(item.ivaRate)
       }))
     })

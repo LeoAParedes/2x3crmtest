@@ -4,6 +4,9 @@ import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
 
+import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
+import { kilogramsToGrams } from '@/src/lib/inventory/weight-units'
+
 type InventoryLot = {
   id: string
   purchaseId: string
@@ -15,6 +18,12 @@ type InventoryLot = {
   expiresOn: string
   status: string
   alertKind: 'expiring' | 'expired' | null
+  supportsWeight: boolean
+}
+
+const defaultQuantityForLot = (lot: InventoryLot | null) => {
+  if (!lot) return '1'
+  return lot.supportsWeight ? '0.100' : '1'
 }
 
 export const MermaCaducidadClient = () => {
@@ -42,7 +51,12 @@ export const MermaCaducidadClient = () => {
     if (!response.ok || !payload.success) {
       throw new Error(payload.message || 'No fue posible cargar lotes')
     }
-    setLots(payload.lots || [])
+    setLots(
+      (payload.lots || []).map(lot => ({
+        ...lot,
+        supportsWeight: Boolean(lot.supportsWeight)
+      }))
+    )
   }
 
   useEffect(() => {
@@ -70,6 +84,18 @@ export const MermaCaducidadClient = () => {
     [lots]
   )
   const selected = lots.find(lot => lot.id === selectedLotId) || null
+  const unitLabel = selected?.supportsWeight ? 'kg' : 'pz'
+
+  useEffect(() => {
+    const lot = lots.find(item => item.id === selectedLotId) || null
+    setQuantity(defaultQuantityForLot(lot))
+  }, [selectedLotId, lots])
+
+  const handleSelectLot = (lotId: string) => {
+    setManualLotId(lotId)
+    setMessage(null)
+    setError(null)
+  }
 
   const handleRegisterMerma = async () => {
     if (submitting || !selected) return
@@ -77,12 +103,22 @@ export const MermaCaducidadClient = () => {
     setMessage(null)
     setError(null)
     try {
-      const qty = Number(quantity.replace(',', '.'))
-      if (!Number.isInteger(qty) || qty <= 0) {
-        throw new Error('Indica una cantidad entera válida')
+      const qtyInput = Number(quantity.replace(',', '.'))
+      if (!Number.isFinite(qtyInput) || qtyInput <= 0) {
+        throw new Error(`Indica una cantidad válida en ${unitLabel}`)
       }
-      if (qty > selected.quantityRemaining) {
-        throw new Error('La cantidad supera el restante del lote')
+
+      const storedQty = selected.supportsWeight
+        ? kilogramsToGrams(qtyInput)
+        : Math.round(qtyInput)
+
+      if (!Number.isInteger(storedQty) || storedQty <= 0) {
+        throw new Error(`Cantidad inválida en ${unitLabel}`)
+      }
+      if (storedQty > selected.quantityRemaining) {
+        throw new Error(
+          `La cantidad supera el restante del lote (${formatStockQuantityLabel(selected.quantityRemaining, selected.supportsWeight)})`
+        )
       }
 
       const response = await fetch('/api/inventario/lotes', {
@@ -90,7 +126,7 @@ export const MermaCaducidadClient = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lotId: selected.id,
-          quantity: qty,
+          quantity: storedQty,
           reason: reason.trim() || 'Merma por caducidad'
         })
       })
@@ -99,8 +135,10 @@ export const MermaCaducidadClient = () => {
         throw new Error(payload.message || 'No fue posible registrar la salida del lote')
       }
 
-      setMessage(`Salida registrada del lote ${selected.sku} · caduca ${selected.expiresOn}`)
-      setQuantity('1')
+      setMessage(
+        `Salida registrada del lote ${selected.sku} · ${formatStockQuantityLabel(storedQty, selected.supportsWeight)} · caduca ${selected.expiresOn}`
+      )
+      setQuantity(defaultQuantityForLot(selected))
       await loadLots()
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Error al registrar merma')
@@ -121,7 +159,7 @@ export const MermaCaducidadClient = () => {
           <Link href='/finanzas/compras' className='font-medium text-slate-800 underline'>
             Compras y proveedores
           </Link>{' '}
-          e indica la caducidad del lote al dar entrada.
+          e indica la caducidad del lote al dar entrada. Unidades: kg o pz según el producto.
         </p>
       </section>
 
@@ -151,14 +189,15 @@ export const MermaCaducidadClient = () => {
                     <span className='text-xs font-normal text-slate-500'>({lot.sku})</span>
                   </p>
                   <p className='text-xs text-slate-600'>
-                    Caduca {lot.expiresOn} · restante {lot.quantityRemaining} ·{' '}
+                    Caduca {lot.expiresOn} · restante{' '}
+                    {formatStockQuantityLabel(lot.quantityRemaining, lot.supportsWeight)} ·{' '}
                     {lot.alertKind === 'expired' ? 'Vencido' : 'Caduca mañana'}
                   </p>
                 </div>
                 <button
                   type='button'
                   aria-label={`Seleccionar lote ${lot.sku} para salida`}
-                  onClick={() => setManualLotId(lot.id)}
+                  onClick={() => handleSelectLot(lot.id)}
                   className='rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50'
                 >
                   Seleccionar lote
@@ -176,27 +215,29 @@ export const MermaCaducidadClient = () => {
             Lote
             <select
               value={selectedLotId}
-              onChange={event => setManualLotId(event.target.value)}
+              onChange={event => handleSelectLot(event.target.value)}
               aria-label='Seleccionar lote'
               className='h-10 rounded-lg border border-slate-300 bg-white px-2 text-sm'
             >
               <option value=''>Selecciona un lote</option>
               {lots.map(lot => (
                 <option key={lot.id} value={lot.id}>
-                  {lot.productName} · {lot.sku} · caduca {lot.expiresOn} · {lot.quantityRemaining} uds
+                  {lot.productName} · {lot.sku} · caduca {lot.expiresOn} ·{' '}
+                  {formatStockQuantityLabel(lot.quantityRemaining, lot.supportsWeight)}
                 </option>
               ))}
             </select>
           </label>
           <label className='grid gap-1 text-xs font-medium text-slate-600'>
-            Cantidad a sacar
+            Cantidad a sacar ({unitLabel})
             <input
               type='text'
-              inputMode='numeric'
+              inputMode='decimal'
               value={quantity}
               onChange={event => setQuantity(event.target.value)}
-              aria-label='Cantidad de merma del lote'
-              className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums'
+              aria-label={`Cantidad de merma del lote en ${unitLabel}`}
+              disabled={!selected}
+              className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums disabled:bg-slate-100'
             />
           </label>
           <label className='grid gap-1 text-xs font-medium text-slate-600 sm:col-span-2'>
@@ -211,8 +252,11 @@ export const MermaCaducidadClient = () => {
           </label>
         </div>
         {selected ? (
-          <p className='mt-3 text-xs text-slate-600'>
-            Lote seleccionado: restante {selected.quantityRemaining} · caduca {selected.expiresOn}
+          <p className='mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700'>
+            Lote seleccionado: <strong>{selected.productName}</strong> ({selected.sku}) · unidad{' '}
+            <strong>{unitLabel}</strong> · restante{' '}
+            {formatStockQuantityLabel(selected.quantityRemaining, selected.supportsWeight)} · caduca{' '}
+            {selected.expiresOn}
           </p>
         ) : null}
         <button

@@ -110,7 +110,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
     for (const item of items) {
       const product = inventory.find(candidate => candidate.id === item.inventoryItemId)
       if (!product) throw new Error('INVENTORY_ITEM_NOT_FOUND')
-      const supportsWeight = inferWeightSupport(product.category, product.aisle)
+      const supportsWeight = inferWeightSupport(product.category, product.aisle, product.productName)
       if (item.unitMode === 'weight' && !supportsWeight) {
         throw new Error('INVENTORY_ITEM_NOT_FOUND')
       }
@@ -396,7 +396,11 @@ export const getSaleTicket = async (saleId: string, actor: AuthenticatedActor): 
     createdAt: sale.createdAt.toISOString(),
     cashierUsername: sale.cashierUsername,
     items: sale.items.map(item => {
-      const supportsWeight = inferWeightSupport(item.inventoryItem.category, item.inventoryItem.aisle)
+      const supportsWeight = inferWeightSupport(
+        item.inventoryItem.category,
+        item.inventoryItem.aisle,
+        item.inventoryItem.productName
+      )
       return {
         sku: item.sku,
         productName: item.productName,

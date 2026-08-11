@@ -9,9 +9,13 @@ import {
 } from '@/src/lib/inventory/low-stock'
 
 describe('archived inventory alerts', () => {
-  it('detects archived aisle marker', () => {
+  it('detects archived aisle, sku suffix, and name marker', () => {
     expect(isArchivedInventoryItem({ aisle: '__archived__' })).toBe(true)
-    expect(isArchivedInventoryItem({ aisle: 'A1' })).toBe(false)
+    expect(isArchivedInventoryItem({ aisle: 'A1', sku: 'ABA-007-archived-20260810' })).toBe(true)
+    expect(
+      isArchivedInventoryItem({ aisle: null, productName: 'Aceite de oliva 500 ml [Archivado]' })
+    ).toBe(true)
+    expect(isArchivedInventoryItem({ aisle: 'A1', sku: 'ABA-007', productName: 'Aceite' })).toBe(false)
   })
 
   it('does not treat archived products as low-stock alerts', () => {
@@ -20,6 +24,15 @@ describe('archived inventory alerts', () => {
         stock: 0,
         minStock: 20,
         aisle: '__archived__'
+      })
+    ).toBe(false)
+    expect(
+      isLowStockItem({
+        stock: 0,
+        minStock: 20,
+        aisle: null,
+        sku: 'X-archived-1',
+        productName: 'X [Archivado]'
       })
     ).toBe(false)
   })

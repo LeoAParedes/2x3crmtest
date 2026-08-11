@@ -11,7 +11,7 @@ import {
   type FinancePeriod
 } from '@/src/lib/finance/period'
 import { createExpenseSchema, type CreateExpenseInput } from '@/src/lib/finance/expense-schema'
-import { ARCHIVED_AISLE, isLowStockItem } from '@/src/lib/inventory/low-stock'
+import { activeInventoryItemWhere, isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { gramsToKilograms, inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 
@@ -585,9 +585,7 @@ export const listRecentPosSales = async (period: FinancePeriod, limit = 8) => {
 /** Inventory SKU/stock snapshot for DavinciAi (efficient aggregates + low-stock sample). */
 export const getInventorySnapshot = async () => {
   const prisma = await getPrisma()
-  const activeWhere = {
-    OR: [{ aisle: null }, { aisle: { not: ARCHIVED_AISLE } }]
-  }
+  const activeWhere = activeInventoryItemWhere
   const [aggregates, rows] = await Promise.all([
     prisma.inventoryItem.aggregate({
       where: activeWhere,

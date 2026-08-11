@@ -3,6 +3,8 @@
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
+
 type LowStockAlert = {
   kind: 'low_stock'
   id: string
@@ -19,6 +21,7 @@ type ExpiryAlert = {
   sku: string
   productName: string
   quantityRemaining: number
+  supportsWeight?: boolean
   expiresOn: string
   href: string
 }
@@ -122,7 +125,9 @@ export const WorkspaceAlertsBell = () => {
                     <span className='font-semibold'>
                       {item.kind === 'expired' ? 'Vencido' : 'Caduca mañana'}
                     </span>
-                    : {item.productName} ({item.sku}) · {item.quantityRemaining} uds · {item.expiresOn}
+                    : {item.productName} ({item.sku}) ·{' '}
+                    {formatStockQuantityLabel(item.quantityRemaining, Boolean(item.supportsWeight))} ·{' '}
+                    {item.expiresOn}
                   </Link>
                 </li>
               ))}
