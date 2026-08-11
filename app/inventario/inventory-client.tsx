@@ -62,34 +62,6 @@ type InventoryClientProps = {
   role: CrmRole
 }
 
-type LogbookCategory = 'sales' | 'inventory' | 'pos' | 'crm' | 'system'
-
-type LogbookItem = {
-  id: string
-  category: LogbookCategory
-  action: string
-  actionLabel: string
-  status: string
-  actorUsername: string
-  actorRole: string
-  createdAt: string
-  details: string
-}
-
-type LogbookResponse = {
-  success: boolean
-  filters: {
-    limit: number
-    action?: string
-    status: 'all' | 'success' | 'failed' | 'pending'
-    category: LogbookCategory | 'all'
-    actor?: string
-  }
-  actions: string[]
-  categories: LogbookCategory[]
-  items: LogbookItem[]
-}
-
 type AdjustmentPayload =
   | {
       operation: 'add_product'
@@ -209,7 +181,6 @@ type BulkOperation =
 type RowAdjustmentPayload = Extract<AdjustmentPayload, { operation: RowAdjustmentOperation }>
 type SortDirection = 'asc' | 'desc'
 type InventorySortField = 'productName' | 'sku' | 'category' | 'stock' | 'unitPrice'
-type LogbookSortField = 'createdAt' | 'category' | 'actionLabel' | 'details' | 'actor' | 'status'
 type AdjustmentSortField = 'sku' | 'productName' | 'category' | 'stock' | 'unitPrice' | 'operation' | 'reason'
 
 type RowAdjustmentPreview = {
@@ -218,22 +189,6 @@ type RowAdjustmentPreview = {
   itemName: string
   operationLabel: string
   previewLines: string[]
-}
-
-const getLogbookActionDisplayLabel = (action: string) => {
-  const actionLabelMap: Record<string, string> = {
-    'sale.create': 'Venta registrada',
-    'inventory.import.csv': 'Importación de inventario',
-    'pos.draft.saved': 'Borrador POS guardado',
-    'inventory.product.create': 'Producto agregado',
-    'inventory.product.delete': 'Producto eliminado',
-    'inventory.price.correct': 'Precio corregido',
-    'inventory.price.schedule': 'Precio programado',
-    'inventory.min_stock.update': 'Umbral de stock bajo actualizado',
-    'inventory.movement.entry': 'Entrada manual de stock',
-    'inventory.movement.exit': 'Salida manual de stock'
-  }
-  return actionLabelMap[action] || action
 }
 
 const createDefaultRowDraft = (): RowAdjustmentDraft => ({
@@ -348,7 +303,6 @@ const getSortIndicator = (isActive: boolean, direction: SortDirection) => {
 export const InventoryClient = ({ role }: InventoryClientProps) => {
   const searchParams = useSearchParams()
   const shortcut = searchParams.get('shortcut')
-  const shouldOpenLogbookByShortcut = shortcut === 'movimientos' || shortcut === 'bitacora'
   const shouldOpenAdjustmentsByShortcut = shortcut === 'ajuste'
   const [items, setItems] = useState<InventoryItem[]>([])
   const [query, setQuery] = useState('')
@@ -364,18 +318,9 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [isLowStockAlertsOpen, setIsLowStockAlertsOpen] = useState(false)
   const [lowStockAlerts, setLowStockAlerts] = useState<InventoryItem[]>([])
   const [loadingLowStockAlerts, setLoadingLowStockAlerts] = useState(false)
-  const [activePanel, setActivePanel] = useState<'inventory' | 'logbook' | 'adjustments'>(
-    shouldOpenAdjustmentsByShortcut ? 'adjustments' : shouldOpenLogbookByShortcut ? 'logbook' : 'inventory'
+  const [activePanel, setActivePanel] = useState<'inventory' | 'adjustments'>(
+    shouldOpenAdjustmentsByShortcut ? 'adjustments' : 'inventory'
   )
-  const [logbookItems, setLogbookItems] = useState<LogbookItem[]>([])
-  const [logbookActionFilter, setLogbookActionFilter] = useState<string>('all')
-  const [logbookStatusFilter, setLogbookStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all')
-  const [logbookCategoryFilter, setLogbookCategoryFilter] = useState<LogbookCategory | 'all'>('inventory')
-  const [logbookActorFilter, setLogbookActorFilter] = useState('')
-  const [logbookSortBy, setLogbookSortBy] = useState<LogbookSortField>('createdAt')
-  const [logbookSortDirection, setLogbookSortDirection] = useState<SortDirection>('desc')
-  const [availableLogbookActions, setAvailableLogbookActions] = useState<string[]>([])
-  const [loadingLogbook, setLoadingLogbook] = useState(false)
   const [loadingAdjustments, setLoadingAdjustments] = useState(false)
   const [adjustmentsSnapshot, setAdjustmentsSnapshot] = useState<InventoryAdjustmentsResponse | null>(null)
   const [adjustmentResult, setAdjustmentResult] = useState<string | null>(null)
@@ -600,51 +545,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }, [isInventorySettingsOpen, isLowStockAlertsOpen])
 
   useEffect(() => {
-    if (activePanel !== 'logbook') return
-
-    let cancelled = false
-    const loadLogbook = async () => {
-      setLoadingLogbook(true)
-      try {
-        const params = new URLSearchParams({
-          category: logbookCategoryFilter,
-          status: logbookStatusFilter,
-          limit: '180'
-        })
-        if (logbookActionFilter !== 'all') {
-          params.set('action', logbookActionFilter)
-        }
-        if (logbookActorFilter.trim().length > 0) {
-          params.set('actor', logbookActorFilter.trim())
-        }
-
-        const response = await fetch(`/api/inventario/bitacora?${params.toString()}`)
-        const payload = (await response.json()) as LogbookResponse
-        if (!response.ok || !payload.success) {
-          throw new Error('No fue posible cargar la bitácora')
-        }
-        if (cancelled) return
-        setLogbookItems(payload.items)
-        setAvailableLogbookActions(payload.actions)
-      } catch (error) {
-        if (!cancelled) {
-          pushToast(error instanceof Error ? error.message : 'Error de carga de bitácora', 'error')
-        }
-      } finally {
-        if (!cancelled) {
-          setLoadingLogbook(false)
-        }
-      }
-    }
-
-    void loadLogbook()
-
-    return () => {
-      cancelled = true
-    }
-  }, [activePanel, logbookActionFilter, logbookCategoryFilter, logbookStatusFilter, logbookActorFilter, refreshSeed])
-
-  useEffect(() => {
     if (activePanel !== 'adjustments') return
 
     let cancelled = false
@@ -690,38 +590,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         item.category.toLowerCase().includes(normalizedQuery)
     )
   }, [adjustmentQuery, items])
-  const sortedLogbookItems = useMemo(() => {
-    const indexedItems = logbookItems.map((item, index) => ({ item, index }))
-    indexedItems.sort((left, right) => {
-      const leftItem = left.item
-      const rightItem = right.item
-      let comparison = 0
-
-      if (logbookSortBy === 'createdAt') {
-        comparison = compareNumber(new Date(leftItem.createdAt).getTime(), new Date(rightItem.createdAt).getTime())
-      } else if (logbookSortBy === 'category') {
-        comparison = compareText(leftItem.category, rightItem.category)
-      } else if (logbookSortBy === 'actionLabel') {
-        comparison = compareText(leftItem.actionLabel, rightItem.actionLabel)
-      } else if (logbookSortBy === 'details') {
-        comparison = compareText(leftItem.details, rightItem.details)
-      } else if (logbookSortBy === 'actor') {
-        comparison = compareText(
-          `${leftItem.actorUsername} ${leftItem.actorRole}`,
-          `${rightItem.actorUsername} ${rightItem.actorRole}`
-        )
-      } else {
-        comparison = compareText(leftItem.status, rightItem.status)
-      }
-
-      if (comparison === 0) {
-        return left.index - right.index
-      }
-
-      return logbookSortDirection === 'asc' ? comparison : -comparison
-    })
-    return indexedItems.map(entry => entry.item)
-  }, [logbookItems, logbookSortBy, logbookSortDirection])
   const sortedAdjustmentItems = useMemo(() => {
     const indexedItems = adjustmentFilteredItems.map((item, index) => ({ item, index }))
     indexedItems.sort((left, right) => {
@@ -1077,7 +945,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     setSelectedItemIds(sortedAdjustmentItems.map(item => item.id))
   }
 
-  const handleActivePanelChange = (panel: 'inventory' | 'logbook' | 'adjustments') => {
+  const handleActivePanelChange = (panel: 'inventory' | 'adjustments') => {
     setIsInventorySettingsOpen(false)
     setIsLowStockAlertsOpen(false)
     setActivePanel(panel)
@@ -1091,14 +959,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     }
     setSortBy(field)
     setSortDirection('asc')
-  }
-  const handleLogbookHeaderSort = (field: LogbookSortField) => {
-    if (logbookSortBy === field) {
-      setLogbookSortDirection(current => (current === 'asc' ? 'desc' : 'asc'))
-      return
-    }
-    setLogbookSortBy(field)
-    setLogbookSortDirection(field === 'createdAt' ? 'desc' : 'asc')
   }
   const handleAdjustmentHeaderSort = (field: AdjustmentSortField) => {
     if (adjustmentSortBy === field) {
@@ -1220,7 +1080,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   }
 
   const buildRowPreview = (item: InventoryItem, payload: RowAdjustmentPayload): RowAdjustmentPreview => {
-    const currentStockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`
+    const currentStockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`
     const currentPriceLabel = formatMxnCurrency(item.unitPrice)
     const lines: string[] = [
       `Stock actual: ${currentStockLabel}`,
@@ -1247,8 +1107,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         incomingQuantity: payload.quantity,
         incomingUnitCost: payload.unitCost
       })
-      const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} und`
-      lines.push(`Entrada: +${payload.quantity} und`)
+      const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} pz`
+      lines.push(`Entrada: +${payload.quantity} pz`)
       lines.push(`Costo de entrada: ${formatMxnCurrency(payload.unitCost)}`)
       lines.push(`Stock proyectado: ${nextStockLabel}`)
       lines.push(`Precio promedio proyectado: ${formatMxnCurrency(nextPrice)}`)
@@ -1258,8 +1118,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
 
     if (payload.operation === 'stock_exit') {
       const nextStock = Math.max(0, item.stock - payload.quantity)
-      const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} und`
-      lines.push(`Salida: -${payload.quantity} und`)
+      const nextStockLabel = item.supportsWeight ? `${(nextStock / 1000).toFixed(3)} kg` : `${nextStock} pz`
+      lines.push(`Salida: -${payload.quantity} pz`)
       lines.push(`Método de valoración: ${payload.valuationMethod === 'fifo' ? 'FIFO' : 'Promedio general'}`)
       lines.push(`Stock proyectado: ${nextStockLabel}`)
       if (payload.valuationMethod === 'fifo') {
@@ -1282,7 +1142,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
     if (payload.operation === 'delete_product') {
       lines.push('Acción: eliminación del producto en catálogo')
       if (item.stock > 0) {
-        const stockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`
+        const stockLabel = item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`
         lines.push(`Inventario actual: ${stockLabel}`)
         lines.push(`Se registrará salida automática de ${item.stock} unidad(es)`)
         lines.push('Después se eliminará el producto del catálogo')
@@ -1493,8 +1353,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         </p>
       </section>
 
-      <section className='mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
-        <div className='mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3'>
+      <section className='mt-6 w-full min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
+        <div className='mb-5 flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3'>
           <div className='inline-flex rounded-lg border border-slate-300 bg-white p-1'>
             <button
               type='button'
@@ -1505,16 +1365,6 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
               }`}
             >
               Inventario
-            </button>
-            <button
-              type='button'
-              onClick={() => handleActivePanelChange('logbook')}
-              aria-label='Ver vista de bitácora'
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-                activePanel === 'logbook' ? 'bg-emerald-600 text-white' : 'text-slate-700 hover:bg-slate-100'
-              }`}
-            >
-              Bitácora
             </button>
             <button
               type='button'
@@ -1640,8 +1490,8 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
         </div>
 
         {activePanel === 'inventory' ? (
-          <>
-            <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
+          <div className='w-full min-w-0 space-y-4'>
+            <div className='grid w-full gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
               <input
                 value={query}
                 onChange={event => {
@@ -1649,15 +1499,15 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                   setQuery(event.target.value)
                 }}
                 placeholder='Buscar SKU o producto'
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                className='h-10 w-full min-w-0 rounded-lg border border-slate-300 px-3 text-sm'
               />
               <p className='self-center text-xs text-slate-600'>
                 Total: {totalItems} | Página {page}/{totalPages}
               </p>
             </div>
 
-            <div ref={inventoryTableContainerRef} className='mt-4 overflow-x-auto rounded-xl border border-slate-200'>
-              <table className='min-w-full divide-y divide-slate-200'>
+            <div ref={inventoryTableContainerRef} className='w-full max-w-full min-w-0 overflow-x-auto rounded-xl border border-slate-200'>
+              <table className='w-full min-w-full table-fixed divide-y divide-slate-200 md:table-auto'>
                 <thead className='bg-slate-50'>
                   <tr>
                     <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
@@ -1731,7 +1581,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                         ) : null}
                       </td>
                       <td className='px-3 py-2 text-sm text-slate-700'>
-                        {item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`}
+                        {item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`}
                       </td>
                       <td className='px-3 py-2 text-sm text-slate-700'>{formatMxnCurrency(item.unitPrice)}</td>
                       <td className='px-3 py-2 text-sm text-slate-700'>{item.supportsWeight ? 'Peso' : 'Pieza'}</td>
@@ -1742,7 +1592,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
               {!items.length ? <p className='px-3 py-4 text-sm text-slate-500'>Sin productos para los filtros seleccionados.</p> : null}
             </div>
 
-            <div className='mt-4 flex items-center justify-between text-sm text-slate-600'>
+            <div className='flex items-center justify-between text-sm text-slate-600'>
               <button
                 type='button'
                 disabled={page <= 1 || loading}
@@ -1763,167 +1613,22 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 Siguiente
               </button>
             </div>
-          </>
-        ) : activePanel === 'logbook' ? (
-          <section className='space-y-4'>
-            <div className='grid gap-3 md:grid-cols-4'>
-              <select
-                value={logbookActionFilter}
-                onChange={event => setLogbookActionFilter(event.target.value)}
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
-              >
-                <option value='all'>Todos los tipos</option>
-                {availableLogbookActions.map(action => (
-                  <option key={action} value={action}>
-                    {getLogbookActionDisplayLabel(action)}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={logbookCategoryFilter}
-                onChange={event => setLogbookCategoryFilter(event.target.value as LogbookCategory | 'all')}
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
-              >
-                <option value='all'>Todas las categorías</option>
-                <option value='sales'>Ventas</option>
-                <option value='inventory'>Inventario</option>
-                <option value='pos'>POS</option>
-                <option value='crm'>CRM</option>
-                <option value='system'>Sistema</option>
-              </select>
-              <select
-                value={logbookStatusFilter}
-                onChange={event => setLogbookStatusFilter(event.target.value as 'all' | 'success' | 'failed' | 'pending')}
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
-              >
-                <option value='all'>Todos los estados</option>
-                <option value='success'>Success</option>
-                <option value='failed'>Failed</option>
-                <option value='pending'>Pending</option>
-              </select>
-              <input
-                value={logbookActorFilter}
-                onChange={event => setLogbookActorFilter(event.target.value)}
-                placeholder='Filtrar por usuario'
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
-              />
-            </div>
-
-            <div className='flex justify-end'>
-              <button
-                type='button'
-                onClick={() => setRefreshSeed(current => current + 1)}
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-50'
-              >
-                Actualizar bitácora
-              </button>
-            </div>
-
-            {loadingLogbook ? <p className='text-sm text-slate-500'>Cargando bitácora...</p> : null}
-
-            <article className='rounded-xl border border-slate-200'>
-              <header className='border-b border-slate-200 bg-slate-50 px-4 py-3'>
-                <h2 className='text-sm font-semibold text-slate-900'>Registro de operaciones del sistema</h2>
-                <p className='mt-1 text-xs text-slate-600'>
-                  Ordena haciendo clic en cualquier encabezado de columna.
-                </p>
-              </header>
-              <div className='overflow-x-auto'>
-                <table className='min-w-full divide-y divide-slate-200'>
-                  <thead className='bg-white'>
-                    <tr>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                        <button type='button' onClick={() => handleLogbookHeaderSort('createdAt')} className='inline-flex items-center gap-1'>
-                          Fecha
-                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'createdAt', logbookSortDirection)}</span>
-                        </button>
-                      </th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                        <button type='button' onClick={() => handleLogbookHeaderSort('category')} className='inline-flex items-center gap-1'>
-                          Categoría
-                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'category', logbookSortDirection)}</span>
-                        </button>
-                      </th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                        <button type='button' onClick={() => handleLogbookHeaderSort('actionLabel')} className='inline-flex items-center gap-1'>
-                          Operación
-                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'actionLabel', logbookSortDirection)}</span>
-                        </button>
-                      </th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                        <button type='button' onClick={() => handleLogbookHeaderSort('details')} className='inline-flex items-center gap-1'>
-                          Detalle
-                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'details', logbookSortDirection)}</span>
-                        </button>
-                      </th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                        <button type='button' onClick={() => handleLogbookHeaderSort('actor')} className='inline-flex items-center gap-1'>
-                          Usuario
-                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'actor', logbookSortDirection)}</span>
-                        </button>
-                      </th>
-                      <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
-                        <button type='button' onClick={() => handleLogbookHeaderSort('status')} className='inline-flex items-center gap-1'>
-                          Estado
-                          <span className='text-[10px]'>{getSortIndicator(logbookSortBy === 'status', logbookSortDirection)}</span>
-                        </button>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className='divide-y divide-slate-100 bg-white'>
-                    {sortedLogbookItems.map(item => (
-                      <tr key={item.id}>
-                        <td className='whitespace-nowrap px-3 py-2 text-sm text-slate-700'>
-                          {new Date(item.createdAt).toLocaleString('es-MX')}
-                        </td>
-                        <td className='px-3 py-2 text-sm text-slate-700'>{item.category}</td>
-                        <td className='px-3 py-2 text-sm text-slate-800'>
-                          <p>{item.actionLabel}</p>
-                        </td>
-                        <td className='px-3 py-2 text-sm text-slate-700'>
-                          <div className='max-w-[460px] whitespace-pre-wrap break-words text-xs leading-5'>{item.details}</div>
-                        </td>
-                        <td className='px-3 py-2 text-sm text-slate-700'>
-                          {item.actorUsername} <span className='text-xs text-slate-500'>({item.actorRole})</span>
-                        </td>
-                        <td className='px-3 py-2 text-sm text-slate-700'>
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-                              item.status === 'success'
-                                ? 'bg-emerald-100 text-emerald-800'
-                                : item.status === 'failed'
-                                  ? 'bg-rose-100 text-rose-800'
-                                  : 'bg-amber-100 text-amber-800'
-                            }`}
-                          >
-                            {item.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!sortedLogbookItems.length ? (
-                  <p className='px-3 py-4 text-sm text-slate-500'>Sin operaciones para los filtros seleccionados.</p>
-                ) : null}
-              </div>
-            </article>
-          </section>
+          </div>
         ) : (
-          <section className='space-y-4'>
-            <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
+          <div className='w-full min-w-0 space-y-4'>
+            <div className='grid w-full gap-3 md:grid-cols-[minmax(0,1fr)_auto]'>
               <input
                 value={adjustmentQuery}
                 onChange={event => setAdjustmentQuery(event.target.value)}
                 placeholder='Buscar en ajustes por SKU o nombre'
-                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+                className='h-10 w-full min-w-0 rounded-lg border border-slate-300 px-3 text-sm'
               />
               <p className='self-center text-xs text-slate-500'>
                 Mostrando {sortedAdjustmentItems.length} de {items.length} producto(s)
               </p>
             </div>
 
-            <div className='rounded-xl border border-slate-200 bg-slate-50 p-3'>
+            <div className='w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-3'>
               <div className='grid gap-3 md:grid-cols-6'>
                 <select
                   value={bulkOperation}
@@ -1952,7 +1657,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                     type='datetime-local'
                     value={bulkEffectiveFrom}
                     onChange={event => setBulkEffectiveFrom(event.target.value)}
-                    className='h-9 w-40 rounded-lg border border-slate-300 px-2 text-xs'
+                    className='h-9 w-full min-w-0 rounded-lg border border-slate-300 px-2 text-xs'
                   />
                 ) : (
                   <div className='h-9 rounded-lg border border-dashed border-slate-200 bg-slate-100' />
@@ -2023,11 +1728,11 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
               </div>
             </div>
 
-            <div className='overflow-x-auto rounded-xl border border-slate-200'>
+            <div className='w-full max-w-full min-w-0 overflow-x-auto rounded-xl border border-slate-200'>
               <div className='border-b border-slate-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800'>
                 Campos obligatorios para la operación elegida se resaltan en ámbar (*)
               </div>
-              <table className='min-w-[1500px] divide-y divide-slate-200 bg-white'>
+              <table className='w-full min-w-full divide-y divide-slate-200 bg-white'>
                 <thead className='bg-slate-50'>
                   <tr>
                     <th className='px-2 py-2 text-left text-xs font-semibold text-slate-500'>Sel.</th>
@@ -2123,7 +1828,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                           ) : null}
                         </td>
                         <td className='px-2 py-2 text-xs text-slate-700'>
-                          <p>{item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} und`}</p>
+                          <p>{item.supportsWeight ? `${(item.stock / 1000).toFixed(3)} kg` : `${item.stock} pz`}</p>
                           <p>{formatMxnCurrency(item.unitPrice)}</p>
                         </td>
                         <td className='px-2 py-2'>
@@ -2160,7 +1865,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                               value={draft.effectiveFrom}
                               onChange={event => updateRowDraft(item.id, { effectiveFrom: event.target.value })}
                               style={fieldAlertStyle(missingEffectiveFrom)}
-                              className={`${requiredInputClass(missingEffectiveFrom)} w-40`}
+                              className={`${requiredInputClass(missingEffectiveFrom)} w-full min-w-0`}
                             />
                           ) : (
                             <span className='text-xs text-slate-400'>—</span>
@@ -2241,7 +1946,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
               ) : null}
             </div>
 
-            <article className='rounded-xl border border-slate-200 p-3'>
+            <article className='w-full min-w-0 rounded-xl border border-slate-200 p-3'>
               <p className='text-xs font-semibold text-slate-800'>Programaciones pendientes</p>
               {loadingAdjustments ? <p className='mt-2 text-xs text-slate-500'>Cargando...</p> : null}
               {adjustmentsSnapshot?.schedules?.length ? (
@@ -2256,7 +1961,7 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
                 <p className='mt-2 text-xs text-slate-500'>Sin pendientes.</p>
               )}
             </article>
-          </section>
+          </div>
         )}
       </section>
 

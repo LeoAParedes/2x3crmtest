@@ -47,7 +47,7 @@ export const formatTicketQuantity = (item: Pick<TicketItem, 'quantity' | 'unitMo
   if (item.unitMode === 'weight') {
     return `${(item.quantity / 1000).toFixed(3)}kg`
   }
-  return `${item.quantity}und`
+  return `${item.quantity}pz`
 }
 
 const padRight = (value: string, length: number) => {

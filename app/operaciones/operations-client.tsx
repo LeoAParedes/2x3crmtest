@@ -39,7 +39,7 @@ const quickCards = [
     description: 'Inicia cobros, tickets y cierre de caja.'
   },
   {
-    href: '/inventario?shortcut=bitacora',
+    href: '/bitacora',
     title: 'Revisar bitácora',
     description: 'Audita operaciones del sistema por tipo y estado.'
   },

@@ -5,7 +5,7 @@ import { buildSaleTicketText, formatTicketQuantity } from '@/src/lib/pos/ticket-
 describe('ticket formatter', () => {
   it('formats weighted and piece quantities', () => {
     expect(formatTicketQuantity({ quantity: 750, unitMode: 'weight' })).toBe('0.750kg')
-    expect(formatTicketQuantity({ quantity: 3, unitMode: 'piece' })).toBe('3und')
+    expect(formatTicketQuantity({ quantity: 3, unitMode: 'piece' })).toBe('3pz')
   })
 
   it('builds a receipt with payment and change lines', () => {

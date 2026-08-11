@@ -32,7 +32,7 @@ const navItems: NavItem[] = [
   { href: '/operaciones', label: 'Operaciones', section: 'operations', iconSrc: '/icons/nav/operations.png' },
   { href: '/inventario', label: 'Inventarios', section: 'inventory', iconSrc: '/icons/nav/inventory.png' },
   { href: '/inventario?shortcut=ajuste', label: 'Ajuste rápido', section: 'inventory', iconSrc: '/icons/nav/adjust.png' },
-  { href: '/inventario?shortcut=bitacora', label: 'Bitácora', section: 'inventory', iconSrc: '/icons/nav/bitacora.png' },
+  { href: '/bitacora', label: 'Bitácora', section: 'operations', iconSrc: '/icons/nav/bitacora.png' },
   { href: '/finanzas', label: 'Finanzas', section: 'finance', iconSrc: '/icons/nav/finance.png' }
 ]
 
