@@ -271,16 +271,6 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
                   Salir
                 </button>
               </form>
-              <a
-                href='https://icons8.com'
-                target='_blank'
-                rel='noreferrer'
-                aria-label='Iconos por Icons8'
-                tabIndex={0}
-                className='block text-[10px] text-[#898989] transition hover:text-[#b4b4b4] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
-              >
-                Icons by Icons8
-              </a>
             </div>
           ) : (
             <form action='/auth/logout' method='post'>
