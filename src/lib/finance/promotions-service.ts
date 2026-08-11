@@ -5,6 +5,7 @@ import {
   type CreatePromotionInput,
   type UpdatePromotionInput
 } from '@/src/lib/finance/promotions-schema'
+import type { PromoCandidate } from '@/src/lib/pos/promo-engine'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
 
 const toMoney = (value: number) => Number(value.toFixed(2))
@@ -17,10 +18,17 @@ const mapPromotion = (promotion: {
   minPurchase: { toString(): string } | number
   description: string
   active: boolean
+  startsAt: Date | null
   expiresAt: Date | null
   createdByUsername: string
   createdAt: Date
   updatedAt: Date
+  products?: Array<{ inventoryItemId: string; inventoryItem?: { sku: string; productName: string } }>
+  bundleItems?: Array<{
+    inventoryItemId: string
+    requiredQty: number
+    inventoryItem?: { sku: string; productName: string }
+  }>
 }) => ({
   id: promotion.id,
   name: promotion.name,
@@ -29,18 +37,102 @@ const mapPromotion = (promotion: {
   minPurchase: toMoney(Number(promotion.minPurchase)),
   description: promotion.description,
   active: promotion.active,
+  startsAt: promotion.startsAt?.toISOString() ?? null,
   expiresAt: promotion.expiresAt?.toISOString() ?? null,
   createdByUsername: promotion.createdByUsername,
   createdAt: promotion.createdAt.toISOString(),
-  updatedAt: promotion.updatedAt.toISOString()
+  updatedAt: promotion.updatedAt.toISOString(),
+  productIds: (promotion.products || []).map(item => item.inventoryItemId),
+  products: (promotion.products || []).map(item => ({
+    inventoryItemId: item.inventoryItemId,
+    sku: item.inventoryItem?.sku || '',
+    productName: item.inventoryItem?.productName || ''
+  })),
+  bundleItems: (promotion.bundleItems || []).map(item => ({
+    inventoryItemId: item.inventoryItemId,
+    requiredQty: item.requiredQty,
+    sku: item.inventoryItem?.sku || '',
+    productName: item.inventoryItem?.productName || ''
+  }))
 })
+
+const promotionInclude = {
+  products: {
+    include: { inventoryItem: { select: { sku: true, productName: true } } }
+  },
+  bundleItems: {
+    include: { inventoryItem: { select: { sku: true, productName: true } } }
+  }
+} as const
 
 export const listPromotions = async () => {
   const prisma = await getPrisma()
   const promotions = await prisma.promotion.findMany({
-    orderBy: [{ active: 'desc' }, { createdAt: 'desc' }]
+    orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
+    include: promotionInclude
   })
   return promotions.map(mapPromotion)
+}
+
+export const listActivePromoCandidates = async (now = new Date()): Promise<PromoCandidate[]> => {
+  const prisma = await getPrisma()
+  const promotions = await prisma.promotion.findMany({
+    where: {
+      active: true,
+      AND: [
+        { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+        { OR: [{ expiresAt: null }, { expiresAt: { gte: now } }] }
+      ]
+    },
+    include: {
+      products: true,
+      bundleItems: true
+    }
+  })
+
+  return promotions.map(promotion => ({
+    id: promotion.id,
+    name: promotion.name,
+    type: promotion.type as PromoCandidate['type'],
+    value: toMoney(Number(promotion.value)),
+    minPurchase: toMoney(Number(promotion.minPurchase)),
+    productIds: promotion.products.map(item => item.inventoryItemId),
+    bundleItems: promotion.bundleItems.map(item => ({
+      inventoryItemId: item.inventoryItemId,
+      requiredQty: item.requiredQty
+    }))
+  }))
+}
+
+const syncPromotionProducts = async (
+  promotionId: string,
+  type: string,
+  productIds: string[],
+  bundleItems: Array<{ inventoryItemId: string; requiredQty: number }>
+) => {
+  const prisma = await getPrisma()
+  await prisma.promotionProduct.deleteMany({ where: { promotionId } })
+  await prisma.promotionBundleItem.deleteMany({ where: { promotionId } })
+
+  if (type === 'bundle') {
+    if (bundleItems.length > 0) {
+      await prisma.promotionBundleItem.createMany({
+        data: bundleItems.map(item => ({
+          promotionId,
+          inventoryItemId: item.inventoryItemId,
+          requiredQty: item.requiredQty
+        }))
+      })
+    }
+    return
+  }
+
+  const uniqueIds = [...new Set(productIds)]
+  if (uniqueIds.length > 0) {
+    await prisma.promotionProduct.createMany({
+      data: uniqueIds.map(inventoryItemId => ({ promotionId, inventoryItemId }))
+    })
+  }
 }
 
 export const createPromotion = async (rawInput: unknown, actor: AuthenticatedActor) => {
@@ -55,10 +147,13 @@ export const createPromotion = async (rawInput: unknown, actor: AuthenticatedAct
       minPurchase: toMoney(input.minPurchase),
       description: input.description,
       active: input.active,
+      startsAt: input.startsAt ? new Date(input.startsAt) : null,
       expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
       createdByUsername: actor.username
     }
   })
+
+  await syncPromotionProducts(promotion.id, input.type, input.productIds, input.bundleItems)
 
   await prisma.systemActionLog.create({
     data: {
@@ -72,12 +167,18 @@ export const createPromotion = async (rawInput: unknown, actor: AuthenticatedAct
       metadata: {
         name: promotion.name,
         type: promotion.type,
-        value: Number(promotion.value)
+        value: Number(promotion.value),
+        productCount: input.productIds.length,
+        bundleCount: input.bundleItems.length
       }
     }
   })
 
-  return mapPromotion(promotion)
+  const full = await prisma.promotion.findUniqueOrThrow({
+    where: { id: promotion.id },
+    include: promotionInclude
+  })
+  return mapPromotion(full)
 }
 
 export const updatePromotion = async (id: string, rawInput: unknown, actor: AuthenticatedActor) => {
@@ -98,6 +199,12 @@ export const updatePromotion = async (id: string, rawInput: unknown, actor: Auth
       minPurchase: input.minPurchase === undefined ? undefined : toMoney(input.minPurchase),
       description: input.description,
       active: input.active,
+      startsAt:
+        input.startsAt === undefined
+          ? undefined
+          : input.startsAt === null
+            ? null
+            : new Date(input.startsAt),
       expiresAt:
         input.expiresAt === undefined
           ? undefined
@@ -106,6 +213,15 @@ export const updatePromotion = async (id: string, rawInput: unknown, actor: Auth
             : new Date(input.expiresAt)
     }
   })
+
+  if (input.productIds || input.bundleItems || input.type) {
+    await syncPromotionProducts(
+      promotion.id,
+      input.type || promotion.type,
+      input.productIds || [],
+      input.bundleItems || []
+    )
+  }
 
   await prisma.systemActionLog.create({
     data: {
@@ -118,12 +234,16 @@ export const updatePromotion = async (id: string, rawInput: unknown, actor: Auth
       status: 'success',
       metadata: {
         active: promotion.active,
-        name: promotion.name
+        type: promotion.type
       }
     }
   })
 
-  return mapPromotion(promotion)
+  const full = await prisma.promotion.findUniqueOrThrow({
+    where: { id: promotion.id },
+    include: promotionInclude
+  })
+  return mapPromotion(full)
 }
 
 export const deletePromotion = async (id: string, actor: AuthenticatedActor) => {
@@ -134,7 +254,6 @@ export const deletePromotion = async (id: string, actor: AuthenticatedActor) => 
   }
 
   await prisma.promotion.delete({ where: { id } })
-
   await prisma.systemActionLog.create({
     data: {
       actorAuthUserId: actor.userId,
@@ -144,9 +263,9 @@ export const deletePromotion = async (id: string, actor: AuthenticatedActor) => 
       entityType: 'Promotion',
       entityId: id,
       status: 'success',
-      metadata: {
-        name: existing.name
-      }
+      metadata: { name: existing.name }
     }
   })
+
+  return { id }
 }

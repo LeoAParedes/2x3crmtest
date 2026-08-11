@@ -146,6 +146,8 @@ model InventoryItem {
   productSuppliers ProductSupplier[]
   purchases        Purchase[]
   lots             InventoryLot[]
+  promotionProducts PromotionProduct[]
+  promotionBundleItems PromotionBundleItem[]
 }
 
 /// One purchase receipt creates one lot with a single expiry date.
@@ -316,11 +318,14 @@ model CashSession {
   cashierAuthUserId String      @db.Uuid
   cashierUsername   String
   status            String      @default("open")
+  /// morning | afternoon
+  shiftSlot         String?
   openingFloat      Decimal     @db.Decimal(10, 2)
   openedAt          DateTime    @default(now())
   closedAt          DateTime?
   cashSalesTotal    Decimal     @db.Decimal(10, 2) @default(0)
   cardSalesTotal    Decimal     @db.Decimal(10, 2) @default(0)
+  creditSalesTotal  Decimal     @db.Decimal(10, 2) @default(0)
   salesCount        Int         @default(0)
   expectedCash      Decimal?    @db.Decimal(10, 2)
   countedCash       Decimal?    @db.Decimal(10, 2)
@@ -331,6 +336,7 @@ model CashSession {
 
   @@index([cashierAuthUserId, status])
   @@index([status, openedAt])
+  @@index([shiftSlot, openedAt])
 }
 
 model Sale {
@@ -342,9 +348,12 @@ model Sale {
   cashSessionId     String?
   subtotal          Decimal      @db.Decimal(10, 2)
   tax               Decimal      @db.Decimal(10, 2)
+  discountTotal     Decimal      @default(0) @db.Decimal(10, 2)
   total             Decimal      @db.Decimal(10, 2)
   paymentMethod     String
   amountReceived    Decimal?     @db.Decimal(10, 2)
+  creditCustomerName  String?
+  creditCustomerPhone String?
   status            String       @default("completed")
   createdAt         DateTime     @default(now())
   cashierProfile    UserProfile  @relation(fields: [cashierProfileId], references: [id], onDelete: Restrict)
@@ -353,6 +362,7 @@ model Sale {
 
   @@index([cashierAuthUserId, createdAt])
   @@index([cashSessionId])
+  @@index([paymentMethod, createdAt])
 }
 
 model SaleItem {
@@ -365,11 +375,15 @@ model SaleItem {
   unitPrice       Decimal       @db.Decimal(10, 2)
   lineTotal       Decimal       @db.Decimal(10, 2)
   lineTax         Decimal       @default(0) @db.Decimal(10, 2)
+  lineDiscount    Decimal       @default(0) @db.Decimal(10, 2)
+  promotionId     String?
   sale            Sale          @relation(fields: [saleId], references: [id], onDelete: Cascade)
   inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  promotion       Promotion?    @relation(fields: [promotionId], references: [id], onDelete: SetNull)
 
   @@index([saleId])
   @@index([inventoryItemId])
+  @@index([promotionId])
 }
 
 model Expense {
@@ -391,20 +405,50 @@ model Expense {
 }
 
 model Promotion {
-  id                String    @id @default(cuid())
+  id                String                 @id @default(cuid())
   name              String
-  /// porcentaje | monto_fijo | 2x1 | bundle
+  /// porcentaje | monto_fijo | 2x1 | 3x2 | bundle
   type              String
-  value             Decimal   @db.Decimal(10, 2)
-  minPurchase       Decimal   @default(0) @db.Decimal(10, 2)
+  value             Decimal                @db.Decimal(10, 2)
+  minPurchase       Decimal                @default(0) @db.Decimal(10, 2)
   description       String
-  active            Boolean   @default(true)
+  active            Boolean                @default(true)
+  startsAt          DateTime?
   expiresAt         DateTime?
   createdByUsername String
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  products          PromotionProduct[]
+  bundleItems       PromotionBundleItem[]
+  saleItems         SaleItem[]
 
   @@index([active, expiresAt])
+  @@index([active, startsAt, expiresAt])
+}
+
+model PromotionProduct {
+  id              String        @id @default(cuid())
+  promotionId     String
+  inventoryItemId String
+  createdAt       DateTime      @default(now())
+  promotion       Promotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, inventoryItemId])
+  @@index([inventoryItemId])
+}
+
+model PromotionBundleItem {
+  id              String        @id @default(cuid())
+  promotionId     String
+  inventoryItemId String
+  requiredQty     Int
+  createdAt       DateTime      @default(now())
+  promotion       Promotion     @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, inventoryItemId])
+  @@index([inventoryItemId])
 }
 
 model SystemActionLog {

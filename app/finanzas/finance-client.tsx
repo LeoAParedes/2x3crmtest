@@ -19,9 +19,9 @@ type SummaryResponse = {
   success: boolean
   generatedAt?: string
   salesTotals: {
-    day: { total: number; count: number }
-    week: { total: number; count: number }
-    month: { total: number; count: number }
+    day: { total: number; count: number; discountTotal?: number }
+    week: { total: number; count: number; discountTotal?: number }
+    month: { total: number; count: number; discountTotal?: number }
   }
   cashFlow: {
     ingresos: number
@@ -40,7 +40,7 @@ const periodOptions: Array<{ value: FinancePeriod; label: string }> = [
   { value: 'month', label: 'Mes' }
 ]
 
-const emptyTotals = { total: 0, count: 0 }
+const emptyTotals = { total: 0, count: 0, discountTotal: 0 }
 
 const financeLinks = [
   { href: '/finanzas/periodos', label: 'Periodos', description: 'Gráficas y rango personalizado' },
@@ -158,7 +158,11 @@ export const FinanceClient = () => {
             { key: 'day', label: 'Hoy', data: salesTotals.day },
             { key: 'week', label: 'Semana', data: salesTotals.week },
             { key: 'month', label: 'Mes', data: salesTotals.month }
-          ] as const
+          ] as Array<{
+            key: string
+            label: string
+            data: { total: number; count: number; discountTotal?: number }
+          }>
         ).map(card => (
           <article key={card.key} className='border border-slate-200 bg-white px-4 py-3'>
             <p className='text-[11px] font-medium uppercase tracking-wide text-slate-500'>{card.label}</p>
@@ -166,6 +170,11 @@ export const FinanceClient = () => {
               {formatMxnCurrency(card.data.total)}
             </p>
             <p className='text-xs text-slate-500'>{card.data.count} ventas</p>
+            {(card.data.discountTotal || 0) > 0 ? (
+              <p className='text-xs text-emerald-700'>
+                Descuentos {formatMxnCurrency(card.data.discountTotal || 0)}
+              </p>
+            ) : null}
           </article>
         ))}
       </section>

@@ -18,9 +18,10 @@ export type TicketSale = {
   items: TicketItem[]
   subtotal: number
   tax: number
+  discountTotal?: number
   total: number
   showIvaOnReceipt?: boolean
-  paymentMethod: 'cash' | 'card'
+  paymentMethod: 'cash' | 'card' | 'credit'
   amountReceived: number | null
   changeDue: number
 }
@@ -113,15 +114,18 @@ export const buildSaleTicketText = (sale: TicketSale, options: TicketBuildOption
 
   lines.push(divider)
   lines.push(labelAmountLine('Subtotal', sale.subtotal, columns))
+  if ((sale.discountTotal || 0) > 0) {
+    lines.push(labelAmountLine('Descuento', sale.discountTotal || 0, columns))
+  }
   if (sale.showIvaOnReceipt && sale.tax > 0) {
     lines.push(labelAmountLine('IVA', sale.tax, columns))
   } else {
     lines.push(labelAmountLine('Impuesto', sale.tax, columns))
   }
   lines.push(labelAmountLine('Total', sale.total, columns))
-  lines.push(
-    labelAmountLine(`Pago (${sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'})`, sale.total, columns)
-  )
+  const paymentLabel =
+    sale.paymentMethod === 'cash' ? 'Efectivo' : sale.paymentMethod === 'credit' ? 'Crédito' : 'Tarjeta'
+  lines.push(labelAmountLine(`Pago (${paymentLabel})`, sale.total, columns))
   if (sale.paymentMethod === 'cash') {
     lines.push(labelAmountLine('Recibido', sale.amountReceived || 0, columns))
     lines.push(labelAmountLine('Cambio', sale.changeDue, columns))

@@ -7,6 +7,8 @@ import {
   createSaleSchema,
   type CreateSaleInput
 } from '@/src/lib/pos/sale-schema'
+import { applyDiscountToSaleTotals, selectBestPromotion } from '@/src/lib/pos/promo-engine'
+import { listActivePromoCandidates } from '@/src/lib/finance/promotions-service'
 import { getPosSettings } from '@/src/lib/pos/pos-settings'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { summarizeSaleQuantities } from '@/src/lib/inventory/logbook-quantity'
@@ -135,10 +137,12 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         productName: product.productName,
         unitPrice: Number(product.unitPrice),
         lineTotal: lineTotals.lineSubtotal,
-        lineTax: lineTotals.lineTax
+        lineTax: lineTotals.lineTax,
+        lineDiscount: 0,
+        promotionId: null as string | null
       }
     })
-    const totals = calculateSaleTotals(
+    const baseTotals = calculateSaleTotals(
       lines.map(line => {
         const product = inventory.find(candidate => candidate.id === line.inventoryItemId)
         const productIvaRate = product?.ivaRate === null || product?.ivaRate === undefined ? null : Number(product.ivaRate)
@@ -151,6 +155,39 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
       }),
       ivaPolicy
     )
+
+    const promoCandidates = await listActivePromoCandidates()
+    const bestPromo = selectBestPromotion(
+      promoCandidates,
+      lines.map(line => ({
+        inventoryItemId: line.inventoryItemId,
+        quantity: line.unitMode === 'weight' ? Math.max(1, Math.round(line.quantity / 1000)) : line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineTotal
+      }))
+    )
+
+    if (bestPromo) {
+      for (const line of lines) {
+        const discount = bestPromo.lineDiscounts[line.inventoryItemId] || 0
+        line.lineDiscount = discount
+        if (discount > 0) {
+          line.promotionId = bestPromo.promotionId
+        }
+      }
+    }
+
+    const discounted = applyDiscountToSaleTotals({
+      subtotal: baseTotals.subtotal,
+      tax: baseTotals.tax,
+      discountTotal: bestPromo?.discountTotal || 0
+    })
+    const totals = {
+      subtotal: baseTotals.subtotal,
+      tax: discounted.tax,
+      discountTotal: discounted.discountTotal,
+      total: discounted.total
+    }
     validateCashPayment(input.paymentMethod, totals.total, input.amountReceived)
 
     for (const item of items) {
@@ -181,6 +218,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         cashSessionId,
         subtotal: totals.subtotal,
         tax: totals.tax,
+        discountTotal: totals.discountTotal,
         total: totals.total,
         paymentMethod: input.paymentMethod,
         amountReceived: normalizedAmountReceived,
@@ -193,7 +231,9 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
             quantity: line.quantity,
             unitPrice: line.unitPrice,
             lineTotal: line.lineTotal,
-            lineTax: line.lineTax
+            lineTax: line.lineTax,
+            lineDiscount: line.lineDiscount,
+            promotionId: line.promotionId
           }))
         }
       },
@@ -288,6 +328,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
       cashierUsername: sale.cashierUsername,
       subtotal: Number(sale.subtotal),
       tax: Number(sale.tax),
+      discountTotal: Number(sale.discountTotal || 0),
       total: Number(sale.total),
       paymentMethod: sale.paymentMethod,
       amountReceived: sale.amountReceived === null ? null : Number(sale.amountReceived),
@@ -363,9 +404,11 @@ export const getSaleTicket = async (saleId: string, actor: AuthenticatedActor): 
     }),
     subtotal: Number(sale.subtotal),
     tax: Number(sale.tax),
+    discountTotal: Number(sale.discountTotal || 0),
     total,
     showIvaOnReceipt: Number(sale.tax) > 0,
-    paymentMethod: sale.paymentMethod === 'card' ? 'card' : 'cash',
+    paymentMethod:
+      sale.paymentMethod === 'card' ? 'card' : sale.paymentMethod === 'credit' ? 'credit' : 'cash',
     amountReceived,
     changeDue
   }

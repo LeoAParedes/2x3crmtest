@@ -25,12 +25,13 @@ const sumSalesInRange = async (start: Date, end: Date) => {
       status: COMPLETED_SALE,
       createdAt: { gte: start, lte: end }
     },
-    _sum: { total: true },
+    _sum: { total: true, discountTotal: true },
     _count: { _all: true }
   })
 
   return {
     total: toMoney(Number(result._sum.total || 0)),
+    discountTotal: toMoney(Number(result._sum.discountTotal || 0)),
     count: result._count._all
   }
 }

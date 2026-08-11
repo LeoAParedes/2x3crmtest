@@ -4,6 +4,19 @@ import { useCallback, useEffect, useState } from 'react'
 
 import { PROMO_TYPES, type PromoType } from '@/src/lib/finance/promotions-schema'
 
+type PromotionProduct = {
+  inventoryItemId: string
+  sku: string
+  productName: string
+}
+
+type PromotionBundleItem = {
+  inventoryItemId: string
+  requiredQty: number
+  sku: string
+  productName: string
+}
+
 type Promotion = {
   id: string
   name: string
@@ -12,16 +25,70 @@ type Promotion = {
   minPurchase: number
   description: string
   active: boolean
+  startsAt: string | null
   expiresAt: string | null
   createdByUsername: string
   createdAt: string
+  productIds: string[]
+  products: PromotionProduct[]
+  bundleItems: PromotionBundleItem[]
+}
+
+type SelectedProduct = {
+  inventoryItemId: string
+  sku: string
+  productName: string
+  requiredQty: number
+}
+
+type InventoryItem = {
+  id: string
+  sku: string
+  productName: string
 }
 
 const promoTypeLabels: Record<PromoType, string> = {
   porcentaje: 'Porcentaje (%)',
   monto_fijo: 'Monto fijo ($)',
   '2x1': '2 × 1',
+  '3x2': '3 × 2',
   bundle: 'Paquete / bundle'
+}
+
+const productSelectionTypes: PromoType[] = ['porcentaje', 'monto_fijo', '2x1', '3x2', 'bundle']
+
+const formatPromoValue = (promo: Promotion) => {
+  if (promo.type === 'porcentaje') return `${promo.value}%`
+  if (promo.type === '2x1' || promo.type === '3x2') return promoTypeLabels[promo.type]
+  return `$${promo.value}`
+}
+
+const formatProductSummary = (promo: Promotion) => {
+  if (promo.type === 'bundle') {
+    const items = promo.bundleItems || []
+    if (!items.length) return 'Sin productos'
+    return items
+      .map(item => `${item.productName || item.sku || item.inventoryItemId} ×${item.requiredQty}`)
+      .join(', ')
+  }
+
+  const products = promo.products || []
+  if (!products.length) {
+    const count = promo.productIds?.length ?? 0
+    return count > 0 ? `${count} producto(s)` : 'Sin restricción'
+  }
+  return `${products.length} producto(s)`
+}
+
+const formatSelectionSummary = (type: PromoType, items: SelectedProduct[]) => {
+  if (!items.length) {
+    if (type === 'bundle' || type === '2x1' || type === '3x2') return 'Sin productos seleccionados'
+    return 'Sin restricción de productos'
+  }
+  if (type === 'bundle') {
+    return items.map(item => `${item.productName} ×${item.requiredQty}`).join(', ')
+  }
+  return `${items.length} producto(s) seleccionado(s)`
 }
 
 export const PromocionesClient = () => {
@@ -37,7 +104,15 @@ export const PromocionesClient = () => {
   const [minPurchase, setMinPurchase] = useState('0')
   const [description, setDescription] = useState('')
   const [active, setActive] = useState(true)
+  const [startsAt, setStartsAt] = useState('')
   const [expiresAt, setExpiresAt] = useState('')
+  const [selectedProducts, setSelectedProducts] = useState<SelectedProduct[]>([])
+  const [showProductModal, setShowProductModal] = useState(false)
+  const [modalSelection, setModalSelection] = useState<SelectedProduct[]>([])
+  const [inventoryQuery, setInventoryQuery] = useState('')
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
+  const [inventoryLoading, setInventoryLoading] = useState(false)
+  const [inventoryError, setInventoryError] = useState<string | null>(null)
 
   const loadPromotions = useCallback(async (soft = false) => {
     if (!soft) setLoading(true)
@@ -60,6 +135,35 @@ export const PromocionesClient = () => {
     }
   }, [])
 
+  const loadInventory = useCallback(async (query: string) => {
+    setInventoryLoading(true)
+    setInventoryError(null)
+    try {
+      const params = new URLSearchParams({
+        page: '1',
+        pageSize: '50'
+      })
+      if (query.trim()) params.set('q', query.trim())
+      const response = await fetch(`/api/pos/inventory?${params.toString()}`)
+      const payload = (await response.json()) as {
+        success?: boolean
+        items?: InventoryItem[]
+        message?: string
+      }
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.message || 'No fue posible cargar inventario')
+      }
+      setInventoryItems(payload.items || [])
+    } catch (loadInventoryError) {
+      setInventoryError(
+        loadInventoryError instanceof Error ? loadInventoryError.message : 'Error al cargar inventario'
+      )
+      setInventoryItems([])
+    } finally {
+      setInventoryLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     queueMicrotask(() => {
       void loadPromotions(false)
@@ -70,6 +174,14 @@ export const PromocionesClient = () => {
     return () => window.clearInterval(intervalId)
   }, [loadPromotions])
 
+  useEffect(() => {
+    if (!showProductModal) return
+    const timeoutId = window.setTimeout(() => {
+      void loadInventory(inventoryQuery)
+    }, 300)
+    return () => window.clearTimeout(timeoutId)
+  }, [showProductModal, inventoryQuery, loadInventory])
+
   const resetForm = () => {
     setName('')
     setPromoType('porcentaje')
@@ -77,7 +189,77 @@ export const PromocionesClient = () => {
     setMinPurchase('0')
     setDescription('')
     setActive(true)
+    setStartsAt('')
     setExpiresAt('')
+    setSelectedProducts([])
+    setShowProductModal(false)
+    setModalSelection([])
+    setInventoryQuery('')
+    setInventoryItems([])
+    setInventoryError(null)
+  }
+
+  const handleOpenProductModal = () => {
+    setModalSelection(selectedProducts.map(item => ({ ...item })))
+    setInventoryQuery('')
+    setShowProductModal(true)
+  }
+
+  const handleCloseProductModal = () => {
+    setShowProductModal(false)
+    setModalSelection([])
+    setInventoryQuery('')
+    setInventoryError(null)
+  }
+
+  const handleConfirmProductModal = () => {
+    setSelectedProducts(modalSelection.map(item => ({ ...item })))
+    setShowProductModal(false)
+    setModalSelection([])
+    setInventoryQuery('')
+    setInventoryError(null)
+  }
+
+  const handleToggleInventoryItem = (item: InventoryItem) => {
+    const existing = modalSelection.find(entry => entry.inventoryItemId === item.id)
+    if (existing) {
+      setModalSelection(current => current.filter(entry => entry.inventoryItemId !== item.id))
+      return
+    }
+    setModalSelection(current => [
+      ...current,
+      {
+        inventoryItemId: item.id,
+        sku: item.sku,
+        productName: item.productName,
+        requiredQty: 1
+      }
+    ])
+  }
+
+  const handleModalRequiredQtyChange = (inventoryItemId: string, rawValue: string) => {
+    const parsed = Number(rawValue)
+    const requiredQty = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1
+    setModalSelection(current =>
+      current.map(entry =>
+        entry.inventoryItemId === inventoryItemId ? { ...entry, requiredQty } : entry
+      )
+    )
+  }
+
+  const validateProductSelection = () => {
+    if (promoType === 'bundle') {
+      if (selectedProducts.length < 2) {
+        return 'Un paquete requiere al menos 2 productos'
+      }
+      const invalidQty = selectedProducts.some(item => !Number.isFinite(item.requiredQty) || item.requiredQty <= 0)
+      if (invalidQty) return 'Cada producto del paquete debe tener cantidad mayor a 0'
+      return null
+    }
+    if (promoType === '2x1' || promoType === '3x2') {
+      if (selectedProducts.length < 1) return 'Selecciona al menos un producto para esta promoción'
+    }
+    return null
   }
 
   const handleCreatePromotion = async () => {
@@ -98,11 +280,33 @@ export const PromocionesClient = () => {
       setSaving(false)
       return
     }
+    if (promoType === 'bundle' && parsedValue <= 0) {
+      setError('Un paquete requiere un descuento fijo mayor a 0')
+      setSaving(false)
+      return
+    }
     if (!description.trim() || description.trim().length < 2) {
       setError('La descripción debe tener al menos 2 caracteres')
       setSaving(false)
       return
     }
+
+    const productSelectionError = validateProductSelection()
+    if (productSelectionError) {
+      setError(productSelectionError)
+      setSaving(false)
+      return
+    }
+
+    const productIds =
+      promoType === 'bundle' ? [] : selectedProducts.map(item => item.inventoryItemId)
+    const bundleItems =
+      promoType === 'bundle'
+        ? selectedProducts.map(item => ({
+            inventoryItemId: item.inventoryItemId,
+            requiredQty: item.requiredQty
+          }))
+        : []
 
     try {
       const response = await fetch('/api/finanzas/promociones', {
@@ -115,7 +319,10 @@ export const PromocionesClient = () => {
           minPurchase: Number.isFinite(parsedMinPurchase) ? parsedMinPurchase : 0,
           description: description.trim(),
           active,
-          expiresAt: expiresAt ? new Date(`${expiresAt}T23:59:59`).toISOString() : null
+          startsAt: startsAt ? new Date(`${startsAt}T00:00:00`).toISOString() : null,
+          expiresAt: expiresAt ? new Date(`${expiresAt}T23:59:59`).toISOString() : null,
+          productIds,
+          bundleItems
         })
       })
       const payload = (await response.json()) as { success?: boolean; message?: string }
@@ -171,6 +378,7 @@ export const PromocionesClient = () => {
 
   const activeCount = promotions.filter(promo => promo.active).length
   const inactiveCount = promotions.length - activeCount
+  const showProductPicker = productSelectionTypes.includes(promoType)
 
   return (
     <main className='mx-auto max-w-5xl px-4 py-8 md:px-8'>
@@ -272,6 +480,16 @@ export const PromocionesClient = () => {
               />
             </label>
             <label className='grid gap-1 text-sm text-slate-700'>
+              Inicia
+              <input
+                type='date'
+                value={startsAt}
+                onChange={event => setStartsAt(event.target.value)}
+                aria-label='Fecha de inicio'
+                className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
+              />
+            </label>
+            <label className='grid gap-1 text-sm text-slate-700'>
               Expira
               <input
                 type='date'
@@ -281,6 +499,24 @@ export const PromocionesClient = () => {
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               />
             </label>
+            {showProductPicker ? (
+              <div className='grid gap-2 sm:col-span-2'>
+                <span className='text-sm text-slate-700'>Productos</span>
+                <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between'>
+                  <p className='text-sm text-slate-600' aria-live='polite'>
+                    {formatSelectionSummary(promoType, selectedProducts)}
+                  </p>
+                  <button
+                    type='button'
+                    onClick={handleOpenProductModal}
+                    aria-label='Seleccionar productos para la promoción'
+                    className='h-10 shrink-0 rounded-lg border border-slate-300 px-4 text-sm text-slate-700 hover:bg-slate-50'
+                  >
+                    Seleccionar productos
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <label className='flex items-center gap-2 self-end text-sm text-slate-700'>
               <input
                 type='checkbox'
@@ -316,6 +552,128 @@ export const PromocionesClient = () => {
         </section>
       ) : null}
 
+      {showProductModal ? (
+        <div
+          className='fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4'
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) handleCloseProductModal()
+          }}
+        >
+          <section
+            role='dialog'
+            aria-modal='true'
+            aria-labelledby='product-picker-title'
+            className='flex max-h-[90vh] w-full max-w-3xl flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl'
+          >
+            <div className='flex items-start justify-between gap-3 border-b border-slate-200 pb-3'>
+              <div>
+                <h2 id='product-picker-title' className='text-lg font-semibold text-slate-900'>
+                  Seleccionar productos
+                </h2>
+                <p className='mt-1 text-sm text-slate-600'>
+                  {promoType === 'bundle'
+                    ? 'Selecciona al menos 2 productos y define la cantidad requerida de cada uno.'
+                    : 'Busca y selecciona los productos aplicables a esta promoción.'}
+                </p>
+              </div>
+              <button
+                type='button'
+                onClick={handleCloseProductModal}
+                aria-label='Cerrar selector de productos'
+                className='rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100'
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <div className='mt-4 flex gap-2'>
+              <input
+                type='search'
+                value={inventoryQuery}
+                onChange={event => setInventoryQuery(event.target.value)}
+                placeholder='Buscar por nombre o SKU…'
+                aria-label='Buscar productos en inventario'
+                className='h-10 flex-1 rounded-lg border border-slate-300 px-3 text-sm'
+              />
+            </div>
+
+            {inventoryError ? (
+              <p role='alert' className='mt-3 text-sm text-rose-700'>{inventoryError}</p>
+            ) : null}
+
+            <div className='mt-4 flex-1 overflow-y-auto rounded-lg border border-slate-200'>
+              {inventoryLoading ? (
+                <p className='px-4 py-3 text-sm text-slate-500'>Cargando inventario…</p>
+              ) : null}
+              {!inventoryLoading && !inventoryItems.length ? (
+                <p className='px-4 py-3 text-sm text-slate-500'>No se encontraron productos.</p>
+              ) : null}
+              {!inventoryLoading && inventoryItems.length > 0 ? (
+                <ul className='divide-y divide-slate-100'>
+                  {inventoryItems.map(item => {
+                    const selected = modalSelection.find(entry => entry.inventoryItemId === item.id)
+                    const isChecked = Boolean(selected)
+                    return (
+                      <li key={item.id} className='flex items-center gap-3 px-3 py-2'>
+                        <input
+                          type='checkbox'
+                          checked={isChecked}
+                          onChange={() => handleToggleInventoryItem(item)}
+                          aria-label={`Seleccionar ${item.productName}`}
+                          className='h-4 w-4 rounded border-slate-300'
+                        />
+                        <div className='min-w-0 flex-1'>
+                          <p className='truncate text-sm font-medium text-slate-900'>{item.productName}</p>
+                          <p className='text-xs text-slate-500'>SKU: {item.sku}</p>
+                        </div>
+                        {promoType === 'bundle' && isChecked ? (
+                          <label className='flex items-center gap-1 text-xs text-slate-600'>
+                            Cant.
+                            <input
+                              type='number'
+                              min='1'
+                              step='1'
+                              value={selected?.requiredQty ?? 1}
+                              onChange={event => handleModalRequiredQtyChange(item.id, event.target.value)}
+                              aria-label={`Cantidad requerida de ${item.productName}`}
+                              className='h-8 w-16 rounded border border-slate-300 px-2 text-sm'
+                            />
+                          </label>
+                        ) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
+              ) : null}
+            </div>
+
+            <div className='mt-4 flex items-center justify-between gap-3 border-t border-slate-200 pt-3'>
+              <p className='text-sm text-slate-600' aria-live='polite'>
+                {modalSelection.length} seleccionado(s)
+              </p>
+              <div className='flex gap-2'>
+                <button
+                  type='button'
+                  onClick={handleCloseProductModal}
+                  aria-label='Cancelar selección de productos'
+                  className='rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-100'
+                >
+                  Cancelar
+                </button>
+                <button
+                  type='button'
+                  onClick={handleConfirmProductModal}
+                  aria-label='Confirmar selección de productos'
+                  className='rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700'
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       <section className='mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm'>
         <div className='border-b border-slate-200 px-4 py-3'>
           <h2 className='text-sm font-semibold text-slate-900'>Promociones definidas</h2>
@@ -326,6 +684,7 @@ export const PromocionesClient = () => {
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Nombre</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Tipo</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Valor</th>
+              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Productos</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Descripción</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Estado</th>
               <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Acciones</th>
@@ -336,8 +695,9 @@ export const PromocionesClient = () => {
               <tr key={promo.id}>
                 <td className='px-3 py-2 text-sm font-medium text-slate-900'>{promo.name}</td>
                 <td className='px-3 py-2 text-sm text-slate-700'>{promoTypeLabels[promo.type]}</td>
-                <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>
-                  {promo.type === 'porcentaje' ? `${promo.value}%` : `$${promo.value}`}
+                <td className='px-3 py-2 text-sm tabular-nums text-slate-700'>{formatPromoValue(promo)}</td>
+                <td className='max-w-xs px-3 py-2 text-sm text-slate-600' title={formatProductSummary(promo)}>
+                  {formatProductSummary(promo)}
                 </td>
                 <td className='max-w-xs px-3 py-2 text-sm text-slate-600'>{promo.description}</td>
                 <td className='px-3 py-2 text-sm'>
