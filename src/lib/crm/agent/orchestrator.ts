@@ -2,7 +2,8 @@ import { Agent } from '@mastra/core/agent'
 import { Mastra } from '@mastra/core'
 
 import type { ChatReply, CrmNormalizedMessage } from '@/src/lib/crm/channel-schema'
-import { hasLlmProviderConfig } from '@/src/lib/config/env'
+import { env, hasLlmProviderConfig } from '@/src/lib/config/env'
+import { runDavinciErpAgent } from '@/src/lib/ai/davinci-agent'
 import { appLog } from '@/src/lib/observability/app-logger'
 import { getAccountBalance } from '@/src/lib/crm/services/finance-service'
 import { findInventoryByQuery } from '@/src/lib/crm/services/inventory-service'
@@ -261,7 +262,20 @@ const fallbackReply = async (message: CrmNormalizedMessage, settings: MastraSett
 
 export const runCrmAgent = async (message: CrmNormalizedMessage): Promise<ChatReply> => {
   const settings = await getMastraSettings()
-  if (!settings.enabled || !hasLlmProviderConfig) {
+  if (!settings.enabled) {
+    const fallback = await fallbackReply(message, settings)
+    return applyReplyPolicy(fallback, settings)
+  }
+
+  // DavinciAi: OpenAI + whitelisted ERP tools (never raw SQL / arbitrary DB)
+  if (env.openAiApiKey && settings.allowedErpTools.length > 0) {
+    const davinciReply = await runDavinciErpAgent(message, settings)
+    if (davinciReply) {
+      return applyReplyPolicy(davinciReply, settings)
+    }
+  }
+
+  if (!hasLlmProviderConfig) {
     const fallback = await fallbackReply(message, settings)
     return applyReplyPolicy(fallback, settings)
   }

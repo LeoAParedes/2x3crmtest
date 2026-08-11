@@ -337,6 +337,8 @@ model MastraSettings {
   allowFinancialActions Boolean  @default(true)
   maxReplyChars         Int      @default(900)
   defaultLocale         String   @default("es-MX")
+  /// Whitelist of DavinciAi ERP metric tool ids (JSON string array)
+  allowedErpTools       Json     @default("[\"sales_total_today\",\"sales_total_period\",\"stock_by_product_search\",\"top_product_period\",\"cash_flow_period\",\"low_stock_count\",\"expenses_total_period\",\"average_ticket_period\"]")
   updatedAt             DateTime @updatedAt
 }
 

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { ERP_TOOL_IDS, ERP_TOOL_LABELS } from '@/src/lib/ai/erp-tool-ids'
 import { safeRecordAgentAction } from '@/src/lib/crm/agent-action-audit'
 import { getMastraSettings, updateMastraSettings } from '@/src/lib/crm/mastra-settings'
 import { hasLlmProviderConfig } from '@/src/lib/config/env'
@@ -14,7 +15,8 @@ const updateSchema = z.object({
   allowWriteActions: z.boolean().optional(),
   allowFinancialActions: z.boolean().optional(),
   maxReplyChars: z.number().int().min(120).max(4000).optional(),
-  defaultLocale: z.string().min(2).max(10).optional()
+  defaultLocale: z.string().min(2).max(10).optional(),
+  allowedErpTools: z.array(z.enum(ERP_TOOL_IDS)).max(ERP_TOOL_IDS.length).optional()
 })
 
 const mastraSettingsResponseSchema = z.object({
@@ -27,12 +29,24 @@ const mastraSettingsResponseSchema = z.object({
     allowFinancialActions: z.boolean(),
     maxReplyChars: z.number().int().min(120).max(4000),
     defaultLocale: z.string().min(2).max(10),
+    allowedErpTools: z.array(z.enum(ERP_TOOL_IDS)),
     updatedAt: z.string()
   }),
   providerStatus: z.object({
     llmConfigured: z.boolean()
-  })
+  }),
+  erpToolCatalog: z.array(
+    z.object({
+      id: z.enum(ERP_TOOL_IDS),
+      label: z.string()
+    })
+  )
 })
+
+const erpToolCatalog = ERP_TOOL_IDS.map(id => ({
+  id,
+  label: ERP_TOOL_LABELS[id]
+}))
 
 export async function GET(request: Request) {
   const access = await requireApiAccess(request, { allowedRoles: ['admin'] })
@@ -55,7 +69,8 @@ export async function GET(request: Request) {
       settings: await getMastraSettings(),
       providerStatus: {
         llmConfigured: hasLlmProviderConfig
-      }
+      },
+      erpToolCatalog
     })
 
     if (!payload.success) {
@@ -110,7 +125,8 @@ export async function POST(request: Request) {
       settings: updated,
       providerStatus: {
         llmConfigured: hasLlmProviderConfig
-      }
+      },
+      erpToolCatalog
     })
 
     if (!responsePayload.success) {

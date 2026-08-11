@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
+import { ERP_TOOL_IDS, ERP_TOOL_LABELS, type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
+
 type DashboardPayload = {
   success: boolean
   metrics: {
@@ -26,6 +28,7 @@ type MastraSettings = {
   allowFinancialActions: boolean
   maxReplyChars: number
   defaultLocale: string
+  allowedErpTools: ErpToolId[]
   updatedAt: string
 }
 
@@ -109,6 +112,17 @@ export default function AdminPage() {
     }
   }
 
+  const handleToggleErpTool = (toolId: ErpToolId) => {
+    setSettings(current => {
+      if (!current) return current
+      const enabled = current.allowedErpTools.includes(toolId)
+      const allowedErpTools = enabled
+        ? current.allowedErpTools.filter(id => id !== toolId)
+        : [...current.allowedErpTools, toolId]
+      return { ...current, allowedErpTools }
+    })
+  }
+
   const metricEntries = dashboard
     ? (Object.entries(metricLabels) as Array<[keyof typeof metricLabels, string]>)
     : []
@@ -142,12 +156,13 @@ export default function AdminPage() {
 
       {settings && (
         <section className='grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
-          <h2 className='text-xl font-semibold text-slate-950'>Control de Mastra</h2>
+          <h2 className='text-xl font-semibold text-slate-950'>Control de Mastra / DavinciAi</h2>
           <label className='flex items-center gap-3 text-sm text-slate-700'>
             <input
               type='checkbox'
               checked={settings.enabled}
               onChange={event => setSettings(current => (current ? { ...current, enabled: event.target.checked } : current))}
+              aria-label='Agente activo'
             />
             Agente activo
           </label>
@@ -157,6 +172,7 @@ export default function AdminPage() {
               value={settings.modelId}
               onChange={event => setSettings(current => (current ? { ...current, modelId: event.target.value } : current))}
               className='h-10 rounded-lg border border-slate-300 px-3'
+              aria-label='Modelo del agente'
             />
           </label>
           <label className='grid gap-1 text-sm text-slate-700'>
@@ -168,8 +184,48 @@ export default function AdminPage() {
                 setSettings(current => (current ? { ...current, instructions: event.target.value } : current))
               }
               className='rounded-lg border border-slate-300 px-3 py-2'
+              aria-label='Instrucciones del agente'
             />
           </label>
+
+          <fieldset className='grid gap-3 rounded-xl border border-slate-200 p-4'>
+            <legend className='px-1 text-sm font-semibold text-slate-900'>
+              DavinciAi — métricas ERP permitidas (solo lectura)
+            </legend>
+            <p className='text-xs text-slate-600'>
+              El modelo solo puede consultar estas herramientas. No tiene SQL ni acceso arbitrario a la base.
+            </p>
+            <div className='grid gap-2 sm:grid-cols-2'>
+              {ERP_TOOL_IDS.map(toolId => (
+                <label key={toolId} className='flex items-start gap-3 text-sm text-slate-700'>
+                  <input
+                    type='checkbox'
+                    className='mt-1'
+                    checked={settings.allowedErpTools.includes(toolId)}
+                    onChange={() => handleToggleErpTool(toolId)}
+                    aria-label={ERP_TOOL_LABELS[toolId]}
+                  />
+                  <span>
+                    <span className='font-medium'>{ERP_TOOL_LABELS[toolId]}</span>
+                    <span className='mt-0.5 block font-mono text-xs text-slate-500'>{toolId}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className='rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-xs text-slate-600'>
+            <p className='font-medium text-slate-800'>Webhooks WhatsApp</p>
+            <ul className='mt-2 list-disc space-y-1 pl-4'>
+              <li>
+                Meta Cloud API: <code className='font-mono'>/api/whatsapp/webhook</code>
+              </li>
+              <li>
+                Twilio (TwiML demo-reply): <code className='font-mono'>/api/whatsapp/twilio/webhook</code>
+              </li>
+            </ul>
+          </div>
+
           <button
             type='button'
             onClick={() => void handleSettingsSubmit()}

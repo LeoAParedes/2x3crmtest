@@ -9,6 +9,8 @@ type RequiredConfig = {
   metaPhoneNumberId?: string
   metaBusinessAccountId?: string
   metaApiVersion: string
+  twilioAuthToken?: string
+  twilioAccountSid?: string
   redisUrl?: string
 }
 
@@ -67,6 +69,8 @@ export const env: RequiredConfig = {
   metaPhoneNumberId: toOptional(process.env.META_PHONE_NUMBER_ID),
   metaBusinessAccountId: toOptional(process.env.META_BUSINESS_ACCOUNT_ID),
   metaApiVersion: process.env.META_API_VERSION?.trim() || 'v21.0',
+  twilioAuthToken: toOptional(process.env.TWILIO_AUTH_TOKEN),
+  twilioAccountSid: toOptional(process.env.TWILIO_ACCOUNT_SID),
   redisUrl: toOptional(process.env.REDIS_URL)
 }
 

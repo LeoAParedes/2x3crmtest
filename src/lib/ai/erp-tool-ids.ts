@@ -1,0 +1,28 @@
+export const ERP_TOOL_IDS = [
+  'sales_total_today',
+  'sales_total_period',
+  'stock_by_product_search',
+  'top_product_period',
+  'cash_flow_period',
+  'low_stock_count',
+  'expenses_total_period',
+  'average_ticket_period'
+] as const
+
+export type ErpToolId = (typeof ERP_TOOL_IDS)[number]
+
+export const isErpToolId = (value: string): value is ErpToolId =>
+  (ERP_TOOL_IDS as readonly string[]).includes(value)
+
+export const ERP_TOOL_LABELS: Record<ErpToolId, string> = {
+  sales_total_today: 'Ventas de hoy',
+  sales_total_period: 'Ventas por periodo',
+  stock_by_product_search: 'Stock por producto',
+  top_product_period: 'Producto más vendido',
+  cash_flow_period: 'Flujo de caja',
+  low_stock_count: 'Productos con stock bajo',
+  expenses_total_period: 'Egresos por periodo',
+  average_ticket_period: 'Ticket promedio'
+}
+
+export const DEFAULT_ALLOWED_ERP_TOOLS: ErpToolId[] = [...ERP_TOOL_IDS]
