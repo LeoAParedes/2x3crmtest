@@ -1,6 +1,6 @@
 'use client'
 
-import type { CSSProperties, FormEvent, KeyboardEvent } from 'react'
+import { useEffect, useRef, type CSSProperties, type FormEvent } from 'react'
 
 import { PosClock } from '@/app/pos/pos-clock'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
@@ -28,7 +28,9 @@ type PosCobroModeProps = {
   cashierUsername: string
   codeQuery: string
   onCodeQueryChange: (value: string) => void
-  onCodeSubmit: () => void
+  onCodeSubmit: (code: string) => void
+  codeLookupPending?: boolean
+  codeFeedback?: string | null
   lines: CobroLine[]
   totals: CobroTotals
   showIva: boolean
@@ -89,6 +91,8 @@ export const PosCobroMode = ({
   codeQuery,
   onCodeQueryChange,
   onCodeSubmit,
+  codeLookupPending = false,
+  codeFeedback = null,
   lines,
   totals,
   showIva,
@@ -111,15 +115,20 @@ export const PosCobroMode = ({
   draftSyncLabel,
   draftSyncStatus
 }: PosCobroModeProps) => {
+  const codeInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (codeLookupPending) return
+    codeInputRef.current?.focus()
+  }, [codeLookupPending, lines.length, codeFeedback])
+
   const handleCodeFormSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    onCodeSubmit()
-  }
-
-  const handleCodeKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter') return
-    event.preventDefault()
-    onCodeSubmit()
+    if (codeLookupPending) return
+    // Read live DOM value so barcode scanners are not one keystroke behind React state.
+    const named = event.currentTarget.elements.namedItem('cobro-code-search')
+    const liveValue = named instanceof HTMLInputElement ? named.value : codeQuery
+    onCodeSubmit(liveValue)
   }
 
   const syncTone =
@@ -170,25 +179,39 @@ export const PosCobroMode = ({
             </label>
             <div className='flex gap-2'>
               <input
+                ref={codeInputRef}
                 id='cobro-code-search'
+                name='cobro-code-search'
                 value={codeQuery}
                 onChange={event => onCodeQueryChange(event.target.value)}
-                onKeyDown={handleCodeKeyDown}
                 autoFocus
                 autoComplete='off'
                 inputMode='text'
+                disabled={codeLookupPending}
                 placeholder='Escanea o escribe el código y Enter'
                 aria-label='Buscar producto por código'
-                className='min-h-14 flex-1 rounded-2xl border border-[var(--cobro-sand-200)] bg-white px-4 text-lg text-[var(--cobro-sand-900)] outline-none placeholder:text-[var(--cobro-vanilla-700)] focus:border-[var(--cobro-apricot-500)] focus:ring-2 focus:ring-[var(--cobro-apricot-300)]/50'
+                aria-busy={codeLookupPending}
+                aria-describedby={codeFeedback ? 'cobro-code-search-feedback' : undefined}
+                className='min-h-14 flex-1 rounded-2xl border border-[var(--cobro-sand-200)] bg-white px-4 text-lg text-[var(--cobro-sand-900)] outline-none placeholder:text-[var(--cobro-vanilla-700)] focus:border-[var(--cobro-apricot-500)] focus:ring-2 focus:ring-[var(--cobro-apricot-300)]/50 disabled:opacity-70'
               />
               <button
                 type='submit'
+                disabled={codeLookupPending}
                 aria-label='Agregar producto por código'
-                className='min-h-14 min-w-14 rounded-2xl bg-[var(--cobro-emerald-500)] px-5 text-base font-bold text-[var(--cobro-emerald-950)] hover:bg-[var(--cobro-emerald-400)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cobro-emerald-300)]'
+                className='min-h-14 min-w-14 rounded-2xl bg-[var(--cobro-emerald-500)] px-5 text-base font-bold text-[var(--cobro-emerald-950)] hover:bg-[var(--cobro-emerald-400)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--cobro-emerald-300)] disabled:cursor-not-allowed disabled:opacity-50'
               >
-                +
+                {codeLookupPending ? '…' : '+'}
               </button>
             </div>
+            {codeFeedback ? (
+              <p
+                id='cobro-code-search-feedback'
+                role='alert'
+                className='rounded-xl border border-[var(--cobro-sand-400)] bg-[var(--cobro-sand-50)] px-3 py-2 text-sm text-[var(--cobro-sand-800)]'
+              >
+                {codeFeedback}
+              </p>
+            ) : null}
           </form>
 
           <div className='min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6'>

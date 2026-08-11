@@ -12,6 +12,12 @@ import {
   selectBestPromotion,
   type PromoCandidate
 } from '@/src/lib/pos/promo-engine'
+import {
+  buildPosProductCodeSearchParams,
+  formatProductCodeLookupMessage,
+  normalizeProductCodeQuery,
+  pickBestProductCodeMatch
+} from '@/src/lib/pos/product-code-lookup'
 import { calculateLineTotals, calculateSaleTotals, type IvaPolicy } from '@/src/lib/pos/sale-schema'
 import { printTicketText } from '@/src/lib/pos/print-ticket'
 import { buildSaleTicketText, type TicketSale } from '@/src/lib/pos/ticket-format'
@@ -287,6 +293,9 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
     getCobroModeServerSnapshot
   )
   const [cobroCodeQuery, setCobroCodeQuery] = useState('')
+  const [cobroCodeFeedback, setCobroCodeFeedback] = useState<string | null>(null)
+  const [cobroCodeLookupPending, setCobroCodeLookupPending] = useState(false)
+  const cobroCodeLookupInFlightRef = useRef(false)
   const [pendingRemoveIndex, setPendingRemoveIndex] = useState<number | null>(null)
   const [adminAuthSubmitting, setAdminAuthSubmitting] = useState(false)
   const [adminAuthError, setAdminAuthError] = useState<string | null>(null)
@@ -630,73 +639,74 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
 
   const handleAddToCart = (product: Product) => {
     setMessage(null)
+    setCobroCodeFeedback(null)
     const unitMode: CartItem['unitMode'] = product.supportsWeight ? 'weight' : 'piece'
-    const existing = cart.find(item => item.inventoryItemId === product.id)
-    const nextCart: CartItem[] = existing
-      ? cart.map(item =>
-          item.inventoryItemId === product.id
-            ? {
-                ...item,
-                supportsWeight: product.supportsWeight,
-                ivaRate: product.ivaRate ?? null,
-                unitMode,
-                quantityInput:
-                  unitMode === 'weight'
-                    ? String((Number(item.quantityInput || '0') + 0.25).toFixed(2))
-                    : String(parsePieceQuantity(item.quantityInput) + 1)
-              }
-            : item
-        )
-      : [
-          ...cart,
-          {
-            inventoryItemId: product.id,
-            sku: product.sku,
-            productName: product.productName,
-            unitPrice: product.unitPrice,
-            supportsWeight: product.supportsWeight,
-            ivaRate: product.ivaRate ?? null,
-            unitMode,
-            quantityInput: unitMode === 'weight' ? '0.25' : '1'
-          }
-        ]
-    setCart(nextCart)
-    queueDraftPersist(nextCart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, {
-      immediate: true
+    setCart(currentCart => {
+      const existing = currentCart.find(item => item.inventoryItemId === product.id)
+      const nextCart: CartItem[] = existing
+        ? currentCart.map(item =>
+            item.inventoryItemId === product.id
+              ? {
+                  ...item,
+                  supportsWeight: product.supportsWeight,
+                  ivaRate: product.ivaRate ?? null,
+                  unitMode,
+                  quantityInput:
+                    unitMode === 'weight'
+                      ? String((Number(item.quantityInput || '0') + 0.25).toFixed(2))
+                      : String(parsePieceQuantity(item.quantityInput) + 1)
+                }
+              : item
+          )
+        : [
+            ...currentCart,
+            {
+              inventoryItemId: product.id,
+              sku: product.sku,
+              productName: product.productName,
+              unitPrice: product.unitPrice,
+              supportsWeight: product.supportsWeight,
+              ivaRate: product.ivaRate ?? null,
+              unitMode,
+              quantityInput: unitMode === 'weight' ? '0.25' : '1'
+            }
+          ]
+      queueDraftPersist(nextCart, paymentMethod, parsedAmountReceived, creditCustomerName, creditCustomerPhone, {
+        immediate: true
+      })
+      return nextCart
     })
   }
 
-  const handleCobroCodeSubmit = async () => {
-    const code = cobroCodeQuery.trim()
+  const handleCobroCodeSubmit = async (rawCode: string) => {
+    const code = normalizeProductCodeQuery(rawCode)
     if (!code) return
+    if (cobroCodeLookupInFlightRef.current) return
+    cobroCodeLookupInFlightRef.current = true
+    setCobroCodeLookupPending(true)
+    setCobroCodeFeedback(null)
     setMessage(null)
+    // Keep controlled input in sync with the live DOM value used for lookup.
+    setCobroCodeQuery(code)
     try {
-      const searchParams = new URLSearchParams({
-        q: code,
-        searchField: 'sku',
-        sortBy: 'sku',
-        sortDirection: 'asc',
-        page: '1',
-        pageSize: '20'
-      })
+      const searchParams = buildPosProductCodeSearchParams(code)
       const response = await fetch(`/api/pos/inventory?${searchParams.toString()}`)
       const data = (await response.json()) as InventoryResponse
       if (!response.ok || !data.success) {
         throw new Error('No fue posible buscar el código')
       }
-      const normalized = code.toLowerCase()
-      const exact =
-        data.items.find(item => item.sku.toLowerCase() === normalized) ||
-        data.items.find(item => item.sku.toLowerCase().startsWith(normalized)) ||
-        data.items[0]
-      if (!exact) {
-        setMessage(`Sin producto para el código ${code}`)
+      const match = pickBestProductCodeMatch(code, data.items)
+      if (match.status !== 'found') {
+        setCobroCodeFeedback(formatProductCodeLookupMessage(code, match))
         return
       }
-      handleAddToCart(exact)
+      handleAddToCart(match.product)
       setCobroCodeQuery('')
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Error al buscar código')
+      setCobroCodeFeedback(error instanceof Error ? error.message : 'Error al buscar código')
+    } finally {
+      cobroCodeLookupInFlightRef.current = false
+      setCobroCodeLookupPending(false)
     }
   }
 
@@ -1159,10 +1169,15 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
         <PosCobroMode
           cashierUsername={cashierUsername}
           codeQuery={cobroCodeQuery}
-          onCodeQueryChange={setCobroCodeQuery}
-          onCodeSubmit={() => {
-            void handleCobroCodeSubmit()
+          onCodeQueryChange={value => {
+            setCobroCodeQuery(value)
+            if (cobroCodeFeedback) setCobroCodeFeedback(null)
           }}
+          onCodeSubmit={code => {
+            void handleCobroCodeSubmit(code)
+          }}
+          codeLookupPending={cobroCodeLookupPending}
+          codeFeedback={cobroCodeFeedback}
           lines={cart.map((item, index) => {
             const line = cartLineTotals[index]
             const lineDiscount = bestPromo?.lineDiscounts[item.inventoryItemId] || 0
