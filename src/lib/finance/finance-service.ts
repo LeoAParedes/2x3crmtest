@@ -497,7 +497,134 @@ export const listExpensesByCategoryInRange = async (
   }))
 }
 
-/** Active staff roster for “quién está en la nómina / personal”. */
+const productSearchVariants = (query: string): string[] => {
+  const base = query.trim().toLowerCase()
+  if (!base) return []
+
+  const variants = new Set<string>([base])
+  if (base.endsWith('es') && base.length > 4) {
+    variants.add(base.slice(0, -2))
+  }
+  if (base.endsWith('s') && base.length > 3) {
+    variants.add(base.slice(0, -1))
+  }
+  return Array.from(variants)
+}
+
+/** Sum completed SaleItem quantity/revenue for products matching name or SKU. */
+export const sumProductSalesByQuery = async (query: string, start: Date, end: Date) => {
+  const variants = productSearchVariants(query)
+  if (variants.length === 0) {
+    return {
+      query,
+      matchCount: 0,
+      quantity: 0,
+      quantityDisplay: '0 pz',
+      unitMode: 'piece' as const,
+      revenue: 0,
+      lineCount: 0,
+      products: [] as Array<{
+        sku: string
+        productName: string
+        quantity: number
+        quantityDisplay: string
+        unitMode: 'piece' | 'weight'
+        revenue: number
+      }>
+    }
+  }
+
+  const prisma = await getPrisma()
+  const nameFilters = variants.flatMap(variant => [
+    { productName: { contains: variant, mode: 'insensitive' as const } },
+    { sku: { contains: variant, mode: 'insensitive' as const } }
+  ])
+
+  const items = await prisma.saleItem.findMany({
+    where: {
+      sale: {
+        status: COMPLETED_SALE,
+        createdAt: { gte: start, lte: end }
+      },
+      OR: nameFilters
+    },
+    select: {
+      sku: true,
+      productName: true,
+      quantity: true,
+      lineTotal: true,
+      inventoryItem: {
+        select: {
+          category: true,
+          aisle: true,
+          productName: true
+        }
+      }
+    }
+  })
+
+  type Acc = {
+    sku: string
+    productName: string
+    quantity: number
+    revenue: number
+    unitMode: 'piece' | 'weight'
+  }
+
+  const bySku = new Map<string, Acc>()
+  for (const item of items) {
+    const unitMode = inferWeightSupport(
+      item.inventoryItem.category,
+      item.inventoryItem.aisle,
+      item.inventoryItem.productName || item.productName
+    )
+      ? 'weight'
+      : 'piece'
+    const current = bySku.get(item.sku)
+    if (!current) {
+      bySku.set(item.sku, {
+        sku: item.sku,
+        productName: item.productName,
+        quantity: item.quantity,
+        revenue: Number(item.lineTotal),
+        unitMode
+      })
+      continue
+    }
+    current.quantity += item.quantity
+    current.revenue = toMoney(current.revenue + Number(item.lineTotal))
+  }
+
+  const products = Array.from(bySku.values())
+    .sort((left, right) => right.quantity - left.quantity || right.revenue - left.revenue)
+    .map(row => ({
+      sku: row.sku,
+      productName: row.productName,
+      quantity: row.quantity,
+      quantityDisplay: formatQuantityDisplay(row.quantity, row.unitMode),
+      unitMode: row.unitMode,
+      revenue: toMoney(row.revenue)
+    }))
+
+  const primaryUnit = products[0]?.unitMode || 'piece'
+  const totalQuantity = products
+    .filter(product => product.unitMode === primaryUnit)
+    .reduce((sum, product) => sum + product.quantity, 0)
+  const totalRevenue = toMoney(products.reduce((sum, product) => sum + product.revenue, 0))
+
+  return {
+    query,
+    matchCount: products.length,
+    quantity: totalQuantity,
+    quantityDisplay: formatQuantityDisplay(totalQuantity, primaryUnit),
+    unitMode: primaryUnit,
+    revenue: totalRevenue,
+    lineCount: items.length,
+    products
+  }
+}
+
+/** Active system UserProfiles (supplemental for payroll_roster; prefer Expense.description names). */
 export const listActiveStaffRoster = async () => {
   const prisma = await getPrisma()
   const profiles = await prisma.userProfile.findMany({

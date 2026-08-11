@@ -21,7 +21,8 @@ describe('DavinciAi ERP whitelist registry', () => {
       'recent_pos_sales',
       'inventory_snapshot',
       'expenses_by_category',
-      'payroll_roster'
+      'payroll_roster',
+      'product_sales_quantity'
     ])
   })
 
@@ -30,12 +31,19 @@ describe('DavinciAi ERP whitelist registry', () => {
     expect(ERP_TOOL_IDS).toContain('inventory_snapshot')
     expect(ERP_TOOL_IDS).toContain('expenses_by_category')
     expect(ERP_TOOL_IDS).toContain('payroll_roster')
+    expect(ERP_TOOL_IDS).toContain('product_sales_quantity')
     expect(toOpenAiTools([...ERP_TOOL_IDS])).toHaveLength(ERP_TOOL_IDS.length)
   })
 
   it('auto-enables new finance comprehension tools', () => {
     expect(parseAllowedErpTools(['sales_total_today'])).toEqual(
-      expect.arrayContaining(['expenses_by_category', 'payroll_roster', 'recent_pos_sales', 'inventory_snapshot'])
+      expect.arrayContaining([
+        'expenses_by_category',
+        'payroll_roster',
+        'recent_pos_sales',
+        'inventory_snapshot',
+        'product_sales_quantity'
+      ])
     )
   })
 

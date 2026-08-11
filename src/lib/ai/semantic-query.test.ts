@@ -139,6 +139,28 @@ describe('parseDeterministicSemanticQuery', () => {
     })
   })
 
+  it('extracts product query from kilos phrasing and defaults to month', () => {
+    expect(
+      parseDeterministicSemanticQuery('Cuantos kilos de aguacate se vendieron?', fixedNow)
+    ).toMatchObject({
+      intent: 'product_sales',
+      productQuery: 'aguacate',
+      dateRange: { kind: 'month' },
+      metrics: ['quantity']
+    })
+  })
+
+  it('extracts garrafones product sales without unit noise', () => {
+    expect(
+      parseDeterministicSemanticQuery('Cuantos garrafones se vendieron?', fixedNow)
+    ).toMatchObject({
+      intent: 'product_sales',
+      productQuery: 'garrafones',
+      dateRange: { kind: 'month' },
+      metrics: ['quantity']
+    })
+  })
+
   it('extracts product query from vendimos phrasing', () => {
     expect(
       parseDeterministicSemanticQuery('Cuántos aguacates vendimos hoy', fixedNow)

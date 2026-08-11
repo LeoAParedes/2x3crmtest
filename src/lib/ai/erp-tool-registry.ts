@@ -52,6 +52,20 @@ const stockSearchInputSchema = z.object({
   query: z.string().min(1).max(120)
 })
 
+const productSalesQuantityInputSchema = z.object({
+  query: z.string().min(1).max(120),
+  period: periodSchema.default('month'),
+  rollingDays: z.number().int().min(1).max(366).optional(),
+  fromDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  toDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+})
+
 const recentSalesInputSchema = z.object({
   period: periodSchema.default('day'),
   limit: z.number().int().min(1).max(20).default(8),
@@ -117,7 +131,7 @@ const periodParamProperties = {
   }
 } as const
 
-const tzNote = `Zona ${FINANCE_TIME_ZONE}; el día inicia a las 00:00 local. Datos frescos de Postgres (Sale/SaleItem/Expense/InventoryItem/UserProfile).`
+const tzNote = `Zona ${FINANCE_TIME_ZONE}; el día inicia a las 00:00 local. Datos frescos del ERP.`
 
 export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
   sales_total_today: {
@@ -157,6 +171,23 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
       additionalProperties: false
     },
     inputSchema: stockSearchInputSchema
+  },
+  product_sales_quantity: {
+    id: 'product_sales_quantity',
+    description: `Cantidad vendida de un producto por nombre/SKU (SaleItem → Sale completed). Devuelve kg para peso/granel y pz para piezas (ej. aguacate, garrafones). Default periodo=month. ${tzNote}`,
+    parameters: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Nombre o SKU del producto (ej. aguacate, garrafón)'
+        },
+        ...periodParamProperties
+      },
+      required: ['query', 'period'],
+      additionalProperties: false
+    },
+    inputSchema: productSalesQuantityInputSchema
   },
   top_product_period: {
     id: 'top_product_period',
@@ -277,7 +308,7 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
   },
   payroll_roster: {
     id: 'payroll_roster',
-    description: `Quién está en la nómina: (1) personal activo UserProfile isActive; (2) pagos Expense category=nomina del periodo con montos/descripciones. ${tzNote}`,
+    description: `Quién está en la nómina: prioriza nombres humanos extraídos de Expense.description (categoría nomina) del periodo; deduplica personas. UserProfile activos solo como complemento. Periodos: month (default / este mes), last_month, rolling 31 (último mes). ${tzNote}`,
     parameters: {
       type: 'object',
       properties: { ...periodParamProperties },

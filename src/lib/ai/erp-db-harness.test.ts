@@ -80,6 +80,33 @@ describe('erp-db-harness', () => {
     expect(picks[0]?.args).toMatchObject({ category: 'luz', period: 'year' })
   })
 
+  it('selects product_sales_quantity for kilos de aguacate vendidos', () => {
+    const picks = selectErpToolsForQuestion(
+      'Cuantos kilos de aguacate se vendieron?',
+      DEFAULT_ALLOWED_ERP_TOOLS
+    )
+    expect(picks.map(pick => pick.toolId)).toEqual(['product_sales_quantity'])
+    expect(picks[0]?.args).toMatchObject({ query: 'aguacate', period: 'month' })
+  })
+
+  it('selects product_sales_quantity for garrafones vendidos', () => {
+    const picks = selectErpToolsForQuestion(
+      'Cuantos garrafones se vendieron?',
+      DEFAULT_ALLOWED_ERP_TOOLS
+    )
+    expect(picks.map(pick => pick.toolId)).toEqual(['product_sales_quantity'])
+    expect(picks[0]?.args).toMatchObject({ query: 'garrafones', period: 'month' })
+  })
+
+  it('selects expenses_by_category for agua este mes', () => {
+    const picks = selectErpToolsForQuestion(
+      'Cuanto pague de agua este mes?',
+      DEFAULT_ALLOWED_ERP_TOOLS
+    )
+    expect(picks[0]?.toolId).toBe('expenses_by_category')
+    expect(picks[0]?.args).toMatchObject({ category: 'agua', period: 'month' })
+  })
+
   it('does not select sales tools for clock questions with hoy', () => {
     const picks = selectErpToolsForQuestion('Que dia y hora es hoy', DEFAULT_ALLOWED_ERP_TOOLS)
     expect(picks).toEqual([])
@@ -110,7 +137,7 @@ describe('erp-db-harness', () => {
     ])
     expect(reply).toContain('Ventas hoy')
     expect(reply).toContain('SALE-1')
-    expect(reply).toContain('Supabase Postgres')
+    expect(reply).not.toMatch(/Fuente|Supabase|Postgres/i)
   })
 
   it('formats expenses_by_category and payroll facts', () => {
@@ -129,20 +156,49 @@ describe('erp-db-harness', () => {
         toolId: 'payroll_roster',
         ok: true,
         facts: {
+          periodLabel: 'este mes',
+          payrollPersonCount: 2,
+          payrollPersonNames: ['Juan Pérez', 'María'],
+          payrollPeople: [
+            { name: 'Juan Pérez', totalAmount: 8000, paymentCount: 2 },
+            { name: 'María', totalAmount: 3500, paymentCount: 1 }
+          ],
+          payrollExpenseTotal: 11500,
+          payrollExpenseCount: 3,
           activeStaffCount: 2,
           activeStaff: [
             { username: 'ana', role: 'cashier' },
             { username: 'admin', role: 'admin' }
-          ],
-          periodLabel: 'este mes',
-          payrollExpenseTotal: 8000,
-          payrollExpenseCount: 1
+          ]
         }
       }
     ])
     expect(reply).toContain('Luz')
     expect(reply).toContain('1200.50')
-    expect(reply).toContain('ana')
-    expect(reply).toContain('8000.00')
+    expect(reply).toContain('Juan Pérez')
+    expect(reply).toContain('María')
+    expect(reply).toContain('11500.00')
+    expect(reply).not.toMatch(/Fuente|Supabase|Postgres|secundario|UserProfile|departamentos|módulos/i)
+    expect(reply).not.toContain('ana')
+  })
+
+  it('formats product_sales_quantity without source footer', () => {
+    const reply = formatDeterministicErpReply([
+      {
+        toolId: 'product_sales_quantity',
+        ok: true,
+        facts: {
+          query: 'aguacate',
+          productName: 'Aguacate Hass',
+          periodLabel: 'este mes',
+          matchCount: 1,
+          quantityDisplay: '12.500 kg',
+          revenue: 450
+        }
+      }
+    ])
+    expect(reply).toContain('12.500 kg')
+    expect(reply).toContain('Aguacate Hass')
+    expect(reply).not.toMatch(/Fuente|Supabase|Postgres/i)
   })
 })

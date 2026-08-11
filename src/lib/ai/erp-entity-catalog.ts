@@ -3,28 +3,28 @@
  * Keep short: injected every turn; tools remain the source of truth for numbers.
  */
 export const ERP_ENTITY_KNOWLEDGE = `
-MAPA DE ENTIDADES (qué / cuándo / cómo / por qué):
+MAPA INTERNO DE ENTIDADES (solo para razonar y elegir tools; NUNCA listar esto al usuario):
 - Sale + SaleItem: ingresos POS. Qué=tickets cobrados; Cuándo=createdAt; Cómo=pago cash/card/credit; Por qué=venta al cliente. Solo status=completed cuenta.
 - Expense (pasivo corriente / servicios): egresos. Categorías: renta, luz, agua, gas, proveedores, nomina, mantenimiento, transporte, otros. kind=fixed|operating. Cuándo=spentAt.
 - Ganancia (P&L): ingresos(Sale.total) − egresos(Expense.amount) en el mismo periodo. No inventes margen de inventario.
-- UserProfile: personal del sistema (admin/cashier, isActive). “¿Quién está en la nómina?” → personal activo + pagos Expense category=nomina.
+- UserProfile: personal del sistema (admin/cashier, isActive). “¿Quién está en la nómina?” → nombres en Expense.description (categoría nomina) del periodo; UserProfile solo complemento.
 - CashSession: turnos de caja (openingFloat, ventas por método, corte). Relaciona Sale.cashSessionId.
 - InventoryItem: stock/precios/SKU. SaleItem → InventoryItem.
 - Purchase + Supplier: compras a proveedores (entrada de mercancía; distinto de Expense.proveedores).
 - Promotion (+ productos/bundles): descuentos aplicados en SaleItem.promotionId.
 - Customer / FinanceAccount / credits: clientes a crédito (Sale.paymentMethod=credit).
 
-RELACIONES CLAVE:
+RELACIONES CLAVE (internas):
 Sale → SaleItem → InventoryItem | Promotion
 Sale → CashSession → UserProfile (cajero)
-Expense.category=nomina ↔ personal (UserProfile) vía descripción/periodo, no FK
+Expense.category=nomina: el nombre de la persona vive en description (ej. “Nómina Juan Pérez”); no hay FK a Employee/UserProfile
 Expense categorías de servicio (luz/agua/gas/renta) = pasivos/servicios del local
 
-REGLA DE RESPUESTA 4W (cuando aplique):
-1) Qué: métrica o entidad (ganancia, egreso de luz, personal activo).
-2) Cuándo: periodo interpretado (este año, últimos 31 días, mes pasado) + zona.
-3) Cómo: fórmula o desglose breve (ingresos − egresos; suma de Expense.category).
-4) Por qué: causa de negocio si los hechos lo permiten (más egresos que ventas, sin tickets, etc.); si no hay causa en tools, no especules.
+REGLA DE RESPUESTA 4W (cuando aplique; sin catálogos ni pies de fuente):
+1) Qué: métrica o entidad (ganancia, egreso de luz, personal en nómina).
+2) Cuándo: periodo interpretado en lenguaje natural (este año, últimos 31 días, mes pasado).
+3) Cómo: fórmula o desglose breve solo si aporta (ingresos − egresos).
+4) Por qué: causa de negocio si los hechos lo permiten; si no hay causa en tools, no especules.
 `.trim()
 
 export const EXPENSE_CATEGORY_ALIASES: Record<string, string> = {

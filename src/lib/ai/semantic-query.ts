@@ -125,7 +125,7 @@ const parseDateRange = (message: string, now: Date): SemanticDateRange => {
     return { kind: 'explicit_date', date: explicit.isoDate }
   }
 
-  return { kind: 'week' }
+  return { kind: 'month' }
 }
 
 const stripDatePhrases = (text: string): string => {
@@ -134,7 +134,11 @@ const stripDatePhrases = (text: string): string => {
   stripped = stripped.replace(/\bultim[oa]s?\s+\d+\s+dias\b/g, ' ')
   stripped = stripped.replace(/\b(la\s+)?semana\s+pasada\b/g, ' ')
   stripped = stripped.replace(/\besta\s+semana\b/g, ' ')
+  stripped = stripped.replace(/\bla\s+semana\b/g, ' ')
+  stripped = stripped.replace(/\bsemana\b/g, ' ')
   stripped = stripped.replace(/\beste\s+mes\b/g, ' ')
+  stripped = stripped.replace(/\bel\s+mes\b/g, ' ')
+  stripped = stripped.replace(/\bmes\b/g, ' ')
   stripped = stripped.replace(/\bhoy\b/g, ' ')
   stripped = stripped.replace(/\bayer\b/g, ' ')
   stripped = stripped.replace(
@@ -169,7 +173,12 @@ const extractProductQuery = (message: string): string => {
     /\binventario\b/g,
     /\bhay\b/g,
     /\bde\s+vendio\b/g,
-    /\by\s+cuanto\b/g
+    /\by\s+cuanto\b/g,
+    /\bkilos?\b/g,
+    /\bkg\b/g,
+    /\bpiezas?\b/g,
+    /\bpz\b/g,
+    /\bunidades?\b/g
   ]
 
   for (const pattern of noisePatterns) {
@@ -178,7 +187,12 @@ const extractProductQuery = (message: string): string => {
 
   text = text.replace(/\b(el|la|los|las|de|del|un|una|unos|unas|se|y|en|al|a)\b/g, ' ')
 
-  return text.replace(/\s+/g, ' ').trim()
+  const cleaned = text.replace(/\s+/g, ' ').trim()
+  if (/^(semana|mes|dia|dias|ano|periodo|hoy|ayer)$/i.test(cleaned)) {
+    return ''
+  }
+
+  return cleaned
 }
 
 const resolveIntent = (text: string, productQuery: string): SemanticIntent => {

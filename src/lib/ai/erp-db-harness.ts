@@ -5,6 +5,7 @@ import { executeErpTool, type ErpToolFactResult } from '@/src/lib/ai/erp-tool-ex
 import { type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
 import { parseAiPeriodFromText, toToolPeriodArgs } from '@/src/lib/ai/ai-date-range'
 import { resolveExpenseCategoryFromText } from '@/src/lib/ai/erp-entity-catalog'
+import { parseDeterministicSemanticQuery, type SemanticDateRange } from '@/src/lib/ai/semantic-query'
 import { getPrisma } from '@/src/lib/db/prisma'
 import {
   FINANCE_TIME_ZONE,
@@ -199,6 +200,64 @@ export const stampErpDbProvenance = <T extends Record<string, unknown>>(facts: T
   }
 }
 
+const semanticDateRangeToPeriodArgs = (
+  dateRange: SemanticDateRange
+): { period: string; rollingDays?: number; fromDate?: string; toDate?: string } => {
+  if (dateRange.kind === 'today') return { period: 'day' }
+  if (dateRange.kind === 'week') return { period: 'week' }
+  if (dateRange.kind === 'month') return { period: 'month' }
+  if (dateRange.kind === 'rolling_days') {
+    return { period: 'rolling', rollingDays: dateRange.days }
+  }
+  if (dateRange.kind === 'yesterday' || dateRange.kind === 'explicit_date') {
+    const iso =
+      dateRange.kind === 'yesterday'
+        ? (() => {
+            const parts = getTimeZoneParts(new Date(), FINANCE_TIME_ZONE)
+            const yesterday = zonedWallTimeToUtc(
+              parts.year,
+              parts.month,
+              parts.day - 1,
+              12,
+              0,
+              0,
+              FINANCE_TIME_ZONE
+            )
+            const y = getTimeZoneParts(yesterday, FINANCE_TIME_ZONE)
+            return `${y.year}-${String(y.month).padStart(2, '0')}-${String(y.day).padStart(2, '0')}`
+          })()
+        : dateRange.date
+    return { period: 'day', fromDate: iso, toDate: iso }
+  }
+  if (dateRange.kind === 'previous_week') {
+    return { period: 'rolling', rollingDays: 7 }
+  }
+  return { period: 'month' }
+}
+
+const isProductSalesSemantic = (
+  message: string
+): { productQuery: string; dateRange: SemanticDateRange; wantsStock: boolean } | null => {
+  const semantic = parseDeterministicSemanticQuery(message)
+  if (!semantic) return null
+  if (!('productQuery' in semantic) || !semantic.productQuery) return null
+  if (
+    semantic.intent !== 'product_sales' &&
+    semantic.intent !== 'product_sales_and_stock' &&
+    semantic.intent !== 'product_stock'
+  ) {
+    return null
+  }
+  return {
+    productQuery: semantic.productQuery,
+    dateRange: semantic.dateRange,
+    wantsStock:
+      semantic.intent === 'product_stock' ||
+      semantic.intent === 'product_sales_and_stock' ||
+      semantic.metrics.includes('stock')
+  }
+}
+
 export const queryCompletedSalesForLocalDate = async (isoDate: string) => {
   const { start, end } = getCustomBounds(isoDate, isoDate)
   const prisma = await getPrisma()
@@ -237,6 +296,26 @@ export const selectErpToolsForQuestion = (
   // Clock/social phrasing must never map to sales tools because of bare "hoy".
   if (!hasErpBusinessIntent(message) || isNonBusinessClockQuestion(text)) {
     return picks
+  }
+
+  const productSemantic = isProductSalesSemantic(message)
+  if (productSemantic) {
+    const periodArgs = semanticDateRangeToPeriodArgs(productSemantic.dateRange)
+    if (
+      productSemantic.wantsStock &&
+      !/\b(vendieron?|vendio|vendimos|ventas?)\b/.test(text)
+    ) {
+      allow('stock_by_product_search', { query: productSemantic.productQuery })
+      return picks.slice(0, 4)
+    }
+    allow('product_sales_quantity', {
+      query: productSemantic.productQuery,
+      ...periodArgs
+    })
+    if (productSemantic.wantsStock) {
+      allow('stock_by_product_search', { query: productSemantic.productQuery })
+    }
+    return picks.slice(0, 4)
   }
 
   if (parseBusinessDateMention(message)) {
@@ -337,7 +416,7 @@ const money = (value: unknown) => {
 export const formatDeterministicErpReply = (results: ErpToolFactResult[]): string => {
   const okResults = results.filter(result => result.ok)
   if (okResults.length === 0) {
-    return 'No pude obtener datos frescos de la base de datos (Supabase/Postgres). Intenta de nuevo en un momento.'
+    return 'No pude obtener datos frescos en este momento. Intenta de nuevo en un momento.'
   }
 
   const lines: string[] = []
@@ -346,13 +425,13 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
     const facts = result.facts
     if (result.toolId === 'sales_total_on_date') {
       lines.push(
-        `Ventas ${String(facts.localDate || facts.label || 'fecha')}: $${money(facts.totalSales) ?? '0.00'} | tickets: ${String(facts.ticketCount ?? 0)} (${FINANCE_TIME_ZONE})`
+        `Ventas ${String(facts.localDate || facts.label || 'fecha')}: $${money(facts.totalSales) ?? '0.00'} | tickets: ${String(facts.ticketCount ?? 0)}`
       )
       continue
     }
     if (result.toolId === 'sales_total_today') {
       lines.push(
-        `Ventas hoy (${FINANCE_TIME_ZONE}): $${money(facts.totalSales) ?? '0.00'} | tickets: ${String(facts.ticketCount ?? 0)}`
+        `Ventas hoy: $${money(facts.totalSales) ?? '0.00'} | tickets: ${String(facts.ticketCount ?? 0)}`
       )
       const last = facts.lastCompletedSale as
         | { saleNumber?: string; total?: number; createdAt?: string }
@@ -360,7 +439,7 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
         | undefined
       if (facts.ticketCount === 0 && last?.saleNumber) {
         lines.push(
-          `Ultima venta completed fuera de hoy: ${last.saleNumber} $${money(last.total) ?? '?'} (${last.createdAt || 'N/A'})`
+          `Última venta fuera de hoy: ${last.saleNumber} $${money(last.total) ?? '?'} (${last.createdAt || 'N/A'})`
         )
       }
       continue
@@ -371,9 +450,23 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
       )
       continue
     }
+    if (result.toolId === 'product_sales_quantity') {
+      const period = String(facts.periodLabel || facts.period || '')
+      const productName = String(facts.productName || facts.query || 'producto')
+      const quantityDisplay = String(facts.quantityDisplay || '0')
+      if (!facts.matchCount || Number(facts.matchCount) === 0) {
+        lines.push(`No registré ventas de ${String(facts.query || productName)} en ${period}`)
+      } else {
+        lines.push(`Se vendieron ${quantityDisplay} de ${productName} (${period})`)
+        if (facts.revenue != null) {
+          lines.push(`Ingresos: $${money(facts.revenue) ?? '0.00'}`)
+        }
+      }
+      continue
+    }
     if (result.toolId === 'cash_flow_period') {
       lines.push(
-        `P&L ${String(facts.periodLabel || facts.period)}: ingresos $${money(facts.ingresos) ?? '0.00'} - egresos $${money(facts.egresos) ?? '0.00'} = ganancia $${money(facts.ganancia) ?? '0.00'}`
+        `Ganancia ${String(facts.periodLabel || facts.period)}: ingresos $${money(facts.ingresos) ?? '0.00'} − egresos $${money(facts.egresos) ?? '0.00'} = $${money(facts.ganancia) ?? '0.00'}`
       )
       continue
     }
@@ -390,19 +483,29 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
       continue
     }
     if (result.toolId === 'payroll_roster') {
-      const staff = Array.isArray(facts.activeStaff) ? facts.activeStaff : []
-      const names = staff
-        .slice(0, 8)
+      const period = String(facts.periodLabel || facts.period || '')
+      const people = Array.isArray(facts.payrollPeople) ? facts.payrollPeople : []
+      const namesFromField = Array.isArray(facts.payrollPersonNames)
+        ? facts.payrollPersonNames.map(String).filter(Boolean)
+        : []
+      const namesFromPeople = people
         .map(row => {
-          const person = row as { username?: string; role?: string }
-          return `${person.username || '?'} (${person.role || '?'})`
+          const person = row as { name?: string }
+          return typeof person.name === 'string' ? person.name.trim() : ''
         })
-        .join(', ')
+        .filter(Boolean)
+      const personNames = (namesFromField.length > 0 ? namesFromField : namesFromPeople).slice(0, 12)
+
+      if (personNames.length > 0) {
+        lines.push(
+          `En la nómina ${period}: ${personNames.join(', ')} (${String(facts.payrollPersonCount ?? personNames.length)} persona(s))`
+        )
+      } else {
+        lines.push(`En la nómina ${period}: sin nombres en descripciones de gastos nómina`)
+      }
+
       lines.push(
-        `Nómina / personal activo: ${String(facts.activeStaffCount ?? 0)} — ${names || 'sin perfiles activos'}`
-      )
-      lines.push(
-        `Pagos nómina ${String(facts.periodLabel || facts.period)}: $${money(facts.payrollExpenseTotal) ?? '0.00'} (${String(facts.payrollExpenseCount ?? 0)} registros)`
+        `Pagos de nómina ${period}: $${money(facts.payrollExpenseTotal) ?? '0.00'} (${String(facts.payrollExpenseCount ?? 0)} registros)`
       )
       continue
     }
@@ -419,7 +522,7 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
     if (result.toolId === 'recent_pos_sales') {
       const sales = Array.isArray(facts.sales) ? facts.sales : []
       if (sales.length === 0) {
-        lines.push(`Ventas POS recientes (${String(facts.period)}): ninguna completed en el rango`)
+        lines.push(`Ventas recientes (${String(facts.period)}): ninguna en el rango`)
       } else {
         const sample = sales
           .slice(0, 3)
@@ -428,7 +531,7 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
             return `${sale.saleNumber || '?'} $${money(sale.total) ?? '?'}`
           })
           .join(' | ')
-        lines.push(`Ventas POS recientes: ${sample}`)
+        lines.push(`Ventas recientes: ${sample}`)
       }
       continue
     }
@@ -438,7 +541,7 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
         | null
         | undefined
       if (!top) {
-        lines.push(`Top productos (${String(facts.period)}): sin ventas completed en el rango`)
+        lines.push(`Top productos (${String(facts.period)}): sin ventas en el rango`)
       } else {
         lines.push(
           `Top producto (${String(facts.period)}): ${top.productName || '?'} ${top.quantityDisplay || ''} | $${money(top.revenue) ?? '?'}`
@@ -447,7 +550,6 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
     }
   }
 
-  lines.push('Fuente: Supabase Postgres (Sale/Expense/InventoryItem).')
   return lines.join('\n')
 }
 
@@ -455,8 +557,9 @@ export const runDeterministicErpDbReply = async (
   message: string,
   allowedTools: ErpToolId[]
 ): Promise<{ reply: string; usedTools: string[]; results: ErpToolFactResult[] }> => {
+  const productSemantic = isProductSalesSemantic(message)
   const mentioned = parseBusinessDateMention(message)
-  if (mentioned) {
+  if (mentioned && !productSemantic) {
     const facts = await queryCompletedSalesForLocalDate(mentioned.isoDate)
     const result = {
       toolId: 'sales_total_on_date' as const,

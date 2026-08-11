@@ -6,7 +6,8 @@ import {
   listActiveStaffRoster,
   listExpensesByCategoryInRange,
   listRecentPosSales,
-  sumExpensesByCategoryInRange
+  sumExpensesByCategoryInRange,
+  sumProductSalesByQuery
 } from '@/src/lib/finance/finance-service'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { FINANCE_TIME_ZONE } from '@/src/lib/finance/period'
@@ -15,6 +16,10 @@ import { resolveAiDateRangeFromArgs } from '@/src/lib/ai/ai-date-range'
 import { stampErpDbProvenance } from '@/src/lib/ai/erp-db-harness'
 import { isErpToolId, type ErpFactToolId, type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
 import { ERP_TOOL_REGISTRY } from '@/src/lib/ai/erp-tool-registry'
+import {
+  aggregatePayrollPeopleFromExpenses,
+  extractPayrollPersonName
+} from '@/src/lib/ai/payroll-names'
 
 export type ErpToolFactResult =
   | {
@@ -95,6 +100,33 @@ const executeStockByProductSearch = async (args: Record<string, unknown>) => {
       aisle: item.aisle
     })),
     source: 'InventoryItem'
+  }
+}
+
+const executeProductSalesQuantity = async (args: Record<string, unknown>) => {
+  const parsed = ERP_TOOL_REGISTRY.product_sales_quantity.inputSchema.parse(args)
+  const range = resolveAiDateRangeFromArgs(parsed, 'month')
+  const sales = await sumProductSalesByQuery(String(parsed.query), range.start, range.end)
+  const top = sales.products[0] || null
+
+  return {
+    currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
+    query: sales.query,
+    period: range.kind,
+    periodLabel: range.label,
+    rangeStart: range.start.toISOString(),
+    rangeEnd: range.end.toISOString(),
+    matchCount: sales.matchCount,
+    quantity: sales.quantity,
+    quantityDisplay: sales.quantityDisplay,
+    unitMode: sales.unitMode,
+    revenue: sales.revenue,
+    lineCount: sales.lineCount,
+    productName: top?.productName || null,
+    sku: top?.sku || null,
+    products: sales.products.slice(0, 8),
+    source: 'SaleItem→Sale.completed'
   }
 }
 
@@ -282,12 +314,22 @@ const executeExpensesByCategory = async (args: Record<string, unknown>) => {
 }
 
 const executePayrollRoster = async (args: Record<string, unknown>) => {
-  const range = resolveAiDateRangeFromArgs(args, 'month')
+  const parsed = ERP_TOOL_REGISTRY.payroll_roster.inputSchema.parse(args)
+  const range = resolveAiDateRangeFromArgs(parsed, 'month')
   const [staff, payrollPayments] = await Promise.all([
     listActiveStaffRoster(),
-    listExpensesByCategoryInRange('nomina', range.start, range.end, 30)
+    listExpensesByCategoryInRange('nomina', range.start, range.end, 50)
   ])
   const payrollTotal = payrollPayments.reduce((sum, row) => sum + row.amount, 0)
+  const mappedPayments = payrollPayments.map(row => ({
+    description: row.description,
+    amount: row.amount,
+    spentAt: row.spentAt,
+    createdByUsername: row.createdByUsername,
+    personName: extractPayrollPersonName(row.description)
+  }))
+  const payrollPeople = aggregatePayrollPeopleFromExpenses(mappedPayments)
+  const payrollPersonNames = payrollPeople.map(person => person.name)
 
   return {
     currency: 'MXN',
@@ -296,26 +338,32 @@ const executePayrollRoster = async (args: Record<string, unknown>) => {
     periodLabel: range.label,
     rangeStart: range.start.toISOString(),
     rangeEnd: range.end.toISOString(),
+    /** Primary answer for “quién está en la nómina”: names from Expense.description. */
+    payrollPersonCount: payrollPeople.length,
+    payrollPersonNames,
+    payrollPeople: payrollPeople.map(person => ({
+      name: person.name,
+      totalAmount: person.totalAmount,
+      paymentCount: person.paymentCount,
+      lastSpentAt: person.lastSpentAt
+    })),
+    payrollExpenseCount: payrollPayments.length,
+    payrollExpenseTotal: Number(payrollTotal.toFixed(2)),
+    payrollPayments: mappedPayments,
+    /** Supplemental: system UserProfile usernames (not the preferred spoken roster). */
     activeStaffCount: staff.length,
     activeStaff: staff.map(person => ({
       username: person.username,
       role: person.role,
       cashierGate: person.cashierGate
     })),
-    payrollExpenseCount: payrollPayments.length,
-    payrollExpenseTotal: Number(payrollTotal.toFixed(2)),
-    payrollPayments: payrollPayments.map(row => ({
-      description: row.description,
-      amount: row.amount,
-      spentAt: row.spentAt,
-      createdByUsername: row.createdByUsername
-    })),
-    que: 'Personal activo del sistema + pagos registrados en categoría nómina',
+    que: 'Personas en nómina según nombres en Expense.description (categoría nomina)',
     cuando: range.label,
-    como: 'UserProfile.isActive=true para roster; Expense.category=nomina para pagos',
+    como:
+      'Expense.category=nomina en el periodo; se extrae el nombre humano de description y se deduplica. UserProfile.isActive es solo complemento.',
     note:
-      'No hay entidad Employee separada: la nómina operativa son perfiles activos; los montos pagados viven en Expense categoría nomina.',
-    source: 'UserProfile + Expense.category=nomina'
+      'Para “quién está en la nómina” prioriza payrollPersonNames / payrollPeople (nombres en la descripción del gasto). activeStaff (UserProfile) es secundario.',
+    source: 'Expense.category=nomina (description) + UserProfile (secundario)'
   }
 }
 
@@ -323,6 +371,7 @@ const executors: Record<ErpToolId, (args: Record<string, unknown>) => Promise<Re
   sales_total_today: async () => executeSalesTotalToday(),
   sales_total_period: executeSalesTotalPeriod,
   stock_by_product_search: executeStockByProductSearch,
+  product_sales_quantity: executeProductSalesQuantity,
   top_product_period: executeTopProductPeriod,
   cash_flow_period: executeCashFlowPeriod,
   low_stock_count: async () => executeLowStockCount(),
