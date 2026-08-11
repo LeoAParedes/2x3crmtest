@@ -9,7 +9,8 @@ export async function GET() {
     timestamp: new Date().toISOString(),
     channels: {
       webChat: true,
-      whatsappMeta: hasMetaProviderConfig
+      whatsappMeta: hasMetaProviderConfig,
+      metaAppSecretConfigured: Boolean(env.metaAppSecret)
     },
     ai: {
       mastraConfigured: true,

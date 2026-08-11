@@ -127,9 +127,23 @@ Pregunta del usuario: ${message.message}
       runMode: 'mastra'
     }
   } catch (error) {
-    appLog('warn', 'DavinciAi ERP harness failed', {
-      reason: error instanceof Error ? error.message : 'unknown'
-    })
+    const reason = error instanceof Error ? error.message : 'unknown'
+    // #region agent log
+    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+      body: JSON.stringify({
+        sessionId: '449600',
+        runId: 'whatsapp-webhook',
+        hypothesisId: 'E',
+        location: 'davinci-agent.ts:runDavinciErpAgent',
+        message: 'DavinciAi OpenAI call failed',
+        data: { reason, modelId: settings.modelId },
+        timestamp: Date.now()
+      })
+    }).catch(() => {})
+    // #endregion
+    appLog('warn', 'DavinciAi ERP harness failed', { reason, modelId: settings.modelId })
     return null
   }
 }
