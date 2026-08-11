@@ -19,8 +19,28 @@ export const createSaleSchema = z
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>
 
-export const calculateSaleTotals = (items: Array<{ quantity: number; unitPrice: number }>) => {
-  const subtotal = Number(items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0).toFixed(2))
+/** Weight quantities are stored in grams; billable qty is kilograms. */
+export const toBillableQuantity = (quantity: number, unitMode: 'piece' | 'weight' = 'piece') => {
+  if (unitMode === 'weight') {
+    return Number((quantity / 1000).toFixed(3))
+  }
+  return quantity
+}
+
+export const calculateLineTotal = (
+  quantity: number,
+  unitPrice: number,
+  unitMode: 'piece' | 'weight' = 'piece'
+) => Number((unitPrice * toBillableQuantity(quantity, unitMode)).toFixed(2))
+
+export const calculateSaleTotals = (
+  items: Array<{ quantity: number; unitPrice: number; unitMode?: 'piece' | 'weight' }>
+) => {
+  const subtotal = Number(
+    items
+      .reduce((sum, item) => sum + calculateLineTotal(item.quantity, item.unitPrice, item.unitMode), 0)
+      .toFixed(2)
+  )
   const tax = 0
   return {
     subtotal,

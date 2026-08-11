@@ -33,7 +33,12 @@ export async function POST(request: Request) {
     }
     const code = error instanceof Error ? error.message : 'SALE_CREATE_FAILED'
     const status = ['INSUFFICIENT_STOCK', 'INSUFFICIENT_PAYMENT'].includes(code) ? 409 : 503
-    return jsonError('No fue posible completar la venta', status, {
+    const messageByCode: Record<string, string> = {
+      INSUFFICIENT_STOCK: 'Stock insuficiente para uno o más productos del carrito',
+      INSUFFICIENT_PAYMENT: 'El monto recibido es insuficiente para el total de la venta',
+      INVENTORY_ITEM_NOT_FOUND: 'Uno o más productos del carrito ya no están disponibles'
+    }
+    return jsonError(messageByCode[code] || 'No fue posible completar la venta', status, {
       code,
       requestId: access.context.requestId
     })

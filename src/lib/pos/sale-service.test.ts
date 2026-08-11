@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { calculateSaleTotals } from '@/src/lib/pos/sale-schema'
 import { normalizeSaleItems, validateCashPayment } from '@/src/lib/pos/sale-service'
 
 describe('sale service rules', () => {
@@ -20,5 +21,14 @@ describe('sale service rules', () => {
 
   it('rejects cash received below total', () => {
     expect(() => validateCashPayment('cash', 20, 19.99)).toThrow('INSUFFICIENT_PAYMENT')
+  })
+
+  it('accepts cash payment for mixed piece and weight carts', () => {
+    const totals = calculateSaleTotals([
+      { quantity: 29, unitPrice: 16.5, unitMode: 'piece' },
+      { quantity: 2500, unitPrice: 89, unitMode: 'weight' }
+    ])
+    expect(totals.total).toBe(701)
+    expect(() => validateCashPayment('cash', totals.total, 702)).not.toThrow()
   })
 })

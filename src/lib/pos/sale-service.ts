@@ -1,7 +1,12 @@
 import crypto from 'node:crypto'
 
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
-import { calculateSaleTotals, createSaleSchema, type CreateSaleInput } from '@/src/lib/pos/sale-schema'
+import {
+  calculateLineTotal,
+  calculateSaleTotals,
+  createSaleSchema,
+  type CreateSaleInput
+} from '@/src/lib/pos/sale-schema'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 
@@ -57,11 +62,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         sku: product.sku,
         productName: product.productName,
         unitPrice: Number(product.unitPrice),
-        lineTotal: Number(
-          (
-            Number(product.unitPrice) * (item.unitMode === 'weight' ? Number((item.quantity / 1000).toFixed(3)) : item.quantity)
-          ).toFixed(2)
-        )
+        lineTotal: calculateLineTotal(item.quantity, Number(product.unitPrice), item.unitMode)
       }
     })
     const totals = calculateSaleTotals(lines)

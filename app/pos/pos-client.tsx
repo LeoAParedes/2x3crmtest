@@ -72,6 +72,16 @@ type SaleResponse = {
     }>
   }
   message?: string
+  error?: {
+    code?: string
+    message?: string
+  }
+}
+
+export const resolveSaleErrorMessage = (data: Pick<SaleResponse, 'message' | 'error'>) => {
+  const fromBody = data.message?.trim() || data.error?.message?.trim()
+  if (fromBody) return fromBody
+  return 'No fue posible registrar la venta'
 }
 
 type PosDraft = {
@@ -456,7 +466,7 @@ export const PosClient = ({ cashierUsername }: PosClientProps) => {
       })
       const data = (await response.json()) as SaleResponse
       if (!response.ok || !data.success || !data.sale) {
-        throw new Error(data.message || 'No fue posible registrar la venta')
+        throw new Error(resolveSaleErrorMessage(data))
       }
       setTicket(data.sale)
       setIsTicketModalOpen(true)
