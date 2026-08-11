@@ -65,6 +65,8 @@ export async function POST(request: Request) {
     return jsonError('Invalid Twilio webhook payload', 400)
   }
 
+  const deliveryStatusUrl = new URL('/api/whatsapp/twilio/status', request.url).toString()
+
   try {
     if (await wasEventProcessed(inbound.messageSid)) {
       appLog('info', 'Twilio webhook duplicate ignored', {
@@ -81,7 +83,10 @@ export async function POST(request: Request) {
     const rate = consumeRateLimit(`wa-twilio:${normalized.sourcePhone}`, 40, 60_000)
     if (!rate.allowed) {
       return new Response(
-        buildTwilioMessagingTwiml('Hemos recibido muchos mensajes seguidos. Intenta nuevamente en un minuto.'),
+        buildTwilioMessagingTwiml(
+          'Hemos recibido muchos mensajes seguidos. Intenta nuevamente en un minuto.',
+          deliveryStatusUrl
+        ),
         {
           status: 200,
           headers: { 'Content-Type': 'text/xml; charset=utf-8' }
@@ -141,7 +146,7 @@ export async function POST(request: Request) {
     }).catch(() => {})
     // #endregion
 
-    return new Response(buildTwilioMessagingTwiml(replyText), {
+    return new Response(buildTwilioMessagingTwiml(replyText, deliveryStatusUrl), {
       status: 200,
       headers: { 'Content-Type': 'text/xml; charset=utf-8' }
     })
@@ -151,7 +156,10 @@ export async function POST(request: Request) {
       elapsedMs: Date.now() - startedAt
     })
     return new Response(
-      buildTwilioMessagingTwiml('No pude procesar tu mensaje en este momento. Intenta de nuevo.'),
+      buildTwilioMessagingTwiml(
+        'No pude procesar tu mensaje en este momento. Intenta de nuevo.',
+        deliveryStatusUrl
+      ),
       {
         status: 200,
         headers: { 'Content-Type': 'text/xml; charset=utf-8' }

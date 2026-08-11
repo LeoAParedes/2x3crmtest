@@ -34,4 +34,16 @@ describe('twilio signature validation', () => {
       })
     ).toBe(true)
   })
+
+  it('includes a delivery callback in TwiML replies', async () => {
+    const { buildTwilioMessagingTwiml } = await import('@/src/lib/whatsapp/twilio')
+
+    const xml = buildTwilioMessagingTwiml(
+      'Hola',
+      'https://2x3crmtest.vercel.app/api/whatsapp/twilio/status'
+    )
+
+    expect(xml).toContain('action="https://2x3crmtest.vercel.app/api/whatsapp/twilio/status"')
+    expect(xml).toContain('statusCallback="https://2x3crmtest.vercel.app/api/whatsapp/twilio/status"')
+  })
 })

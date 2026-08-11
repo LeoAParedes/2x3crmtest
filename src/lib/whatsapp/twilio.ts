@@ -164,7 +164,10 @@ export const diagnoseTwilioSignature = (input: {
   }
 }
 
-export const buildTwilioMessagingTwiml = (message: string) => {
+export const buildTwilioMessagingTwiml = (
+  message: string,
+  deliveryStatusUrl?: string
+) => {
   const escaped = message
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
@@ -172,7 +175,16 @@ export const buildTwilioMessagingTwiml = (message: string) => {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;')
 
-  return `<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escaped}</Message></Response>`
+  const escapedStatusUrl = deliveryStatusUrl
+    ?.replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;')
+
+  const callbackAttributes = escapedStatusUrl
+    ? ` action="${escapedStatusUrl}" method="POST" statusCallback="${escapedStatusUrl}"`
+    : ''
+
+  return `<?xml version="1.0" encoding="UTF-8"?><Response><Message${callbackAttributes}>${escaped}</Message></Response>`
 }
 
 /** Empty TwiML ack when the reply was already sent via REST API. */
