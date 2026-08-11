@@ -1,6 +1,7 @@
 import { getPrisma } from '@/src/lib/db/prisma'
 import {
   buildBucketLabels,
+  FINANCE_TIME_ZONE,
   formatBucketKey,
   getAllPeriodBounds,
   getPeriodBounds,
@@ -105,11 +106,42 @@ const buildCashFlowSeries = async (period: FinancePeriod, start: Date, end: Date
     expenseMap.set(key, toMoney((expenseMap.get(key) || 0) + Number(expense.amount)))
   }
 
-  return labels.map(label => ({
-    label,
-    ingresos: incomeMap.get(label) || 0,
-    egresos: expenseMap.get(label) || 0
-  }))
+  return labels.map(label => {
+    const ingresos = incomeMap.get(label) || 0
+    const egresos = expenseMap.get(label) || 0
+    const ganancia = toMoney(ingresos - egresos)
+    return {
+      label,
+      ingresos,
+      egresos,
+      ganancia,
+      /** Absolute value for chart Y axis (losses still plot upward). */
+      gananciaPlot: Math.abs(ganancia),
+      gananciaNegative: ganancia < 0
+    }
+  })
+}
+
+const pacificHourAndWeekday = (date: Date) => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: FINANCE_TIME_ZONE,
+    hour: 'numeric',
+    hourCycle: 'h23',
+    weekday: 'short'
+  })
+  const parts = formatter.formatToParts(date)
+  const hour = Number(parts.find(part => part.type === 'hour')?.value || 0)
+  const weekday = parts.find(part => part.type === 'weekday')?.value || 'Mon'
+  const weekdayMap: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6
+  }
+  return { hour, day: weekdayMap[weekday] ?? 0 }
 }
 
 const formatQuantityDisplay = (quantity: number, unitMode: 'piece' | 'weight') => {
@@ -162,8 +194,7 @@ const buildTopProducts = async (start: Date, end: Date, limit = 10) => {
       ? 'weight'
       : 'piece'
     const createdAt = item.sale.createdAt
-    const hour = createdAt.getHours()
-    const day = createdAt.getDay()
+    const { hour, day } = pacificHourAndWeekday(createdAt)
     const current = bySku.get(item.sku)
     if (!current) {
       const hourCounts = Array.from({ length: 24 }, () => 0)
@@ -241,9 +272,11 @@ export const getFinanceDashboard = async (
 
   const averageTicket =
     periodIncome.count > 0 ? toMoney(periodIncome.total / periodIncome.count) : 0
+  const ganancia = toMoney(periodIncome.total - periodExpenses.total)
 
   return {
     period,
+    timeZone: FINANCE_TIME_ZONE,
     generatedAt: now.toISOString(),
     range: {
       start: selected.start.toISOString(),
@@ -257,7 +290,10 @@ export const getFinanceDashboard = async (
     cashFlow: {
       ingresos: periodIncome.total,
       egresos: periodExpenses.total,
-      neto: toMoney(periodIncome.total - periodExpenses.total),
+      /** Alias histórico: neto === ganancia (ingresos − egresos). */
+      neto: ganancia,
+      ganancia,
+      gananciaNegative: ganancia < 0,
       salesCount: periodIncome.count,
       expenseCount: periodExpenses.count,
       averageTicket
@@ -267,7 +303,13 @@ export const getFinanceDashboard = async (
     topProducts,
     comparison: [
       { name: 'Ingresos', value: periodIncome.total },
-      { name: 'Egresos', value: periodExpenses.total }
+      { name: 'Egresos', value: periodExpenses.total },
+      {
+        name: 'Ganancia',
+        value: Math.abs(ganancia),
+        signedValue: ganancia,
+        negative: ganancia < 0
+      }
     ]
   }
 }
@@ -364,4 +406,110 @@ export const deleteExpense = async (id: string, actor: AuthenticatedActor) => {
       }
     }
   })
+}
+
+/** Recent completed POS tickets (live DB) for DavinciAi. */
+export const listRecentPosSales = async (period: FinancePeriod, limit = 8) => {
+  const prisma = await getPrisma()
+  const { start, end } = getPeriodBounds(period)
+  const take = Math.min(Math.max(limit, 1), 20)
+
+  const sales = await prisma.sale.findMany({
+    where: {
+      status: COMPLETED_SALE,
+      createdAt: { gte: start, lte: end }
+    },
+    orderBy: { createdAt: 'desc' },
+    take,
+    select: {
+      saleNumber: true,
+      total: true,
+      tax: true,
+      subtotal: true,
+      paymentMethod: true,
+      createdAt: true,
+      cashierUsername: true,
+      items: {
+        select: {
+          sku: true,
+          productName: true,
+          quantity: true,
+          lineTotal: true
+        }
+      }
+    }
+  })
+
+  return {
+    timeZone: FINANCE_TIME_ZONE,
+    period,
+    rangeStart: start.toISOString(),
+    rangeEnd: end.toISOString(),
+    count: sales.length,
+    sales: sales.map(sale => ({
+      saleNumber: sale.saleNumber,
+      total: toMoney(Number(sale.total)),
+      tax: toMoney(Number(sale.tax)),
+      subtotal: toMoney(Number(sale.subtotal)),
+      paymentMethod: sale.paymentMethod,
+      cashierUsername: sale.cashierUsername,
+      createdAt: sale.createdAt.toISOString(),
+      itemCount: sale.items.length,
+      items: sale.items.map(item => ({
+        sku: item.sku,
+        productName: item.productName,
+        quantity: item.quantity,
+        lineTotal: toMoney(Number(item.lineTotal))
+      }))
+    }))
+  }
+}
+
+/** Inventory SKU/stock snapshot for DavinciAi (efficient aggregates + low-stock sample). */
+export const getInventorySnapshot = async () => {
+  const prisma = await getPrisma()
+  const [aggregates, rows] = await Promise.all([
+    prisma.inventoryItem.aggregate({
+      _count: { _all: true },
+      _sum: { stock: true }
+    }),
+    prisma.inventoryItem.findMany({
+      select: {
+        sku: true,
+        productName: true,
+        stock: true,
+        minStock: true,
+        category: true,
+        unitPrice: true
+      },
+      orderBy: { sku: 'asc' }
+    })
+  ])
+
+  const lowStock = rows
+    .filter(item => item.stock <= item.minStock)
+    .sort((left, right) => left.stock - right.stock)
+
+  return {
+    timeZone: FINANCE_TIME_ZONE,
+    skuCount: aggregates._count._all,
+    totalUnits: Number(aggregates._sum.stock || 0),
+    lowStockCount: lowStock.length,
+    lowStockSamples: lowStock.slice(0, 12).map(item => ({
+      sku: item.sku,
+      name: item.productName,
+      stock: item.stock,
+      minStock: item.minStock,
+      category: item.category,
+      unitPrice: toMoney(Number(item.unitPrice))
+    })),
+    /** Compact catalog for the agent (cap to keep tokens low). */
+    catalogSample: rows.slice(0, 40).map(item => ({
+      sku: item.sku,
+      name: item.productName,
+      stock: item.stock,
+      minStock: item.minStock,
+      category: item.category
+    }))
+  }
 }

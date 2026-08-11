@@ -6,10 +6,15 @@ export const ERP_TOOL_IDS = [
   'cash_flow_period',
   'low_stock_count',
   'expenses_total_period',
-  'average_ticket_period'
+  'average_ticket_period',
+  'recent_pos_sales',
+  'inventory_snapshot'
 ] as const
 
 export type ErpToolId = (typeof ERP_TOOL_IDS)[number]
+
+/** Tools introduced after initial rollout — auto-enabled when missing from stored settings. */
+export const NEW_ERP_TOOL_IDS: ErpToolId[] = ['recent_pos_sales', 'inventory_snapshot']
 
 export const isErpToolId = (value: string): value is ErpToolId =>
   (ERP_TOOL_IDS as readonly string[]).includes(value)
@@ -19,10 +24,12 @@ export const ERP_TOOL_LABELS: Record<ErpToolId, string> = {
   sales_total_period: 'Ventas por periodo',
   stock_by_product_search: 'Stock por producto',
   top_product_period: 'Producto más vendido',
-  cash_flow_period: 'Flujo de caja',
+  cash_flow_period: 'Flujo de caja / ganancia',
   low_stock_count: 'Productos con stock bajo',
   expenses_total_period: 'Egresos por periodo',
-  average_ticket_period: 'Ticket promedio'
+  average_ticket_period: 'Ticket promedio',
+  recent_pos_sales: 'Ventas POS recientes',
+  inventory_snapshot: 'Resumen de inventario'
 }
 
 export const DEFAULT_ALLOWED_ERP_TOOLS: ErpToolId[] = [...ERP_TOOL_IDS]

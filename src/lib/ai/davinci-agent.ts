@@ -6,23 +6,33 @@ import {
   createOpenAiChatCompletion,
   type OpenAiChatMessage
 } from '@/src/lib/ai/openai-client'
+import { FINANCE_TIME_ZONE } from '@/src/lib/finance/period'
 import { appLog } from '@/src/lib/observability/app-logger'
 
-const MAX_TOOL_ROUNDS = 4
+const MAX_TOOL_ROUNDS = 6
 
 const buildSystemPrompt = (settings: MastraSettings) => `
-Eres DavinciAi, el asistente de negocio del ERP 2x3crmtest para el dueño/operador.
-Responde siempre en español, de forma clara y breve (máximo ${settings.maxReplyChars} caracteres).
+Eres DavinciAi, consultor de negocio del ERP 2x3crmtest (POS + inventario + finanzas).
+Responde siempre en español, claro y breve (máximo ${settings.maxReplyChars} caracteres).
 
-Reglas obligatorias de datos:
-1. Nunca inventes cifras de ventas, stock, egresos, tickets o rankings.
-2. Solo reporta números que vengan de resultados de herramientas (tools).
-3. Si no tienes datos de una herramienta, dilo explícitamente y sugiere qué preguntar.
-4. No pidas ni ejecutes SQL. Solo usa las herramientas disponibles.
-5. Si una herramienta está deshabilitada, explica que el administrador no la habilitó.
-6. Formatea montos como MXN con 2 decimales cuando aplique.
+Modelo de datos real (Postgres vía tools; nunca inventes cifras):
+- Sale / SaleItem: cada venta del POS. Solo status=completed cuenta como ingreso.
+- Expense: egresos (nómina, renta, proveedores, etc.). kind fixed|operating se registra pero la ganancia usa TODOS los egresos.
+- InventoryItem: sku, productName, stock, minStock, unitPrice. Alerta si stock <= minStock.
+- P&L: ingresos = Σ Sale.total; egresos = Σ Expense.amount; ganancia = ingresos − egresos.
+- Zona horaria: ${FINANCE_TIME_ZONE}. Cada día inicia a las 00:00 local (no uses medianoche CDMX).
 
-Instrucciones adicionales del administrador:
+Reglas:
+1. Cada pregunta: llama tools frescas; no reutilices cifras de mensajes anteriores.
+2. Solo reporta números que vengan de resultados de tools.
+3. Si falta un dato, dilo y sugiere la tool/pregunta correcta.
+4. No pidas ni ejecutes SQL. Solo tools.
+5. Formatea montos MXN con 2 decimales.
+6. Distingue ventas (tickets POS) de egresos (gastos). Una nómina fija reduce la ganancia pero no “borra” las ventas del día: reporta ingresos, egresos y ganancia por separado.
+7. Para inventario usa inventory_snapshot, stock_by_product_search o low_stock_count.
+8. Para “qué se vendió” usa recent_pos_sales o top_product_period.
+
+Instrucciones del administrador:
 ${settings.instructions}
 `.trim()
 
@@ -56,7 +66,9 @@ export const runDavinciErpAgent = async (
 Canal: ${message.channel}
 Sesión: ${message.sessionId}
 Locale: ${settings.defaultLocale}
+Zona: ${FINANCE_TIME_ZONE}
 Pregunta del usuario: ${message.message}
+Consulta datos frescos con tools antes de responder.
 `.trim()
     }
   ]
@@ -110,7 +122,7 @@ Pregunta del usuario: ${message.message}
         {
           role: 'user',
           content:
-            'Responde ahora al usuario usando únicamente los hechos de las herramientas. No inventes números.'
+            'Responde ahora con hechos de las tools. Separa ingresos, egresos y ganancia cuando hables de dinero. No inventes números.'
         }
       ]
     })
@@ -134,8 +146,8 @@ Pregunta del usuario: ${message.message}
       headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
       body: JSON.stringify({
         sessionId: '449600',
-        runId: 'whatsapp-webhook',
-        hypothesisId: 'E',
+        runId: 'davinci-harness',
+        hypothesisId: 'H',
         location: 'davinci-agent.ts:runDavinciErpAgent',
         message: 'DavinciAi OpenAI call failed',
         data: { reason, modelId: settings.modelId },

@@ -179,13 +179,17 @@ export const FinanceClient = () => {
         </article>
         <article className='border border-slate-200 bg-white px-3 py-2.5'>
           <p className='text-[11px] uppercase tracking-wide text-slate-500'>Egresos</p>
-          <p className='mt-1 text-lg font-semibold tabular-nums text-amber-800'>
+          <p className='mt-1 text-lg font-semibold tabular-nums text-slate-600'>
             {formatMxnCurrency(cashFlow.egresos)}
           </p>
         </article>
         <article className='border border-slate-200 bg-white px-3 py-2.5'>
-          <p className='text-[11px] uppercase tracking-wide text-slate-500'>Neto</p>
-          <p className='mt-1 text-lg font-semibold tabular-nums text-slate-950'>
+          <p className='text-[11px] uppercase tracking-wide text-slate-500'>Ganancia</p>
+          <p
+            className={`mt-1 text-lg font-semibold tabular-nums ${
+              cashFlow.neto >= 0 ? 'text-emerald-700' : 'text-rose-700'
+            }`}
+          >
             {formatMxnCurrency(cashFlow.neto)}
           </p>
         </article>

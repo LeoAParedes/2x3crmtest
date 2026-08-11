@@ -110,4 +110,4 @@ Responde TwiML. **No es necesario** si usas Evolution.
 2. En Evolution, apunta el webhook de la instancia a `/api/whatsapp/evolution/webhook` con evento `MESSAGES_UPSERT`.
 3. En `/admin`, deja activo el agente y las métricas deseadas.
 4. Envía por WhatsApp: `¿cuánto vendimos hoy?`
-5. Debes recibir un total en MXN proveniente de ventas `completed` del día (America/Mexico_City), no un número inventado.
+5. Debes recibir un total en MXN proveniente de ventas `completed` del día (America/Los_Angeles, 00:00 local), no un número inventado.

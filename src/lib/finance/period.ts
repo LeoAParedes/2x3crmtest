@@ -1,6 +1,7 @@
 export type FinancePeriod = 'day' | 'week' | 'month'
 
-export const FINANCE_TIME_ZONE = 'America/Mexico_City'
+/** Business calendar uses US Pacific; each day starts at local midnight (00:00). */
+export const FINANCE_TIME_ZONE = 'America/Los_Angeles'
 
 const periodValues: FinancePeriod[] = ['day', 'week', 'month']
 

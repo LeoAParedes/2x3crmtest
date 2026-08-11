@@ -1,7 +1,12 @@
 import { isLowStockItem } from '@/src/lib/inventory/low-stock'
 import { findInventoryByQuery } from '@/src/lib/crm/services/inventory-service'
-import { getFinanceDashboard } from '@/src/lib/finance/finance-service'
+import {
+  getFinanceDashboard,
+  getInventorySnapshot,
+  listRecentPosSales
+} from '@/src/lib/finance/finance-service'
 import { getPrisma } from '@/src/lib/db/prisma'
+import { FINANCE_TIME_ZONE } from '@/src/lib/finance/period'
 import { isErpToolId, type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
 import { ERP_TOOL_REGISTRY, resolvePeriod } from '@/src/lib/ai/erp-tool-registry'
 
@@ -19,11 +24,13 @@ const executeSalesTotalToday = async () => {
   const dashboard = await getFinanceDashboard('day')
   return {
     currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
     period: 'day',
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     totalSales: dashboard.salesTotals.day.total,
-    ticketCount: dashboard.salesTotals.day.count
+    ticketCount: dashboard.salesTotals.day.count,
+    source: 'Sale.status=completed'
   }
 }
 
@@ -35,11 +42,13 @@ const executeSalesTotalPeriod = async (args: Record<string, unknown>) => {
 
   return {
     currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
     period,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     totalSales: bucket.total,
-    ticketCount: bucket.count
+    ticketCount: bucket.count,
+    source: 'Sale.status=completed'
   }
 }
 
@@ -56,7 +65,8 @@ const executeStockByProductSearch = async (args: Record<string, unknown>) => {
       stock: item.stock,
       price: item.price,
       aisle: item.aisle
-    }))
+    })),
+    source: 'InventoryItem'
   }
 }
 
@@ -69,6 +79,7 @@ const executeTopProductPeriod = async (args: Record<string, unknown>) => {
 
   return {
     currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
     period,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
@@ -87,7 +98,8 @@ const executeTopProductPeriod = async (args: Record<string, unknown>) => {
           quantityDisplay: products[0].quantityDisplay,
           revenue: products[0].revenue
         }
-      : null
+      : null,
+    source: 'SaleItem→Sale.completed'
   }
 }
 
@@ -96,12 +108,16 @@ const executeCashFlowPeriod = async (args: Record<string, unknown>) => {
   const dashboard = await getFinanceDashboard(period)
   return {
     currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
     period,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     ingresos: dashboard.cashFlow.ingresos,
     egresos: dashboard.cashFlow.egresos,
+    ganancia: dashboard.cashFlow.ganancia,
     neto: dashboard.cashFlow.neto,
+    gananciaNegative: dashboard.cashFlow.gananciaNegative,
+    formula: 'ganancia = ingresos(Sale.total) - egresos(Expense.amount)',
     salesCount: dashboard.cashFlow.salesCount,
     expenseCount: dashboard.cashFlow.expenseCount
   }
@@ -124,6 +140,7 @@ const executeLowStockCount = async () => {
     .sort((left, right) => left.stock - right.stock)
 
   return {
+    timeZone: FINANCE_TIME_ZONE,
     lowStockCount: lowStock.length,
     inventoryCount: rows.length,
     samples: lowStock.slice(0, 10).map(item => ({
@@ -132,7 +149,8 @@ const executeLowStockCount = async () => {
       stock: item.stock,
       minStock: item.minStock,
       category: item.category
-    }))
+    })),
+    rule: 'stock <= minStock'
   }
 }
 
@@ -141,11 +159,13 @@ const executeExpensesTotalPeriod = async (args: Record<string, unknown>) => {
   const dashboard = await getFinanceDashboard(period)
   return {
     currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
     period,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     totalExpenses: dashboard.cashFlow.egresos,
-    expenseCount: dashboard.cashFlow.expenseCount
+    expenseCount: dashboard.cashFlow.expenseCount,
+    source: 'Expense.amount'
   }
 }
 
@@ -154,6 +174,7 @@ const executeAverageTicketPeriod = async (args: Record<string, unknown>) => {
   const dashboard = await getFinanceDashboard(period)
   return {
     currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
     period,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
@@ -163,6 +184,14 @@ const executeAverageTicketPeriod = async (args: Record<string, unknown>) => {
   }
 }
 
+const executeRecentPosSales = async (args: Record<string, unknown>) => {
+  const period = resolvePeriod(args.period, 'day')
+  const limit = typeof args.limit === 'number' ? args.limit : 8
+  return listRecentPosSales(period, limit)
+}
+
+const executeInventorySnapshot = async () => getInventorySnapshot()
+
 const executors: Record<ErpToolId, (args: Record<string, unknown>) => Promise<Record<string, unknown>>> = {
   sales_total_today: async () => executeSalesTotalToday(),
   sales_total_period: executeSalesTotalPeriod,
@@ -171,7 +200,9 @@ const executors: Record<ErpToolId, (args: Record<string, unknown>) => Promise<Re
   cash_flow_period: executeCashFlowPeriod,
   low_stock_count: async () => executeLowStockCount(),
   expenses_total_period: executeExpensesTotalPeriod,
-  average_ticket_period: executeAverageTicketPeriod
+  average_ticket_period: executeAverageTicketPeriod,
+  recent_pos_sales: executeRecentPosSales,
+  inventory_snapshot: async () => executeInventorySnapshot()
 }
 
 export const executeErpTool = async (

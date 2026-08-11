@@ -25,8 +25,15 @@ import type { FinancePeriod } from '@/src/lib/finance/period'
 import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 
 type SalesBucket = { label: string; sales: number }
-type CashFlowBucket = { label: string; ingresos: number; egresos: number }
-type ComparisonPoint = { name: string; value: number }
+type CashFlowBucket = {
+  label: string
+  ingresos: number
+  egresos: number
+  ganancia?: number
+  gananciaPlot?: number
+  gananciaNegative?: boolean
+}
+type ComparisonPoint = { name: string; value: number; signedValue?: number; negative?: boolean }
 type TopProduct = {
   rank: number
   sku: string
@@ -51,10 +58,13 @@ type SummaryResponse = {
     ingresos: number
     egresos: number
     neto: number
+    ganancia?: number
+    gananciaNegative?: boolean
     salesCount: number
     expenseCount: number
     averageTicket?: number
   }
+  timeZone?: string
   salesSeries: SalesBucket[]
   cashFlowSeries: CashFlowBucket[]
   comparison: ComparisonPoint[]
@@ -85,7 +95,9 @@ const periodOptions: Array<{ value: FinancePeriod; label: string }> = [
 const chartColors = {
   sales: '#0f766e',
   income: '#047857',
-  expense: '#b45309',
+  expense: '#6b7280',
+  profit: '#16a34a',
+  loss: '#dc2626',
   grid: '#e2e8f0',
   axis: '#64748b'
 }
@@ -238,13 +250,27 @@ export const FinancePeriodosClient = () => {
     ingresos: 0,
     egresos: 0,
     neto: 0,
+    ganancia: 0,
+    gananciaNegative: false,
     salesCount: 0,
     expenseCount: 0,
     averageTicket: 0
   }
+  const ganancia = cashFlow.ganancia ?? cashFlow.neto
   const topProducts = summary?.topProducts || []
   const salesSeries = summary?.salesSeries || []
-  const cashFlowSeries = summary?.cashFlowSeries || []
+  const cashFlowSeries = (summary?.cashFlowSeries || []).map(bucket => {
+    const computedGanancia =
+      typeof bucket.ganancia === 'number'
+        ? bucket.ganancia
+        : Number((bucket.ingresos - bucket.egresos).toFixed(2))
+    return {
+      ...bucket,
+      ganancia: computedGanancia,
+      gananciaPlot: Math.abs(computedGanancia),
+      gananciaNegative: computedGanancia < 0
+    }
+  })
   const comparison = summary?.comparison || []
 
   return (
@@ -253,12 +279,14 @@ export const FinancePeriodosClient = () => {
         <div>
           <h1 className='text-2xl font-semibold text-slate-950'>Periodos</h1>
           <p className='mt-1 text-sm text-slate-600'>
-            Gráficas detalladas por día, semana, mes o un rango personalizado entre dos fechas.
+            Ingresos, egresos y ganancia por periodo (zona Pacífico, día desde 00:00).
           </p>
           <p className='mt-1 text-xs text-emerald-700'>
-            En vivo · actualiza cada 15s
+            En vivo · {summary?.timeZone || 'America/Los_Angeles'} · actualiza cada 15s
             {summary?.generatedAt
-              ? ` · ${new Date(summary.generatedAt).toLocaleTimeString('es-MX')}`
+              ? ` · ${new Date(summary.generatedAt).toLocaleTimeString('es-MX', {
+                  timeZone: summary.timeZone || 'America/Los_Angeles'
+                })}`
               : ''}
           </p>
         </div>
@@ -360,21 +388,21 @@ export const FinancePeriodosClient = () => {
         </article>
         <article className='border border-slate-200 bg-white px-4 py-3'>
           <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Egresos (periodo)</p>
-          <p className='mt-2 text-xl font-semibold tabular-nums text-amber-800'>
+          <p className='mt-2 text-xl font-semibold tabular-nums text-slate-600'>
             {formatMxnCurrency(cashFlow.egresos)}
           </p>
           <p className='mt-1 text-xs text-slate-500'>{cashFlow.expenseCount} gastos</p>
         </article>
         <article className='border border-slate-200 bg-white px-4 py-3'>
-          <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Flujo neto</p>
+          <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Ganancia</p>
           <p
             className={`mt-2 text-xl font-semibold tabular-nums ${
-              cashFlow.neto >= 0 ? 'text-slate-950' : 'text-rose-700'
+              ganancia >= 0 ? 'text-emerald-700' : 'text-rose-700'
             }`}
           >
-            {formatMxnCurrency(cashFlow.neto)}
+            {formatMxnCurrency(ganancia)}
           </p>
-          <p className='mt-1 text-xs text-slate-500'>Ingresos menos egresos</p>
+          <p className='mt-1 text-xs text-slate-500'>Ingresos − egresos</p>
         </article>
         <article className='border border-slate-200 bg-white px-4 py-3'>
           <p className='text-xs font-medium uppercase tracking-wide text-slate-500'>Ticket promedio</p>
@@ -427,8 +455,10 @@ export const FinancePeriodosClient = () => {
         </article>
 
         <article className='border border-slate-200 bg-white p-4'>
-          <h2 className='text-sm font-semibold text-slate-900'>Ingresos vs. egresos</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Comparación por intervalo</p>
+          <h2 className='text-sm font-semibold text-slate-900'>Ingresos, egresos y ganancia</h2>
+          <p className='mt-0.5 text-xs text-slate-500'>
+            Egreso en gris · ganancia en verde · pérdida en rojo (eje Y siempre positivo)
+          </p>
           <div className='mt-3 h-64'>
             {cashFlowSeries.length ? (
               <ResponsiveContainer width='100%' height='100%'>
@@ -441,10 +471,27 @@ export const FinancePeriodosClient = () => {
                     tickLine={false}
                     width={48}
                   />
-                  <Tooltip formatter={formatTooltipMoney} labelFormatter={label => `Periodo: ${label}`} />
+                  <Tooltip
+                    formatter={(value, name, item) => {
+                      const payload = item?.payload as CashFlowBucket | undefined
+                      if (name === 'Ganancia' && payload) {
+                        return formatMxnCurrency(payload.ganancia ?? Number(value ?? 0))
+                      }
+                      return formatTooltipMoney(value)
+                    }}
+                    labelFormatter={label => `Periodo: ${label}`}
+                  />
                   <Legend />
                   <Bar dataKey='ingresos' name='Ingresos' fill={chartColors.income} radius={[3, 3, 0, 0]} />
                   <Bar dataKey='egresos' name='Egresos' fill={chartColors.expense} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey='gananciaPlot' name='Ganancia' radius={[3, 3, 0, 0]}>
+                    {cashFlowSeries.map(bucket => (
+                      <Cell
+                        key={`ganancia-${bucket.label}`}
+                        fill={bucket.gananciaNegative ? chartColors.loss : chartColors.profit}
+                      />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -543,7 +590,7 @@ export const FinancePeriodosClient = () => {
 
         <article className='border border-slate-200 bg-white p-4'>
           <h2 className='text-sm font-semibold text-slate-900'>Resumen del periodo</h2>
-          <p className='mt-0.5 text-xs text-slate-500'>Ingresos frente a egresos totales</p>
+          <p className='mt-0.5 text-xs text-slate-500'>Ingresos, egresos y ganancia (|y| positivo)</p>
           <div className='mt-3 h-56'>
             {comparison.some(point => point.value > 0) ? (
               <ResponsiveContainer width='100%' height='100%'>
@@ -556,12 +603,28 @@ export const FinancePeriodosClient = () => {
                     tickLine={false}
                     width={48}
                   />
-                  <Tooltip formatter={formatTooltipMoney} />
+                  <Tooltip
+                    formatter={(value, _name, item) => {
+                      const point = item?.payload as ComparisonPoint | undefined
+                      if (point?.name === 'Ganancia' && typeof point.signedValue === 'number') {
+                        return formatMxnCurrency(point.signedValue)
+                      }
+                      return formatTooltipMoney(value)
+                    }}
+                  />
                   <Bar dataKey='value' name='Monto' radius={[3, 3, 0, 0]}>
                     {comparison.map(point => (
                       <Cell
                         key={point.name}
-                        fill={point.name === 'Ingresos' ? chartColors.income : chartColors.expense}
+                        fill={
+                          point.name === 'Ingresos'
+                            ? chartColors.income
+                            : point.name === 'Egresos'
+                              ? chartColors.expense
+                              : point.negative
+                                ? chartColors.loss
+                                : chartColors.profit
+                        }
                       />
                     ))}
                   </Bar>
