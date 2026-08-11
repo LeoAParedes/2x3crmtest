@@ -52,13 +52,16 @@ export const authenticateCredentials = async (
 export const loginAction = async (_previousState: LoginState, formData: FormData): Promise<LoginState> => {
   const rawUsername = formData.get('username')
 
-  // destination is set outside try so redirect() is called outside the catch block.
-  // redirect() throws NEXT_REDIRECT internally; if called inside catch it would be
-  // swallowed and the user would see a spurious error even after a successful sign-in.
+  // Hoisted outside try/catch for two reasons:
+  // 1. destination — redirect() throws NEXT_REDIRECT internally; if called inside catch it would
+  //    be swallowed and show a spurious error even after a successful sign-in.
+  // 2. supabase — we need it in the catch block to sign out any partial session that may have
+  //    been created before a subsequent step (e.g. Prisma findProfile) threw.
   let destination: '/admin' | '/pos' | '/caja' | null = null
+  let supabase: Awaited<ReturnType<typeof createServerSupabaseClient>> | null = null
 
   try {
-    const supabase = await createServerSupabaseClient()
+    supabase = await createServerSupabaseClient()
     const prisma = await getPrisma()
 
     const result = await authenticateCredentials(
@@ -68,7 +71,7 @@ export const loginAction = async (_previousState: LoginState, formData: FormData
       },
       {
         signIn: async ({ email, password }) => {
-          const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+          const { data, error } = await supabase!.auth.signInWithPassword({ email, password })
           return { userId: error ? null : (data.user?.id ?? null) }
         },
         findProfile: async userId => {
@@ -92,6 +95,14 @@ export const loginAction = async (_previousState: LoginState, formData: FormData
       name: error instanceof Error ? error.name : 'unknown',
       message: error instanceof Error ? error.message : 'unknown'
     })
+    // If Supabase auth succeeded but a later step (e.g. DB profile lookup) threw, a session
+    // cookie was already set. Sign out so the user is not silently logged in despite seeing
+    // this error — otherwise a page reload would land them on /admin unexpectedly.
+    try {
+      await supabase?.auth.signOut()
+    } catch {
+      // best-effort; don't mask the original error
+    }
     return { error: 'Error interno al iniciar sesión. Revisa la configuración del servidor.' }
   }
 
