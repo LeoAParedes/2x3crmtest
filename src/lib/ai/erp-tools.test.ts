@@ -19,14 +19,24 @@ describe('DavinciAi ERP whitelist registry', () => {
       'sales_total_today',
       'low_stock_count',
       'recent_pos_sales',
-      'inventory_snapshot'
+      'inventory_snapshot',
+      'expenses_by_category',
+      'payroll_roster'
     ])
   })
 
   it('includes all registry tools in the default catalog', () => {
     expect(ERP_TOOL_IDS).toContain('recent_pos_sales')
     expect(ERP_TOOL_IDS).toContain('inventory_snapshot')
+    expect(ERP_TOOL_IDS).toContain('expenses_by_category')
+    expect(ERP_TOOL_IDS).toContain('payroll_roster')
     expect(toOpenAiTools([...ERP_TOOL_IDS])).toHaveLength(ERP_TOOL_IDS.length)
+  })
+
+  it('auto-enables new finance comprehension tools', () => {
+    expect(parseAllowedErpTools(['sales_total_today'])).toEqual(
+      expect.arrayContaining(['expenses_by_category', 'payroll_roster', 'recent_pos_sales', 'inventory_snapshot'])
+    )
   })
 
   it('exposes only whitelisted OpenAI function tools', () => {

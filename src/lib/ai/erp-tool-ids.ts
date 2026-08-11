@@ -8,7 +8,9 @@ export const ERP_TOOL_IDS = [
   'expenses_total_period',
   'average_ticket_period',
   'recent_pos_sales',
-  'inventory_snapshot'
+  'inventory_snapshot',
+  'expenses_by_category',
+  'payroll_roster'
 ] as const
 
 export type ErpToolId = (typeof ERP_TOOL_IDS)[number]
@@ -19,7 +21,12 @@ export type ErpHarnessFactId = (typeof ERP_HARNESS_FACT_IDS)[number]
 export type ErpFactToolId = ErpToolId | ErpHarnessFactId
 
 /** Tools introduced after initial rollout — auto-enabled when missing from stored settings. */
-export const NEW_ERP_TOOL_IDS: ErpToolId[] = ['recent_pos_sales', 'inventory_snapshot']
+export const NEW_ERP_TOOL_IDS: ErpToolId[] = [
+  'recent_pos_sales',
+  'inventory_snapshot',
+  'expenses_by_category',
+  'payroll_roster'
+]
 
 export const isErpToolId = (value: string): value is ErpToolId =>
   (ERP_TOOL_IDS as readonly string[]).includes(value)
@@ -34,7 +41,9 @@ export const ERP_TOOL_LABELS: Record<ErpToolId, string> = {
   expenses_total_period: 'Egresos por periodo',
   average_ticket_period: 'Ticket promedio',
   recent_pos_sales: 'Ventas POS recientes',
-  inventory_snapshot: 'Resumen de inventario'
+  inventory_snapshot: 'Resumen de inventario',
+  expenses_by_category: 'Egresos por categoría / servicio',
+  payroll_roster: 'Nómina / personal activo'
 }
 
 export const DEFAULT_ALLOWED_ERP_TOOLS: ErpToolId[] = [...ERP_TOOL_IDS]

@@ -3,13 +3,18 @@ import { findInventoryByQuery } from '@/src/lib/crm/services/inventory-service'
 import {
   getFinanceDashboard,
   getInventorySnapshot,
-  listRecentPosSales
+  listActiveStaffRoster,
+  listExpensesByCategoryInRange,
+  listRecentPosSales,
+  sumExpensesByCategoryInRange
 } from '@/src/lib/finance/finance-service'
 import { getPrisma } from '@/src/lib/db/prisma'
 import { FINANCE_TIME_ZONE } from '@/src/lib/finance/period'
+import { expenseCategoryLabels } from '@/src/lib/finance/expense-schema'
+import { resolveAiDateRangeFromArgs } from '@/src/lib/ai/ai-date-range'
 import { stampErpDbProvenance } from '@/src/lib/ai/erp-db-harness'
 import { isErpToolId, type ErpFactToolId, type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
-import { ERP_TOOL_REGISTRY, resolvePeriod } from '@/src/lib/ai/erp-tool-registry'
+import { ERP_TOOL_REGISTRY } from '@/src/lib/ai/erp-tool-registry'
 
 export type ErpToolFactResult =
   | {
@@ -56,19 +61,21 @@ const executeSalesTotalToday = async () => {
 }
 
 const executeSalesTotalPeriod = async (args: Record<string, unknown>) => {
-  const period = resolvePeriod(args.period, 'day')
-  const dashboard = await getFinanceDashboard(period)
-  const bucket =
-    period === 'day' ? dashboard.salesTotals.day : period === 'week' ? dashboard.salesTotals.week : dashboard.salesTotals.month
+  const range = resolveAiDateRangeFromArgs(args, 'day')
+  const dashboard = await getFinanceDashboard(range.financePeriod, {
+    start: range.start,
+    end: range.end
+  })
 
   return {
     currency: 'MXN',
     timeZone: FINANCE_TIME_ZONE,
-    period,
+    period: range.kind,
+    periodLabel: range.label,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
-    totalSales: bucket.total,
-    ticketCount: bucket.count,
+    totalSales: dashboard.cashFlow.ingresos,
+    ticketCount: dashboard.cashFlow.salesCount,
     source: 'Sale.status=completed'
   }
 }
@@ -93,15 +100,19 @@ const executeStockByProductSearch = async (args: Record<string, unknown>) => {
 
 const executeTopProductPeriod = async (args: Record<string, unknown>) => {
   const parsed = ERP_TOOL_REGISTRY.top_product_period.inputSchema.parse(args)
-  const period = resolvePeriod(parsed.period, 'week')
+  const range = resolveAiDateRangeFromArgs(parsed, 'week')
   const limit = typeof parsed.limit === 'number' ? parsed.limit : 5
-  const dashboard = await getFinanceDashboard(period)
+  const dashboard = await getFinanceDashboard(range.financePeriod, {
+    start: range.start,
+    end: range.end
+  })
   const products = dashboard.topProducts.slice(0, limit)
 
   return {
     currency: 'MXN',
     timeZone: FINANCE_TIME_ZONE,
-    period,
+    period: range.kind,
+    periodLabel: range.label,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     products: products.map(product => ({
@@ -125,12 +136,16 @@ const executeTopProductPeriod = async (args: Record<string, unknown>) => {
 }
 
 const executeCashFlowPeriod = async (args: Record<string, unknown>) => {
-  const period = resolvePeriod(args.period, 'day')
-  const dashboard = await getFinanceDashboard(period)
+  const range = resolveAiDateRangeFromArgs(args, 'month')
+  const dashboard = await getFinanceDashboard(range.financePeriod, {
+    start: range.start,
+    end: range.end
+  })
   return {
     currency: 'MXN',
     timeZone: FINANCE_TIME_ZONE,
-    period,
+    period: range.kind,
+    periodLabel: range.label,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     ingresos: dashboard.cashFlow.ingresos,
@@ -138,7 +153,10 @@ const executeCashFlowPeriod = async (args: Record<string, unknown>) => {
     ganancia: dashboard.cashFlow.ganancia,
     neto: dashboard.cashFlow.neto,
     gananciaNegative: dashboard.cashFlow.gananciaNegative,
-    formula: 'ganancia = ingresos(Sale.total) - egresos(Expense.amount)',
+    formula: 'ganancia = ingresos(Sale.total completed) - egresos(Expense.amount)',
+    que: 'Ganancia neta operativa del periodo (P&L simple)',
+    cuando: range.label,
+    como: 'Suma ventas POS completed menos suma de egresos/pasivos registrados',
     salesCount: dashboard.cashFlow.salesCount,
     expenseCount: dashboard.cashFlow.expenseCount
   }
@@ -178,12 +196,16 @@ const executeLowStockCount = async () => {
 }
 
 const executeExpensesTotalPeriod = async (args: Record<string, unknown>) => {
-  const period = resolvePeriod(args.period, 'day')
-  const dashboard = await getFinanceDashboard(period)
+  const range = resolveAiDateRangeFromArgs(args, 'month')
+  const dashboard = await getFinanceDashboard(range.financePeriod, {
+    start: range.start,
+    end: range.end
+  })
   return {
     currency: 'MXN',
     timeZone: FINANCE_TIME_ZONE,
-    period,
+    period: range.kind,
+    periodLabel: range.label,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     totalExpenses: dashboard.cashFlow.egresos,
@@ -193,12 +215,16 @@ const executeExpensesTotalPeriod = async (args: Record<string, unknown>) => {
 }
 
 const executeAverageTicketPeriod = async (args: Record<string, unknown>) => {
-  const period = resolvePeriod(args.period, 'day')
-  const dashboard = await getFinanceDashboard(period)
+  const range = resolveAiDateRangeFromArgs(args, 'day')
+  const dashboard = await getFinanceDashboard(range.financePeriod, {
+    start: range.start,
+    end: range.end
+  })
   return {
     currency: 'MXN',
     timeZone: FINANCE_TIME_ZONE,
-    period,
+    period: range.kind,
+    periodLabel: range.label,
     rangeStart: dashboard.range.start,
     rangeEnd: dashboard.range.end,
     averageTicket: dashboard.cashFlow.averageTicket,
@@ -208,12 +234,90 @@ const executeAverageTicketPeriod = async (args: Record<string, unknown>) => {
 }
 
 const executeRecentPosSales = async (args: Record<string, unknown>) => {
-  const period = resolvePeriod(args.period, 'day')
+  const range = resolveAiDateRangeFromArgs(args, 'day')
   const limit = typeof args.limit === 'number' ? args.limit : 8
-  return listRecentPosSales(period, limit)
+  const result = await listRecentPosSales(range.financePeriod, limit, {
+    start: range.start,
+    end: range.end
+  })
+  return {
+    ...result,
+    period: range.kind,
+    periodLabel: range.label
+  }
 }
 
 const executeInventorySnapshot = async () => getInventorySnapshot()
+
+const executeExpensesByCategory = async (args: Record<string, unknown>) => {
+  const parsed = ERP_TOOL_REGISTRY.expenses_by_category.inputSchema.parse(args)
+  const category = String(parsed.category)
+  const range = resolveAiDateRangeFromArgs(parsed, 'year')
+  const limit = typeof parsed.limit === 'number' ? parsed.limit : 15
+  const [summary, items] = await Promise.all([
+    sumExpensesByCategoryInRange(category, range.start, range.end),
+    listExpensesByCategoryInRange(category, range.start, range.end, limit)
+  ])
+
+  const categoryLabel =
+    expenseCategoryLabels[category as keyof typeof expenseCategoryLabels] || category
+
+  return {
+    currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
+    category,
+    categoryLabel,
+    period: range.kind,
+    periodLabel: range.label,
+    rangeStart: range.start.toISOString(),
+    rangeEnd: range.end.toISOString(),
+    totalPaid: summary.total,
+    expenseCount: summary.count,
+    items,
+    que: `Pagos de ${categoryLabel} (Expense.category=${category})`,
+    cuando: range.label,
+    como: 'Suma de Expense.amount filtrada por categoría y spentAt en el rango',
+    source: 'Expense'
+  }
+}
+
+const executePayrollRoster = async (args: Record<string, unknown>) => {
+  const range = resolveAiDateRangeFromArgs(args, 'month')
+  const [staff, payrollPayments] = await Promise.all([
+    listActiveStaffRoster(),
+    listExpensesByCategoryInRange('nomina', range.start, range.end, 30)
+  ])
+  const payrollTotal = payrollPayments.reduce((sum, row) => sum + row.amount, 0)
+
+  return {
+    currency: 'MXN',
+    timeZone: FINANCE_TIME_ZONE,
+    period: range.kind,
+    periodLabel: range.label,
+    rangeStart: range.start.toISOString(),
+    rangeEnd: range.end.toISOString(),
+    activeStaffCount: staff.length,
+    activeStaff: staff.map(person => ({
+      username: person.username,
+      role: person.role,
+      cashierGate: person.cashierGate
+    })),
+    payrollExpenseCount: payrollPayments.length,
+    payrollExpenseTotal: Number(payrollTotal.toFixed(2)),
+    payrollPayments: payrollPayments.map(row => ({
+      description: row.description,
+      amount: row.amount,
+      spentAt: row.spentAt,
+      createdByUsername: row.createdByUsername
+    })),
+    que: 'Personal activo del sistema + pagos registrados en categoría nómina',
+    cuando: range.label,
+    como: 'UserProfile.isActive=true para roster; Expense.category=nomina para pagos',
+    note:
+      'No hay entidad Employee separada: la nómina operativa son perfiles activos; los montos pagados viven en Expense categoría nomina.',
+    source: 'UserProfile + Expense.category=nomina'
+  }
+}
 
 const executors: Record<ErpToolId, (args: Record<string, unknown>) => Promise<Record<string, unknown>>> = {
   sales_total_today: async () => executeSalesTotalToday(),
@@ -225,7 +329,9 @@ const executors: Record<ErpToolId, (args: Record<string, unknown>) => Promise<Re
   expenses_total_period: executeExpensesTotalPeriod,
   average_ticket_period: executeAverageTicketPeriod,
   recent_pos_sales: executeRecentPosSales,
-  inventory_snapshot: async () => executeInventorySnapshot()
+  inventory_snapshot: async () => executeInventorySnapshot(),
+  expenses_by_category: executeExpensesByCategory,
+  payroll_roster: executePayrollRoster
 }
 
 export const executeErpTool = async (

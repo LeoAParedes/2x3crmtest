@@ -96,6 +96,34 @@ export const getAllPeriodBounds = (now = new Date(), timeZone = FINANCE_TIME_ZON
   month: getPeriodBounds('month', now, timeZone)
 })
 
+/** Calendar year-to-date from Jan 1 00:00 local through now. */
+export const getYearBounds = (now = new Date(), timeZone = FINANCE_TIME_ZONE) => {
+  const parts = getTimeZoneParts(now, timeZone)
+  const start = zonedWallTimeToUtc(parts.year, 1, 1, 0, 0, 0, timeZone)
+  return { start, end: now }
+}
+
+/** Previous complete calendar month in local time (1st 00:00 → last day 23:59:59). */
+export const getPreviousMonthBounds = (now = new Date(), timeZone = FINANCE_TIME_ZONE) => {
+  const parts = getTimeZoneParts(now, timeZone)
+  const year = parts.month === 1 ? parts.year - 1 : parts.year
+  const month = parts.month === 1 ? 12 : parts.month - 1
+  const start = zonedWallTimeToUtc(year, month, 1, 0, 0, 0, timeZone)
+  const nextMonth = month === 12 ? 1 : month + 1
+  const nextYear = month === 12 ? year + 1 : year
+  const end = zonedWallTimeToUtc(nextYear, nextMonth, 1, 0, 0, 0, timeZone)
+  return { start, end: new Date(end.getTime() - 1000) }
+}
+
+/** Previous complete calendar year (Jan 1 → Dec 31 local). */
+export const getPreviousYearBounds = (now = new Date(), timeZone = FINANCE_TIME_ZONE) => {
+  const parts = getTimeZoneParts(now, timeZone)
+  const year = parts.year - 1
+  const start = zonedWallTimeToUtc(year, 1, 1, 0, 0, 0, timeZone)
+  const end = zonedWallTimeToUtc(year, 12, 31, 23, 59, 59, timeZone)
+  return { start, end }
+}
+
 export const getCustomBounds = (fromDate: string, toDate: string, timeZone = FINANCE_TIME_ZONE) => {
   const fromParts = fromDate.split('-').map(Number)
   const toParts = toDate.split('-').map(Number)
@@ -121,7 +149,8 @@ export const getCustomBounds = (fromDate: string, toDate: string, timeZone = FIN
  * starting at local midnight of the first day (Pacific).
  */
 export const getRollingBounds = (days: number, now = new Date(), timeZone = FINANCE_TIME_ZONE) => {
-  const safeDays = Math.max(1, Math.min(Math.floor(days), 90))
+  /** Cap at 366 so AI “últimos N días” / year-ish windows stay bounded. */
+  const safeDays = Math.max(1, Math.min(Math.floor(days), 366))
   const parts = getTimeZoneParts(now, timeZone)
   const startAnchor = new Date(Date.UTC(parts.year, parts.month - 1, parts.day - (safeDays - 1)))
   const start = zonedWallTimeToUtc(

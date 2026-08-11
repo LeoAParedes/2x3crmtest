@@ -447,6 +447,82 @@ export const listExpensesInRange = async (start: Date, end: Date) => {
   }))
 }
 
+export const sumExpensesByCategoryInRange = async (
+  category: string,
+  start: Date,
+  end: Date
+) => {
+  const prisma = await getPrisma()
+  const result = await prisma.expense.aggregate({
+    where: {
+      category,
+      spentAt: { gte: start, lte: end }
+    },
+    _sum: { amount: true },
+    _count: { _all: true }
+  })
+
+  return {
+    category,
+    total: toMoney(Number(result._sum.amount || 0)),
+    count: result._count._all
+  }
+}
+
+export const listExpensesByCategoryInRange = async (
+  category: string,
+  start: Date,
+  end: Date,
+  limit = 20
+) => {
+  const prisma = await getPrisma()
+  const take = Math.min(Math.max(limit, 1), 50)
+  const expenses = await prisma.expense.findMany({
+    where: {
+      category,
+      spentAt: { gte: start, lte: end }
+    },
+    orderBy: { spentAt: 'desc' },
+    take
+  })
+
+  return expenses.map(expense => ({
+    id: expense.id,
+    category: expense.category,
+    description: expense.description,
+    amount: Number(expense.amount),
+    kind: expense.kind,
+    spentAt: expense.spentAt.toISOString(),
+    createdByUsername: expense.createdByUsername
+  }))
+}
+
+/** Active staff roster for “quién está en la nómina / personal”. */
+export const listActiveStaffRoster = async () => {
+  const prisma = await getPrisma()
+  const profiles = await prisma.userProfile.findMany({
+    where: { isActive: true },
+    orderBy: [{ role: 'asc' }, { username: 'asc' }],
+    select: {
+      id: true,
+      username: true,
+      role: true,
+      isActive: true,
+      cashierGate: true,
+      createdAt: true
+    }
+  })
+
+  return profiles.map(profile => ({
+    id: profile.id,
+    username: profile.username,
+    role: profile.role,
+    isActive: profile.isActive,
+    cashierGate: profile.cashierGate,
+    createdAt: profile.createdAt.toISOString()
+  }))
+}
+
 export const listExpenses = async (period: FinancePeriod) => {
   const { start, end } = getPeriodBounds(period)
   return listExpensesInRange(start, end)
@@ -526,9 +602,13 @@ export const deleteExpense = async (id: string, actor: AuthenticatedActor) => {
 }
 
 /** Recent completed POS tickets (live DB) for DavinciAi. */
-export const listRecentPosSales = async (period: FinancePeriod, limit = 8) => {
+export const listRecentPosSales = async (
+  period: FinancePeriod,
+  limit = 8,
+  customRange?: { start: Date; end: Date }
+) => {
   const prisma = await getPrisma()
-  const { start, end } = getPeriodBounds(period)
+  const { start, end } = customRange || getPeriodBounds(period)
   const take = Math.min(Math.max(limit, 1), 20)
 
   const sales = await prisma.sale.findMany({

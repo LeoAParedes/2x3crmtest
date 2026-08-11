@@ -17,6 +17,9 @@ describe('erp-db-harness', () => {
     expect(isErpDataQuestion('stock bajo en inventario')).toBe(true)
     expect(isErpDataQuestion('Ventas hoy')).toBe(true)
     expect(isErpDataQuestion('Cuantas ventas hubo agosto 10?')).toBe(true)
+    expect(isErpDataQuestion('¿Cuántas ganancias hubo en el último mes?')).toBe(true)
+    expect(isErpDataQuestion('¿Quién está en la nómina?')).toBe(true)
+    expect(isErpDataQuestion('¿Cuánto pagué de luz este año?')).toBe(true)
     expect(isErpDataQuestion('hola')).toBe(false)
   })
 
@@ -51,6 +54,32 @@ describe('erp-db-harness', () => {
     expect(picks.map(pick => pick.toolId)).toEqual(expect.arrayContaining(['sales_total_period']))
   })
 
+  it('selects cash_flow_period for ganancias del último mes', () => {
+    const picks = selectErpToolsForQuestion(
+      '¿Cuántas ganancias hubo en el último mes?',
+      DEFAULT_ALLOWED_ERP_TOOLS
+    )
+    expect(picks[0]?.toolId).toBe('cash_flow_period')
+    expect(picks[0]?.args).toMatchObject({ period: 'rolling', rollingDays: 31 })
+  })
+
+  it('selects payroll_roster for quién está en la nómina', () => {
+    const picks = selectErpToolsForQuestion(
+      '¿Quién está en la nómina?',
+      DEFAULT_ALLOWED_ERP_TOOLS
+    )
+    expect(picks.map(pick => pick.toolId)).toContain('payroll_roster')
+  })
+
+  it('selects expenses_by_category for luz este año', () => {
+    const picks = selectErpToolsForQuestion(
+      '¿Cuánto pagué de luz este año?',
+      DEFAULT_ALLOWED_ERP_TOOLS
+    )
+    expect(picks[0]?.toolId).toBe('expenses_by_category')
+    expect(picks[0]?.args).toMatchObject({ category: 'luz', period: 'year' })
+  })
+
   it('does not select sales tools for clock questions with hoy', () => {
     const picks = selectErpToolsForQuestion('Que dia y hora es hoy', DEFAULT_ALLOWED_ERP_TOOLS)
     expect(picks).toEqual([])
@@ -82,5 +111,38 @@ describe('erp-db-harness', () => {
     expect(reply).toContain('Ventas hoy')
     expect(reply).toContain('SALE-1')
     expect(reply).toContain('Supabase Postgres')
+  })
+
+  it('formats expenses_by_category and payroll facts', () => {
+    const reply = formatDeterministicErpReply([
+      {
+        toolId: 'expenses_by_category',
+        ok: true,
+        facts: {
+          categoryLabel: 'Luz',
+          periodLabel: 'este año',
+          totalPaid: 1200.5,
+          expenseCount: 3
+        }
+      },
+      {
+        toolId: 'payroll_roster',
+        ok: true,
+        facts: {
+          activeStaffCount: 2,
+          activeStaff: [
+            { username: 'ana', role: 'cashier' },
+            { username: 'admin', role: 'admin' }
+          ],
+          periodLabel: 'este mes',
+          payrollExpenseTotal: 8000,
+          payrollExpenseCount: 1
+        }
+      }
+    ])
+    expect(reply).toContain('Luz')
+    expect(reply).toContain('1200.50')
+    expect(reply).toContain('ana')
+    expect(reply).toContain('8000.00')
   })
 })

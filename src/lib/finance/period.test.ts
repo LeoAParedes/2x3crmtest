@@ -4,13 +4,23 @@ import {
   FINANCE_TIME_ZONE,
   formatBucketKey,
   getPeriodBounds,
+  getPreviousMonthBounds,
   getRollingBounds,
+  getYearBounds,
   isFinancePeriod,
   resolveSeriesPeriod,
   zonedWallTimeToUtc
 } from '@/src/lib/finance/period'
 
 describe('finance period helpers', () => {
+  it('builds previous calendar month and year-to-date bounds', () => {
+    const now = zonedWallTimeToUtc(2026, 8, 11, 12, 0, 0, FINANCE_TIME_ZONE)
+    const prev = getPreviousMonthBounds(now, FINANCE_TIME_ZONE)
+    expect(formatBucketKey(prev.start, 'week', FINANCE_TIME_ZONE).toLowerCase()).toMatch(/jul/)
+    const ytd = getYearBounds(now, FINANCE_TIME_ZONE)
+    expect(formatBucketKey(ytd.start, 'week', FINANCE_TIME_ZONE).toLowerCase()).toMatch(/ene|jan/)
+  })
+
   it('accepts day week and month periods', () => {
     expect(isFinancePeriod('day')).toBe(true)
     expect(isFinancePeriod('week')).toBe(true)

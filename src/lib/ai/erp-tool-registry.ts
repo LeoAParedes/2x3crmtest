@@ -1,14 +1,16 @@
 import { z } from 'zod'
 
+import { AI_PERIOD_KINDS } from '@/src/lib/ai/ai-date-range'
 import {
   ERP_TOOL_IDS,
   isErpToolId,
   NEW_ERP_TOOL_IDS,
   type ErpToolId
 } from '@/src/lib/ai/erp-tool-ids'
+import { EXPENSE_CATEGORIES } from '@/src/lib/finance/expense-schema'
 import { FINANCE_TIME_ZONE, isFinancePeriod, type FinancePeriod } from '@/src/lib/finance/period'
 
-const periodSchema = z.enum(['day', 'week', 'month'])
+const periodSchema = z.enum(AI_PERIOD_KINDS)
 
 export type ErpToolDefinition = {
   id: ErpToolId
@@ -20,12 +22,30 @@ export type ErpToolDefinition = {
 const emptyObjectSchema = z.object({})
 
 const periodInputSchema = z.object({
-  period: periodSchema.default('day')
+  period: periodSchema.default('month'),
+  rollingDays: z.number().int().min(1).max(366).optional(),
+  fromDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  toDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
 })
 
 const topProductInputSchema = z.object({
   period: periodSchema.default('week'),
-  limit: z.number().int().min(1).max(10).default(5)
+  limit: z.number().int().min(1).max(10).default(5),
+  rollingDays: z.number().int().min(1).max(366).optional(),
+  fromDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  toDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
 })
 
 const stockSearchInputSchema = z.object({
@@ -34,10 +54,70 @@ const stockSearchInputSchema = z.object({
 
 const recentSalesInputSchema = z.object({
   period: periodSchema.default('day'),
-  limit: z.number().int().min(1).max(20).default(8)
+  limit: z.number().int().min(1).max(20).default(8),
+  rollingDays: z.number().int().min(1).max(366).optional(),
+  fromDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  toDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
 })
 
-const tzNote = `Zona ${FINANCE_TIME_ZONE}; el día inicia a las 00:00 local. Datos frescos de Postgres (Sale/SaleItem/Expense/InventoryItem).`
+const expensesByCategoryInputSchema = z.object({
+  category: z.enum(EXPENSE_CATEGORIES),
+  period: periodSchema.default('year'),
+  rollingDays: z.number().int().min(1).max(366).optional(),
+  fromDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  toDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  limit: z.number().int().min(1).max(50).default(15)
+})
+
+const payrollRosterInputSchema = z.object({
+  period: periodSchema.default('month'),
+  rollingDays: z.number().int().min(1).max(366).optional(),
+  fromDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  toDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+})
+
+const periodParamProperties = {
+  period: {
+    type: 'string',
+    enum: [...AI_PERIOD_KINDS],
+    description:
+      'Periodo: day|week|month (calendario local), year (YTD), last_month (mes calendario anterior), last_year, rolling (+rollingDays). “último mes” → rolling 31; “este año” → year.'
+  },
+  rollingDays: {
+    type: 'integer',
+    minimum: 1,
+    maximum: 366,
+    description: 'Obligatorio si period=rolling (ej. 31 para último mes aproximado)'
+  },
+  fromDate: {
+    type: 'string',
+    description: 'Inicio ISO YYYY-MM-DD (opcional; con toDate redefine el periodo)'
+  },
+  toDate: {
+    type: 'string',
+    description: 'Fin ISO YYYY-MM-DD (opcional; con fromDate redefine el periodo)'
+  }
+} as const
+
+const tzNote = `Zona ${FINANCE_TIME_ZONE}; el día inicia a las 00:00 local. Datos frescos de Postgres (Sale/SaleItem/Expense/InventoryItem/UserProfile).`
 
 export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
   sales_total_today: {
@@ -52,16 +132,10 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
   },
   sales_total_period: {
     id: 'sales_total_period',
-    description: `Total de ventas POS completadas y tickets para period=day|week|month. ${tzNote}`,
+    description: `Total de ventas POS completadas y tickets para un periodo (day|week|month|year|last_month|rolling). ${tzNote}`,
     parameters: {
       type: 'object',
-      properties: {
-        period: {
-          type: 'string',
-          enum: ['day', 'week', 'month'],
-          description: 'Periodo a consultar'
-        }
-      },
+      properties: { ...periodParamProperties },
       required: ['period'],
       additionalProperties: false
     },
@@ -90,10 +164,7 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
     parameters: {
       type: 'object',
       properties: {
-        period: {
-          type: 'string',
-          enum: ['day', 'week', 'month']
-        },
+        ...periodParamProperties,
         limit: {
           type: 'integer',
           minimum: 1,
@@ -108,15 +179,10 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
   },
   cash_flow_period: {
     id: 'cash_flow_period',
-    description: `P&L del periodo: ingresos=Σ Sale.total completed; egresos=Σ Expense.amount (fijos+operativos); ganancia=ingresos−egresos. ${tzNote}`,
+    description: `P&L / ganancias del periodo: ingresos=Σ Sale.total completed; egresos=Σ Expense.amount (pasivos/servicios/nómina); ganancia=ingresos−egresos. Usa year para “este año”, rolling+31 para “último mes”. ${tzNote}`,
     parameters: {
       type: 'object',
-      properties: {
-        period: {
-          type: 'string',
-          enum: ['day', 'week', 'month']
-        }
-      },
+      properties: { ...periodParamProperties },
       required: ['period'],
       additionalProperties: false
     },
@@ -135,15 +201,10 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
   },
   expenses_total_period: {
     id: 'expenses_total_period',
-    description: `Suma Expense.amount del periodo (nómina, renta, proveedores, etc.). ${tzNote}`,
+    description: `Suma Expense.amount del periodo (todos los pasivos: nómina, renta, luz, etc.). ${tzNote}`,
     parameters: {
       type: 'object',
-      properties: {
-        period: {
-          type: 'string',
-          enum: ['day', 'week', 'month']
-        }
-      },
+      properties: { ...periodParamProperties },
       required: ['period'],
       additionalProperties: false
     },
@@ -154,12 +215,7 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
     description: `Ticket promedio = ingresos / número de ventas POS completed. ${tzNote}`,
     parameters: {
       type: 'object',
-      properties: {
-        period: {
-          type: 'string',
-          enum: ['day', 'week', 'month']
-        }
-      },
+      properties: { ...periodParamProperties },
       required: ['period'],
       additionalProperties: false
     },
@@ -171,10 +227,7 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
     parameters: {
       type: 'object',
       properties: {
-        period: {
-          type: 'string',
-          enum: ['day', 'week', 'month']
-        },
+        ...periodParamProperties,
         limit: {
           type: 'integer',
           minimum: 1,
@@ -197,6 +250,41 @@ export const ERP_TOOL_REGISTRY: Record<ErpToolId, ErpToolDefinition> = {
       additionalProperties: false
     },
     inputSchema: emptyObjectSchema
+  },
+  expenses_by_category: {
+    id: 'expenses_by_category',
+    description: `Cuánto se pagó de un servicio/pasivo (Expense.category: renta|luz|agua|gas|proveedores|nomina|mantenimiento|transporte|otros) en un periodo. Ideal para “cuánto pagué de luz este año”. ${tzNote}`,
+    parameters: {
+      type: 'object',
+      properties: {
+        category: {
+          type: 'string',
+          enum: [...EXPENSE_CATEGORIES],
+          description: 'Categoría de egreso / servicio / pasivo'
+        },
+        ...periodParamProperties,
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 50,
+          description: 'Máximo de movimientos a listar (default 15)'
+        }
+      },
+      required: ['category', 'period'],
+      additionalProperties: false
+    },
+    inputSchema: expensesByCategoryInputSchema
+  },
+  payroll_roster: {
+    id: 'payroll_roster',
+    description: `Quién está en la nómina: (1) personal activo UserProfile isActive; (2) pagos Expense category=nomina del periodo con montos/descripciones. ${tzNote}`,
+    parameters: {
+      type: 'object',
+      properties: { ...periodParamProperties },
+      required: ['period'],
+      additionalProperties: false
+    },
+    inputSchema: payrollRosterInputSchema
   }
 }
 
@@ -216,6 +304,7 @@ export const parseAllowedErpTools = (value: unknown): ErpToolId[] => {
   return parsed.length > 0 ? parsed : [...ERP_TOOL_IDS]
 }
 
+/** @deprecated Prefer resolveAiDateRangeFromArgs for year/rolling; kept for classic day|week|month. */
 export const resolvePeriod = (value: unknown, fallback: FinancePeriod = 'day'): FinancePeriod => {
   if (typeof value === 'string' && isFinancePeriod(value)) {
     return value

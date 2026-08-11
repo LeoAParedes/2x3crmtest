@@ -3,6 +3,8 @@ import { resolve } from 'node:path'
 
 import { executeErpTool, type ErpToolFactResult } from '@/src/lib/ai/erp-tool-executors'
 import { type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
+import { parseAiPeriodFromText, toToolPeriodArgs } from '@/src/lib/ai/ai-date-range'
+import { resolveExpenseCategoryFromText } from '@/src/lib/ai/erp-entity-catalog'
 import { getPrisma } from '@/src/lib/db/prisma'
 import {
   FINANCE_TIME_ZONE,
@@ -65,17 +67,21 @@ const normalizeIntentText = (message: string): string =>
 /** Business nouns/verbs — temporal words alone (hoy, semana, agosto…) are not enough. */
 const ERP_SALES_SIGNAL =
   /\b(venta|ventas|ticket|tickets|ingreso|ingresos|vendi[oó]|vendieron|vendimos|vendid[oa]s?|cobro|cobros)\b/
-const ERP_EXPENSE_SIGNAL = /\b(egreso|egresos|gasto|gastos|n[oó]mina|renta|proveedor)\b/
-const ERP_PROFIT_SIGNAL = /\b(ganancia|utilidad|pnl|p&l|flujo|caja|finanzas)\b/
+const ERP_EXPENSE_SIGNAL =
+  /\b(egreso|egresos|gasto|gastos|n[oó]mina|renta|proveedor|luz|agua|gas|pasivo|servicio|servicios|mantenimiento|transporte|pagu[eé]|pague|pagamos|pagado)\b/
+const ERP_PROFIT_SIGNAL = /\b(ganancia|ganancias|utilidad|utilidades|pnl|p&l|flujo|caja|finanzas)\b/
+const ERP_PAYROLL_SIGNAL =
+  /\b(n[oó]mina|nomina|sueldos?|salarios?|emplead[oa]s?|cajeros?)\b/
 const ERP_INVENTORY_SIGNAL =
   /\b(stock|inventario|sku|producto|productos|precio|low[\s-]?stock)\b/
 const ERP_METRIC_SIGNAL =
-  /\b(cu[aá]nto|cu[aá]ntos|cu[aá]ntas|total|promedio|top|ranking)\b/
+  /\b(cu[aá]nto|cu[aá]ntos|cu[aá]ntas|total|promedio|top|ranking|qui[eé]n|quienes)\b/
 
 const hasStrongErpNoun = (text: string): boolean =>
   ERP_SALES_SIGNAL.test(text) ||
   ERP_EXPENSE_SIGNAL.test(text) ||
   ERP_PROFIT_SIGNAL.test(text) ||
+  ERP_PAYROLL_SIGNAL.test(text) ||
   ERP_INVENTORY_SIGNAL.test(text)
 
 export const hasErpBusinessIntent = (message: string): boolean => {
@@ -237,43 +243,59 @@ export const selectErpToolsForQuestion = (
     return picks
   }
 
+  const periodArgs = toToolPeriodArgs(parseAiPeriodFromText(message))
+  const expenseCategory = resolveExpenseCategoryFromText(message)
+
   const wantsInventory = ERP_INVENTORY_SIGNAL.test(text) || /\bbajo\b/.test(text)
-  const wantsExpenses = ERP_EXPENSE_SIGNAL.test(text)
+  const wantsPayroll =
+    (/\bn[oó]mina\b/.test(text) || /\bnomina\b/.test(text) || /\bpersonal\b/.test(text) || /\bemplead/.test(text)) &&
+    (/\bqui[eé]n\b/.test(text) || /\bquienes\b/.test(text) || /\best[aá]n?\b/.test(text) || /\blista\b/.test(text))
+  const wantsCategoryExpense = Boolean(expenseCategory) && expenseCategory !== 'nomina'
+  const wantsNominaPayments =
+    expenseCategory === 'nomina' && /\b(cu[aá]nto|pagu|pagado|gaste|gasto)\b/.test(text)
+  const wantsExpenses =
+    (ERP_EXPENSE_SIGNAL.test(text) || wantsCategoryExpense) && !wantsPayroll
   const wantsProfit = ERP_PROFIT_SIGNAL.test(text)
   const wantsSales =
     ERP_SALES_SIGNAL.test(text) ||
-    /\b(cu[aá]nto|cu[aá]ntos|cu[aá]ntas|total)\b/.test(text) ||
-    wantsProfit
+    ((/\b(cu[aá]nto|cu[aá]ntos|cu[aá]ntas|total)\b/.test(text) || wantsProfit) &&
+      !wantsExpenses &&
+      !wantsPayroll &&
+      !wantsCategoryExpense)
   const wantsTop = /\b(top|ranking|mas vendido)\b/.test(text)
   const wantsRecent = /\b(reciente|ultim|ticket|tickets|que se vendio)\b/.test(text)
-  const wantsAllTime = /\b(sistema|historial|todas|acumulad)\b/.test(text)
 
-  if (wantsSales) {
-    if (wantsAllTime || (!/\bhoy\b/.test(text) && !/\bsemana\b/.test(text) && !/\bmes\b/.test(text))) {
-      allow('sales_total_period', { period: 'week' })
-      allow('sales_total_period', { period: 'month' })
-    }
-    if (/\bhoy\b/.test(text) || (!wantsAllTime && !/\bsemana\b/.test(text) && !/\bmes\b/.test(text))) {
-      allow('sales_total_today')
-    }
-    if (/\bsemana\b/.test(text)) {
-      allow('sales_total_period', { period: 'week' })
-    }
-    if (/\bmes\b/.test(text)) {
-      allow('sales_total_period', { period: 'month' })
-    }
+  if (wantsPayroll) {
+    allow('payroll_roster', periodArgs)
   }
+
+  if (wantsCategoryExpense && expenseCategory) {
+    allow('expenses_by_category', { ...periodArgs, category: expenseCategory })
+  } else if (wantsNominaPayments) {
+    allow('expenses_by_category', { ...periodArgs, category: 'nomina' })
+  }
+
   if (wantsProfit) {
-    allow('cash_flow_period', { period: 'week' })
+    allow('cash_flow_period', periodArgs)
   }
-  if (wantsExpenses) {
-    allow('expenses_total_period', { period: 'week' })
+
+  if (wantsSales && !wantsProfit) {
+    if (periodArgs.period === 'day') {
+      allow('sales_total_today')
+    } else {
+      allow('sales_total_period', periodArgs)
+    }
   }
+
+  if (wantsExpenses && !wantsCategoryExpense && !wantsNominaPayments) {
+    allow('expenses_total_period', periodArgs)
+  }
+
   if (wantsTop) {
-    allow('top_product_period', { period: 'week', limit: 5 })
+    allow('top_product_period', { ...periodArgs, limit: 5 })
   }
-  if (wantsRecent) {
-    allow('recent_pos_sales', { period: 'week', limit: 8 })
+  if (wantsRecent && wantsSales) {
+    allow('recent_pos_sales', { ...periodArgs, limit: 8 })
   }
   if (wantsInventory) {
     allow('inventory_snapshot')
@@ -351,13 +373,36 @@ export const formatDeterministicErpReply = (results: ErpToolFactResult[]): strin
     }
     if (result.toolId === 'cash_flow_period') {
       lines.push(
-        `P&L ${String(facts.period)}: ingresos $${money(facts.ingresos) ?? '0.00'} - egresos $${money(facts.egresos) ?? '0.00'} = ganancia $${money(facts.ganancia) ?? '0.00'}`
+        `P&L ${String(facts.periodLabel || facts.period)}: ingresos $${money(facts.ingresos) ?? '0.00'} - egresos $${money(facts.egresos) ?? '0.00'} = ganancia $${money(facts.ganancia) ?? '0.00'}`
       )
       continue
     }
     if (result.toolId === 'expenses_total_period') {
       lines.push(
-        `Egresos ${String(facts.period)}: $${money(facts.totalExpenses) ?? '0.00'} (${String(facts.expenseCount ?? 0)} registros)`
+        `Egresos ${String(facts.periodLabel || facts.period)}: $${money(facts.totalExpenses) ?? '0.00'} (${String(facts.expenseCount ?? 0)} registros)`
+      )
+      continue
+    }
+    if (result.toolId === 'expenses_by_category') {
+      lines.push(
+        `${String(facts.categoryLabel || facts.category)} ${String(facts.periodLabel || facts.period)}: $${money(facts.totalPaid) ?? '0.00'} (${String(facts.expenseCount ?? 0)} pagos)`
+      )
+      continue
+    }
+    if (result.toolId === 'payroll_roster') {
+      const staff = Array.isArray(facts.activeStaff) ? facts.activeStaff : []
+      const names = staff
+        .slice(0, 8)
+        .map(row => {
+          const person = row as { username?: string; role?: string }
+          return `${person.username || '?'} (${person.role || '?'})`
+        })
+        .join(', ')
+      lines.push(
+        `Nómina / personal activo: ${String(facts.activeStaffCount ?? 0)} — ${names || 'sin perfiles activos'}`
+      )
+      lines.push(
+        `Pagos nómina ${String(facts.periodLabel || facts.period)}: $${money(facts.payrollExpenseTotal) ?? '0.00'} (${String(facts.payrollExpenseCount ?? 0)} registros)`
       )
       continue
     }
