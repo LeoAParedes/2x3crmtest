@@ -369,11 +369,11 @@ export const ChatbotPanel = () => {
             <li className={metaStatus.blockers.openAiKeyInvalid ? 'text-rose-700' : 'text-emerald-700'}>
               OPENAI_API_KEY formato sk-: {metaStatus.blockers.openAiKeyInvalid ? 'No (corrige en Vercel + Redeploy)' : 'Sí'}
             </li>
-            <li className={metaStatus.blockers.recipientNotInAllowedList ? 'text-rose-700' : 'text-slate-600'}>
+            <li className={metaStatus.blockers.recipientNotInAllowedList ? 'text-rose-700 font-semibold' : 'text-emerald-700'}>
               Destinatario en lista To de Meta:{' '}
               {metaStatus.blockers.recipientNotInAllowedList
-                ? 'No (#131030) — agrégalo en API Setup'
-                : 'sin fallo reciente en esta instancia'}
+                ? 'NO (#131030) — este es el bloqueo actual: Meta recibe tu mensaje y ChatGPT responde, pero no puede enviarte la respuesta'
+                : 'OK / sin fallo reciente'}
             </li>
           </ul>
         ) : null}
