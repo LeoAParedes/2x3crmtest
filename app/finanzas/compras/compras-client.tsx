@@ -121,7 +121,9 @@ export const ComprasClient = () => {
   }, [])
 
   useEffect(() => {
-    void loadRestock()
+    queueMicrotask(() => {
+      void loadRestock()
+    })
   }, [loadRestock])
 
   const handleOpenPurchaseForm = (item: RestockItem) => {

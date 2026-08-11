@@ -53,7 +53,9 @@ export const ChatbotPanel = () => {
   }, [])
 
   useEffect(() => {
-    void handleLoad()
+    queueMicrotask(() => {
+      void handleLoad()
+    })
   }, [handleLoad])
 
   const handleSave = async () => {

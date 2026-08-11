@@ -73,7 +73,9 @@ export const PasivoClient = () => {
   }, [period])
 
   useEffect(() => {
-    void loadExpenses()
+    queueMicrotask(() => {
+      void loadExpenses()
+    })
   }, [loadExpenses])
 
   const handleCreateExpense = async (event: FormEvent<HTMLFormElement>) => {

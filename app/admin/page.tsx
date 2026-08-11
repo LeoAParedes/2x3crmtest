@@ -83,7 +83,9 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => {
-    void handleLoadMetrics()
+    queueMicrotask(() => {
+      void handleLoadMetrics()
+    })
   }, [handleLoadMetrics])
 
   const metricEntries = dashboard

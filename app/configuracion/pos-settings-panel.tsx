@@ -33,7 +33,9 @@ export const PosSettingsPanel = () => {
   }, [])
 
   useEffect(() => {
-    void handleLoad()
+    queueMicrotask(() => {
+      void handleLoad()
+    })
   }, [handleLoad])
 
   const handleSave = async () => {

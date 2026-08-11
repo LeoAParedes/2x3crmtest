@@ -61,7 +61,9 @@ export const PromocionesClient = () => {
   }, [])
 
   useEffect(() => {
-    void loadPromotions(false)
+    queueMicrotask(() => {
+      void loadPromotions(false)
+    })
     const intervalId = window.setInterval(() => {
       void loadPromotions(true)
     }, 30000)
