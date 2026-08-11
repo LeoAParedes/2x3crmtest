@@ -45,6 +45,7 @@ type PurchaseRow = {
   totalAmount: number
   paymentStatus: string
   soldByName: string | null
+  expiresOn: string | null
   purchasedAt: string
   createdByUsername: string
   supplier: { id: string; name: string; openBalance: number }
@@ -68,6 +69,7 @@ type EntryForm = {
   paymentStatus: 'paid' | 'credit'
   soldByName: string
   reason: string
+  expiresOn: string
 }
 
 const emptyEntry = (): EntryForm => ({
@@ -81,7 +83,8 @@ const emptyEntry = (): EntryForm => ({
   newSupplierName: '',
   paymentStatus: 'paid',
   soldByName: '',
-  reason: 'Compra a proveedor'
+  reason: 'Compra a proveedor',
+  expiresOn: ''
 })
 
 export const ComprasClient = () => {
@@ -261,6 +264,10 @@ export const ComprasClient = () => {
       setError('Selecciona un proveedor o escribe uno nuevo')
       return
     }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(entryForm.expiresOn)) {
+      setError('Indica la fecha de caducidad del lote (obligatoria)')
+      return
+    }
 
     const quantityNumber = Number(entryForm.quantity.replace(',', '.'))
     const unitCost = Number(entryForm.unitCost.replace(',', '.'))
@@ -297,7 +304,8 @@ export const ComprasClient = () => {
           unitCost,
           paymentStatus: entryForm.paymentStatus,
           soldByName: entryForm.soldByName.trim() || undefined,
-          reason: entryForm.reason.trim() || 'Compra a proveedor'
+          reason: entryForm.reason.trim() || 'Compra a proveedor',
+          expiresOn: entryForm.expiresOn
         })
       })
       const payload = (await response.json()) as { success?: boolean; message?: string }
@@ -446,6 +454,17 @@ export const ComprasClient = () => {
                 onChange={event => setEntryForm(current => ({ ...current, unitCost: event.target.value }))}
                 aria-label='Costo unitario'
                 className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums'
+              />
+            </label>
+            <label className='grid gap-1 text-xs font-medium text-slate-600'>
+              Caducidad del lote
+              <input
+                type='date'
+                value={entryForm.expiresOn}
+                onChange={event => setEntryForm(current => ({ ...current, expiresOn: event.target.value }))}
+                aria-label='Fecha de caducidad del lote'
+                required
+                className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm'
               />
             </label>
             <label className='grid gap-1 text-xs font-medium text-slate-600'>

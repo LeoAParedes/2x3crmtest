@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from 'react'
 
+import { WorkspaceAlertsBell } from '@/app/components/workspace-alerts-bell'
 import type { CrmRole } from '@/src/lib/security/rbac'
 
 type WorkspaceShellProps = {
@@ -558,6 +559,7 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
               <span className='rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600'>{role}</span>
             </div>
             <div className='flex items-center gap-2'>
+              <WorkspaceAlertsBell />
               {canAccessPos ? (
                 <Link
                   href='/pos?openCart=1'

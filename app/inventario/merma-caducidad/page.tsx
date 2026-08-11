@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 
 import { MermaCaducidadClient } from '@/app/inventario/merma-caducidad/merma-caducidad-client'
@@ -12,7 +13,9 @@ export default async function MermaCaducidadPage() {
 
   return (
     <WorkspaceShell username={actor.username} role={actor.role}>
-      <MermaCaducidadClient />
+      <Suspense fallback={<p className='px-4 py-8 text-sm text-slate-600'>Cargando merma…</p>}>
+        <MermaCaducidadClient />
+      </Suspense>
     </WorkspaceShell>
   )
 }

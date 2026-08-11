@@ -1,9 +1,16 @@
 import { z } from 'zod'
 
 import { getPrisma } from '@/src/lib/db/prisma'
+import { FINANCE_TIME_ZONE, getTimeZoneParts } from '@/src/lib/finance/period'
 import { calculateWeightedAveragePrice } from '@/src/lib/inventory/valuation'
 import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
+import { parseExpiresOnInput } from '@/src/lib/inventory/lot-service'
 import type { AuthenticatedActor } from '@/src/lib/security/api-auth'
+
+const toBusinessIsoDate = (date: Date) => {
+  const parts = getTimeZoneParts(date, FINANCE_TIME_ZONE)
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
+}
 
 const toMoney = (value: number) => Number(value.toFixed(2))
 
@@ -23,7 +30,8 @@ export const purchaseEntrySchema = z.object({
   unitCost: z.number().positive().max(1_000_000),
   paymentStatus: z.enum(['paid', 'credit']),
   soldByName: z.string().trim().max(120).optional().or(z.literal('')),
-  reason: z.string().trim().min(2).max(240).default('Compra a proveedor')
+  reason: z.string().trim().min(2).max(240).default('Compra a proveedor'),
+  expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 })
 
 export type PurchaseEntryInput = z.infer<typeof purchaseEntrySchema>
@@ -107,6 +115,7 @@ export const listRecentPurchases = async (limit = 20) => {
     totalAmount: Number(purchase.totalAmount),
     paymentStatus: purchase.paymentStatus,
     soldByName: purchase.soldByName,
+    expiresOn: purchase.expiresOn ? toBusinessIsoDate(purchase.expiresOn) : null,
     purchasedAt: purchase.purchasedAt.toISOString(),
     createdByUsername: purchase.createdByUsername,
     supplier: {
@@ -128,6 +137,7 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
     throw new Error('SUPPLIER_REQUIRED')
   }
 
+  const expiresOn = parseExpiresOnInput(input.expiresOn)
   const prisma = await getPrisma()
   const totalAmount = toMoney(input.quantity * input.unitCost)
 
@@ -180,7 +190,8 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
           valuationMethod: 'average',
           source: 'purchase',
           supplierId,
-          paymentStatus: input.paymentStatus
+          paymentStatus: input.paymentStatus,
+          expiresOn: input.expiresOn
         })
       }
     })
@@ -235,7 +246,19 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
         reason: input.reason,
         expenseId,
         movementId: movement.id,
+        expiresOn,
         createdByUsername: actor.username
+      }
+    })
+
+    const lot = await transaction.inventoryLot.create({
+      data: {
+        purchaseId: purchase.id,
+        inventoryItemId: item.id,
+        quantityReceived: input.quantity,
+        quantityRemaining: input.quantity,
+        expiresOn,
+        status: 'active'
       }
     })
 
@@ -256,7 +279,9 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
           totalAmount,
           paymentStatus: input.paymentStatus,
           expenseId,
-          movementId: movement.id
+          movementId: movement.id,
+          lotId: lot.id,
+          expiresOn: input.expiresOn
         }
       }
     })
@@ -267,7 +292,8 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
       purchase,
       item: updatedItem,
       supplier: refreshedSupplier,
-      expenseId
+      expenseId,
+      lot
     }
   })
 
@@ -278,6 +304,8 @@ export const createPurchaseEntry = async (rawInput: unknown, actor: Authenticate
     unitCost: Number(result.purchase.unitCost),
     totalAmount: Number(result.purchase.totalAmount),
     expenseId: result.expenseId,
+    expiresOn: input.expiresOn,
+    lotId: result.lot.id,
     product: {
       id: result.item.id,
       sku: result.item.sku,

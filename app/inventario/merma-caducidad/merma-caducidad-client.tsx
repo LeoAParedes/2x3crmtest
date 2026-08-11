@@ -1,77 +1,56 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 
-import { formatMxnCurrency } from '@/src/lib/mxn-currency'
-import { formatStockQuantityLabel } from '@/src/lib/inventory/logbook-quantity'
-import { isLowStockItem } from '@/src/lib/inventory/low-stock'
-
-type InventoryItem = {
+type InventoryLot = {
   id: string
+  purchaseId: string
+  inventoryItemId: string
   sku: string
   productName: string
-  category: string
-  stock: number
-  minStock: number
-  unitPrice: number
-  supportsWeight?: boolean
-  aisle?: string | null
-}
-
-type ExpiryNote = {
-  inventoryItemId: string
+  quantityReceived: number
+  quantityRemaining: number
   expiresOn: string
-  note: string
-}
-
-const EXPIRY_STORAGE_KEY = 'inventory_expiry_notes_v1'
-
-const readExpiryNotes = (): ExpiryNote[] => {
-  if (typeof window === 'undefined') return []
-  try {
-    const raw = window.localStorage.getItem(EXPIRY_STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as ExpiryNote[]
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-const writeExpiryNotes = (notes: ExpiryNote[]) => {
-  window.localStorage.setItem(EXPIRY_STORAGE_KEY, JSON.stringify(notes))
+  status: string
+  alertKind: 'expiring' | 'expired' | null
 }
 
 export const MermaCaducidadClient = () => {
-  const [items, setItems] = useState<InventoryItem[]>([])
+  const searchParams = useSearchParams()
+  const preselectedLotId = searchParams.get('lotId') || ''
+
+  const [lots, setLots] = useState<InventoryLot[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState('')
+  const [manualLotId, setManualLotId] = useState('')
   const [quantity, setQuantity] = useState('1')
-  const [reason, setReason] = useState('Merma')
-  const [expiresOn, setExpiresOn] = useState('')
-  const [expiryNote, setExpiryNote] = useState('')
-  const [expiryNotes, setExpiryNotes] = useState<ExpiryNote[]>(() => readExpiryNotes())
+  const [reason, setReason] = useState('Merma por caducidad')
   const [submitting, setSubmitting] = useState(false)
+
+  const selectedLotId = manualLotId || preselectedLotId
+
+  const loadLots = async () => {
+    const response = await fetch('/api/inventario/lotes')
+    const payload = (await response.json()) as {
+      success?: boolean
+      lots?: InventoryLot[]
+      message?: string
+    }
+    if (!response.ok || !payload.success) {
+      throw new Error(payload.message || 'No fue posible cargar lotes')
+    }
+    setLots(payload.lots || [])
+  }
 
   useEffect(() => {
     let cancelled = false
     const load = async () => {
       try {
-        const response = await fetch('/api/pos/inventory?page=1&pageSize=200')
-        const payload = (await response.json()) as {
-          success?: boolean
-          items?: InventoryItem[]
-          message?: string
-        }
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.message || 'No fue posible cargar inventario')
-        }
-        if (!cancelled) {
-          setItems(payload.items || [])
-          setError(null)
-        }
+        await loadLots()
+        if (!cancelled) setError(null)
       } catch (loadError) {
         if (!cancelled) {
           setError(loadError instanceof Error ? loadError.message : 'Error de carga')
@@ -86,16 +65,11 @@ export const MermaCaducidadClient = () => {
     }
   }, [])
 
-  const lowStock = useMemo(() => items.filter(item => isLowStockItem(item)), [items])
-  const selected = items.find(item => item.id === selectedId) || null
-
-  const notesByItem = useMemo(() => {
-    const map = new Map<string, ExpiryNote>()
-    for (const note of expiryNotes) {
-      map.set(note.inventoryItemId, note)
-    }
-    return map
-  }, [expiryNotes])
+  const alertLots = useMemo(
+    () => lots.filter(lot => lot.alertKind === 'expired' || lot.alertKind === 'expiring'),
+    [lots]
+  )
+  const selected = lots.find(lot => lot.id === selectedLotId) || null
 
   const handleRegisterMerma = async () => {
     if (submitting || !selected) return
@@ -104,31 +78,30 @@ export const MermaCaducidadClient = () => {
     setError(null)
     try {
       const qty = Number(quantity.replace(',', '.'))
-      if (!Number.isFinite(qty) || qty <= 0) {
-        throw new Error('Indica una cantidad válida de merma')
+      if (!Number.isInteger(qty) || qty <= 0) {
+        throw new Error('Indica una cantidad entera válida')
       }
-      const response = await fetch('/api/inventario/ajustes', {
+      if (qty > selected.quantityRemaining) {
+        throw new Error('La cantidad supera el restante del lote')
+      }
+
+      const response = await fetch('/api/inventario/lotes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          inventoryItemId: selected.id,
-          operation: 'stock_exit',
+          lotId: selected.id,
           quantity: qty,
-          reason: reason.trim() || 'Merma',
-          valuationMethod: 'fifo'
+          reason: reason.trim() || 'Merma por caducidad'
         })
       })
       const payload = (await response.json()) as { success?: boolean; message?: string }
       if (!response.ok || !payload.success) {
-        throw new Error(payload.message || 'No fue posible registrar la merma')
+        throw new Error(payload.message || 'No fue posible registrar la salida del lote')
       }
-      setMessage(`Merma registrada en ${selected.productName}`)
+
+      setMessage(`Salida registrada del lote ${selected.sku} · caduca ${selected.expiresOn}`)
       setQuantity('1')
-      const refresh = await fetch('/api/pos/inventory?page=1&pageSize=200')
-      const refreshPayload = (await refresh.json()) as { success?: boolean; items?: InventoryItem[] }
-      if (refresh.ok && refreshPayload.success) {
-        setItems(refreshPayload.items || [])
-      }
+      await loadLots()
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Error al registrar merma')
     } finally {
@@ -136,185 +109,122 @@ export const MermaCaducidadClient = () => {
     }
   }
 
-  const handleSaveExpiry = () => {
-    if (!selectedId || !expiresOn) {
-      setError('Selecciona producto y fecha de caducidad')
-      return
-    }
-    const nextNote: ExpiryNote = {
-      inventoryItemId: selectedId,
-      expiresOn,
-      note: expiryNote.trim()
-    }
-    const next = [...expiryNotes.filter(item => item.inventoryItemId !== selectedId), nextNote]
-    setExpiryNotes(next)
-    writeExpiryNotes(next)
-    setMessage('Fecha de caducidad guardada')
-    setError(null)
-  }
-
   return (
-    <main className='mx-auto max-w-6xl px-4 py-8 md:px-8'>
+    <main className='mx-auto max-w-5xl px-4 py-8 md:px-8'>
       <section className='border-b border-slate-200 pb-5'>
-        <h1 className='text-2xl font-semibold text-slate-950'>Merma y Caducidad</h1>
+        <h1 className='text-2xl font-semibold text-slate-950'>Merma y caducidad</h1>
         <p className='mt-1 text-sm text-slate-600'>
-          Registra salidas por merma y marca productos próximos a caducar.
+          La caducidad vive en Supabase por lote de compra. Da salida solo del lote seleccionado (FEFO).
+        </p>
+        <p className='mt-2 text-xs text-slate-500'>
+          Para registrar una fecha nueva, usa{' '}
+          <Link href='/finanzas/compras' className='font-medium text-slate-800 underline'>
+            Compras y proveedores
+          </Link>{' '}
+          e indica la caducidad del lote al dar entrada.
         </p>
       </section>
 
-      <div className='mt-6 grid gap-6 lg:grid-cols-2'>
-        <section className='rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
-          <h2 className='text-sm font-semibold text-slate-900'>Registrar merma</h2>
-          <label className='mt-4 grid gap-1 text-sm text-slate-700'>
-            Producto
-            <select
-              value={selectedId}
-              onChange={event => setSelectedId(event.target.value)}
-              aria-label='Producto para merma'
-              className='h-10 rounded-lg border border-slate-300 px-3'
-            >
-              <option value=''>Selecciona…</option>
-              {items.map(item => (
-                <option key={item.id} value={item.id}>
-                  {item.sku} — {item.productName} ({item.stock})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className='mt-3 grid gap-1 text-sm text-slate-700'>
-            Cantidad
-            <input
-              value={quantity}
-              onChange={event => setQuantity(event.target.value)}
-              aria-label='Cantidad de merma'
-              className='h-10 rounded-lg border border-slate-300 px-3'
-            />
-          </label>
-          <label className='mt-3 grid gap-1 text-sm text-slate-700'>
-            Motivo
-            <input
-              value={reason}
-              onChange={event => setReason(event.target.value)}
-              aria-label='Motivo de merma'
-              className='h-10 rounded-lg border border-slate-300 px-3'
-            />
-          </label>
-          {selected ? (
-            <p className='mt-2 text-xs text-slate-500'>
-              Stock actual {formatStockQuantityLabel(selected.stock, selected.supportsWeight ?? false)} ·{' '}
-              {formatMxnCurrency(selected.unitPrice)} c/u
-            </p>
-          ) : null}
-          <button
-            type='button'
-            onClick={() => void handleRegisterMerma()}
-            disabled={submitting || !selectedId}
-            aria-label='Registrar merma'
-            className='mt-4 h-10 rounded-lg bg-rose-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
-          >
-            {submitting ? 'Registrando…' : 'Registrar merma'}
-          </button>
-        </section>
-
-        <section className='rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
-          <h2 className='text-sm font-semibold text-slate-900'>Caducidad</h2>
-          <label className='mt-4 grid gap-1 text-sm text-slate-700'>
-            Producto
-            <select
-              value={selectedId}
-              onChange={event => setSelectedId(event.target.value)}
-              aria-label='Producto para caducidad'
-              className='h-10 rounded-lg border border-slate-300 px-3'
-            >
-              <option value=''>Selecciona…</option>
-              {items.map(item => (
-                <option key={item.id} value={item.id}>
-                  {item.sku} — {item.productName}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className='mt-3 grid gap-1 text-sm text-slate-700'>
-            Fecha de caducidad
-            <input
-              type='date'
-              value={expiresOn}
-              onChange={event => setExpiresOn(event.target.value)}
-              aria-label='Fecha de caducidad'
-              className='h-10 rounded-lg border border-slate-300 px-3'
-            />
-          </label>
-          <label className='mt-3 grid gap-1 text-sm text-slate-700'>
-            Nota
-            <input
-              value={expiryNote}
-              onChange={event => setExpiryNote(event.target.value)}
-              aria-label='Nota de caducidad'
-              className='h-10 rounded-lg border border-slate-300 px-3'
-              placeholder='Lote, ubicación…'
-            />
-          </label>
-          <button
-            type='button'
-            onClick={handleSaveExpiry}
-            disabled={!selectedId}
-            aria-label='Guardar caducidad'
-            className='mt-4 h-10 rounded-lg bg-amber-600 px-4 text-sm font-semibold text-white disabled:opacity-50'
-          >
-            Guardar caducidad
-          </button>
-        </section>
-      </div>
-
-      <section className='mt-6 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm'>
-        <div className='border-b border-slate-200 px-4 py-3'>
-          <h2 className='text-sm font-semibold text-slate-900'>Alertas</h2>
-        </div>
-        <table className='min-w-full divide-y divide-slate-200'>
-          <thead className='bg-slate-50'>
-            <tr>
-              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>SKU</th>
-              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Producto</th>
-              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Stock</th>
-              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Caduca</th>
-              <th className='px-3 py-2 text-left text-xs font-semibold uppercase text-slate-500'>Estado</th>
-            </tr>
-          </thead>
-          <tbody className='divide-y divide-slate-100'>
-            {[...lowStock, ...items.filter(item => notesByItem.has(item.id) && !isLowStockItem(item))]
-              .slice(0, 40)
-              .map(item => {
-                const note = notesByItem.get(item.id)
-                return (
-                  <tr key={item.id}>
-                    <td className='px-3 py-2 text-sm text-slate-700'>{item.sku}</td>
-                    <td className='px-3 py-2 text-sm text-slate-900'>{item.productName}</td>
-                    <td className='px-3 py-2 text-sm text-slate-700'>{item.stock}</td>
-                    <td className='px-3 py-2 text-sm text-slate-700'>{note?.expiresOn || '—'}</td>
-                    <td className='px-3 py-2 text-sm text-slate-700'>
-                      {isLowStockItem(item) ? 'Stock bajo' : note ? 'Con caducidad' : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-          </tbody>
-        </table>
-        {loading ? <p className='px-4 py-4 text-sm text-slate-500'>Cargando…</p> : null}
-        {!loading && !lowStock.length && !expiryNotes.length ? (
-          <p className='px-4 py-4 text-sm text-slate-500'>Sin alertas de merma o caducidad por ahora.</p>
-        ) : null}
-      </section>
-
+      {loading ? <p className='mt-6 text-sm text-slate-600'>Cargando lotes…</p> : null}
       {error ? (
-        <p role='alert' className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
+        <p className='mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800' role='alert'>
           {error}
         </p>
       ) : null}
       {message ? (
-        <p aria-live='polite' className='mt-4 text-sm text-emerald-700'>
+        <p className='mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900'>
           {message}
         </p>
       ) : null}
+
+      <section className='mt-6 rounded-xl border border-slate-200 bg-white p-4' aria-label='Alertas de caducidad'>
+        <h2 className='text-sm font-semibold text-slate-900'>Alertas (1 día antes y vencidos)</h2>
+        {alertLots.length === 0 ? (
+          <p className='mt-2 text-sm text-slate-500'>Sin lotes próximos a caducar ni vencidos.</p>
+        ) : (
+          <ul className='mt-3 divide-y divide-slate-100'>
+            {alertLots.map(lot => (
+              <li key={lot.id} className='flex flex-wrap items-center justify-between gap-2 py-2 text-sm'>
+                <div>
+                  <p className='font-medium text-slate-900'>
+                    {lot.productName}{' '}
+                    <span className='text-xs font-normal text-slate-500'>({lot.sku})</span>
+                  </p>
+                  <p className='text-xs text-slate-600'>
+                    Caduca {lot.expiresOn} · restante {lot.quantityRemaining} ·{' '}
+                    {lot.alertKind === 'expired' ? 'Vencido' : 'Caduca mañana'}
+                  </p>
+                </div>
+                <button
+                  type='button'
+                  aria-label={`Seleccionar lote ${lot.sku} para salida`}
+                  onClick={() => setManualLotId(lot.id)}
+                  className='rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50'
+                >
+                  Seleccionar lote
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className='mt-6 rounded-xl border border-slate-200 bg-white p-4' aria-label='Salida de lote'>
+        <h2 className='text-sm font-semibold text-slate-900'>Dar salida por merma (lote)</h2>
+        <div className='mt-3 grid gap-3 sm:grid-cols-2'>
+          <label className='grid gap-1 text-xs font-medium text-slate-600'>
+            Lote
+            <select
+              value={selectedLotId}
+              onChange={event => setManualLotId(event.target.value)}
+              aria-label='Seleccionar lote'
+              className='h-10 rounded-lg border border-slate-300 bg-white px-2 text-sm'
+            >
+              <option value=''>Selecciona un lote</option>
+              {lots.map(lot => (
+                <option key={lot.id} value={lot.id}>
+                  {lot.productName} · {lot.sku} · caduca {lot.expiresOn} · {lot.quantityRemaining} uds
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className='grid gap-1 text-xs font-medium text-slate-600'>
+            Cantidad a sacar
+            <input
+              type='text'
+              inputMode='numeric'
+              value={quantity}
+              onChange={event => setQuantity(event.target.value)}
+              aria-label='Cantidad de merma del lote'
+              className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums'
+            />
+          </label>
+          <label className='grid gap-1 text-xs font-medium text-slate-600 sm:col-span-2'>
+            Motivo
+            <input
+              type='text'
+              value={reason}
+              onChange={event => setReason(event.target.value)}
+              aria-label='Motivo de merma'
+              className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm'
+            />
+          </label>
+        </div>
+        {selected ? (
+          <p className='mt-3 text-xs text-slate-600'>
+            Lote seleccionado: restante {selected.quantityRemaining} · caduca {selected.expiresOn}
+          </p>
+        ) : null}
+        <button
+          type='button'
+          aria-label='Registrar salida del lote'
+          disabled={submitting || !selected}
+          onClick={() => void handleRegisterMerma()}
+          className='mt-4 h-10 rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50'
+        >
+          {submitting ? 'Registrando…' : 'Registrar salida del lote'}
+        </button>
+      </section>
     </main>
   )
 }

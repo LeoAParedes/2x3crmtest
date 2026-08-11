@@ -145,6 +145,29 @@ model InventoryItem {
   saleItems        SaleItem[]
   productSuppliers ProductSupplier[]
   purchases        Purchase[]
+  lots             InventoryLot[]
+}
+
+/// One purchase receipt creates one lot with a single expiry date.
+model InventoryLot {
+  id                String        @id @default(cuid())
+  purchaseId        String        @unique
+  inventoryItemId   String
+  quantityReceived  Int
+  quantityRemaining Int
+  /// Calendar expiry date (business day start in America/Los_Angeles, stored as UTC DateTime).
+  expiresOn         DateTime
+  receivedAt        DateTime      @default(now())
+  /// active | exhausted | wasted
+  status            String        @default("active")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  purchase          Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  inventoryItem     InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([inventoryItemId, expiresOn])
+  @@index([status, expiresOn])
+  @@index([expiresOn])
 }
 
 model InventoryMovement {
@@ -206,12 +229,15 @@ model Purchase {
   reason            String?
   expenseId         String?
   movementId        String?
+  /// Lot expiry calendar date for this purchase receipt.
+  expiresOn         DateTime?
   purchasedAt       DateTime       @default(now())
   createdByUsername String
   createdAt         DateTime       @default(now())
   updatedAt         DateTime       @updatedAt
   supplier          Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   inventoryItem     InventoryItem  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  lot               InventoryLot?
 
   @@index([supplierId, purchasedAt])
   @@index([inventoryItemId, purchasedAt])
