@@ -61,7 +61,10 @@ const graphGet = async <T,>(path: string): Promise<{ data?: T; error?: string }>
   return { data: payload }
 }
 
-const graphPost = async <T,>(path: string): Promise<{ data?: T; error?: string }> => {
+const graphPost = async <T,>(
+  path: string,
+  body?: Record<string, string>
+): Promise<{ data?: T; error?: string }> => {
   if (!env.metaAccessToken) {
     return { error: 'META_ACCESS_TOKEN missing' }
   }
@@ -73,6 +76,7 @@ const graphPost = async <T,>(path: string): Promise<{ data?: T; error?: string }
       Authorization: `Bearer ${env.metaAccessToken}`,
       'Content-Type': 'application/json'
     },
+    body: body ? JSON.stringify(body) : undefined,
     cache: 'no-store'
   })
   const payload = (await response.json()) as T & GraphError
@@ -199,16 +203,36 @@ export const subscribeCurrentAppToWaba = async () => {
   if (!env.metaBusinessAccountId) {
     return { ok: false as const, error: 'META_BUSINESS_ACCOUNT_ID missing' }
   }
+  if (!env.metaWebhookVerifyToken) {
+    return { ok: false as const, error: 'META_WEBHOOK_VERIFY_TOKEN missing' }
+  }
 
-  const result = await graphPost<{ success?: boolean }>(`/${env.metaBusinessAccountId}/subscribed_apps`)
+  const configuredBase = env.appBaseUrl.replace(/\/$/, '')
+  const productionFallback =
+    process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim()
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL.trim()}`
+      : 'https://2x3crmtest.vercel.app'
+  const baseUrl =
+    !configuredBase || configuredBase.includes('localhost') ? productionFallback : configuredBase
+  const callbackUri = `${baseUrl}/api/whatsapp/webhook`
+  // Meta verifies this callback with GET hub.challenge using verify_token.
+  // Without override_callback_uri, WABA can stay on Meta DevX and never POST to Vercel.
+  const result = await graphPost<{ success?: boolean }>(`/${env.metaBusinessAccountId}/subscribed_apps`, {
+    override_callback_uri: callbackUri,
+    verify_token: env.metaWebhookVerifyToken
+  })
   if (result.error) {
-    return { ok: false as const, error: result.error }
+    return {
+      ok: false as const,
+      error: `${result.error} (callback=${callbackUri}). Confirma que META_WEBHOOK_VERIFY_TOKEN en Vercel es exactamente el mismo que usas al verificar el webhook en Meta.`
+    }
   }
 
   const check = await checkMetaWhatsAppSubscription()
   return {
     ok: true as const,
     graph: result.data,
+    callbackUri,
     subscription: check
   }
 }

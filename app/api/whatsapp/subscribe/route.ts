@@ -41,6 +41,7 @@ export async function POST(request: Request) {
   return jsonOk({
     success: true,
     graph: result.graph,
+    callbackUri: result.callbackUri,
     subscription: result.subscription
   })
 }

@@ -146,6 +146,7 @@ export const ChatbotPanel = () => {
       const payload = (await response.json()) as {
         success?: boolean
         message?: string
+        callbackUri?: string
         subscription?: MetaStatusResponse['metaSubscription']
       }
       if (!response.ok || !payload.success) {
@@ -157,7 +158,7 @@ export const ChatbotPanel = () => {
       }))
       setMessage(
         payload.subscription?.tokenAppIsSubscribed
-          ? 'App suscrita al WABA. Ya puedes escribir al número de prueba.'
+          ? `App suscrita con callback ${payload.callbackUri || ''}. Escribe a +1 555-204-7381.`
           : 'Subscribe ejecutado, pero Graph aún no lista tu app. Revisa el token/app en Meta.'
       )
     } catch (subscribeError) {

@@ -45,8 +45,53 @@ export async function GET(request: Request) {
   const mode = searchParams.get(challengeModeKey)
   const token = searchParams.get(challengeTokenKey)
   const challenge = searchParams.get(challengeResponseKey)
+  const configuredToken = env.metaWebhookVerifyToken
+  const tokenMatches = Boolean(token && configuredToken && token === configuredToken)
 
-  if (mode === 'subscribe' && token && env.metaWebhookVerifyToken && token === env.metaWebhookVerifyToken) {
+  // #region agent log
+  fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
+    body: JSON.stringify({
+      sessionId: '449600',
+      runId: 'whatsapp-webhook',
+      hypothesisId: 'G',
+      location: 'webhook/route.ts:GET',
+      message: 'Meta webhook verification challenge',
+      data: {
+        mode,
+        hasToken: Boolean(token),
+        hasConfiguredToken: Boolean(configuredToken),
+        tokenMatches,
+        hasChallenge: Boolean(challenge),
+        tokenLength: token?.length || 0,
+        configuredTokenLength: configuredToken?.length || 0
+      },
+      timestamp: Date.now()
+    })
+  }).catch(() => {})
+  // #endregion
+  appLog('info', '[debug449600] Meta webhook verification challenge', {
+    mode,
+    hasToken: Boolean(token),
+    hasConfiguredToken: Boolean(configuredToken),
+    tokenMatches,
+    hasChallenge: Boolean(challenge),
+    tokenLength: token?.length || 0,
+    configuredTokenLength: configuredToken?.length || 0
+  })
+  recordWebhookDebugHit({
+    stage: tokenMatches ? 'received' : 'error',
+    reason: tokenMatches
+      ? 'verify_ok'
+      : !configuredToken
+        ? 'verify_token_missing_in_env'
+        : !token
+          ? 'verify_token_missing_in_query'
+          : 'verify_token_mismatch'
+  })
+
+  if (mode === 'subscribe' && tokenMatches) {
     return new Response(challenge || '', { status: 200 })
   }
 
