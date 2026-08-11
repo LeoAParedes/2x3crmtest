@@ -94,7 +94,7 @@ export const PosSettingsPanel = () => {
       <h2 className='text-lg font-semibold text-slate-950'>Punto de venta y recibo</h2>
       <p className='mt-2 text-sm text-slate-600'>
         El precio de piso en inventario se mantiene sin IVA. Al activar la opción, el recibo suma IVA por
-        producto y muestra el desglose en cada línea.
+        producto y muestra el desglose en cada línea. El agua embotellada / garrafón se calcula a 0% IVA.
       </p>
 
       <label className='mt-5 flex items-start gap-3 text-sm text-slate-700'>

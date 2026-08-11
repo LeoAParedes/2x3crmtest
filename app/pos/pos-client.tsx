@@ -21,6 +21,7 @@ import {
   rankProductCodeCandidates,
   type PosLookupProduct
 } from '@/src/lib/pos/product-code-lookup'
+import { resolveEffectiveIvaRate } from '@/src/lib/inventory/iva-exempt-water'
 import { calculateLineTotals, calculateSaleTotals, type IvaPolicy } from '@/src/lib/pos/sale-schema'
 import { printTicketText } from '@/src/lib/pos/print-ticket'
 import { buildSaleTicketText, type TicketSale } from '@/src/lib/pos/ticket-format'
@@ -257,10 +258,14 @@ const sanitizeCartItem = (item: CartItem): CartItem => {
   const enforcedMode: CartItem['unitMode'] = supportsWeight ? 'weight' : 'piece'
   const unitPrice = Number(item.unitPrice)
   const rawIva = item.ivaRate === null || item.ivaRate === undefined ? null : Number(item.ivaRate)
-  const ivaRate =
+  const normalizedStored =
     rawIva === null || !Number.isFinite(rawIva)
       ? null
       : Math.max(0, Math.min(1, rawIva > 1 ? rawIva / 100 : rawIva))
+  const ivaRate = resolveEffectiveIvaRate({
+    productName: item.productName,
+    ivaRate: normalizedStored
+  })
   return {
     ...item,
     unitPrice: Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0,
@@ -1092,6 +1097,9 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
                     <p className='text-[11px] leading-tight text-slate-500'>
                       Piso {lineBase} + IVA {lineTax}
                     </p>
+                  ) : null}
+                  {ivaPolicy.showIvaOnReceipt && item.ivaRate === 0 ? (
+                    <p className='text-[11px] leading-tight text-emerald-700'>Exento de IVA</p>
                   ) : null}
                 </div>
                 <p className='shrink-0 text-sm font-semibold tabular-nums text-slate-900'>{lineTotal}</p>

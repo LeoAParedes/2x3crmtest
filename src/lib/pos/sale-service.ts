@@ -18,6 +18,7 @@ import { getPrisma } from '@/src/lib/db/prisma'
 import { summarizeSaleQuantities } from '@/src/lib/inventory/logbook-quantity'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { ensureCanonicalWeightStocks } from '@/src/lib/inventory/normalize-weight-stock'
+import { resolveEffectiveIvaRate } from '@/src/lib/inventory/iva-exempt-water'
 import { hasSufficientStock, inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import { requireOpenCashSessionId } from '@/src/lib/caja/cash-session-service'
 import type { TicketSale } from '@/src/lib/pos/ticket-format'
@@ -129,7 +130,12 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
     const lines = items.map(item => {
       const product = inventory.find(candidate => candidate.id === item.inventoryItemId)
       if (!product) throw new Error('INVENTORY_ITEM_NOT_FOUND')
-      const productIvaRate = product.ivaRate === null ? null : Number(product.ivaRate)
+      const productIvaRate = resolveEffectiveIvaRate({
+        productName: product.productName,
+        category: product.category,
+        aisle: product.aisle,
+        ivaRate: product.ivaRate === null ? null : Number(product.ivaRate)
+      })
       const lineTotals = calculateLineTotals(
         {
           quantity: item.quantity,
@@ -153,7 +159,14 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
     const baseTotals = calculateSaleTotals(
       lines.map(line => {
         const product = inventory.find(candidate => candidate.id === line.inventoryItemId)
-        const productIvaRate = product?.ivaRate === null || product?.ivaRate === undefined ? null : Number(product.ivaRate)
+        const productIvaRate = product
+          ? resolveEffectiveIvaRate({
+              productName: product.productName,
+              category: product.category,
+              aisle: product.aisle,
+              ivaRate: product.ivaRate === null ? null : Number(product.ivaRate)
+            })
+          : null
         return {
           quantity: line.quantity,
           unitPrice: line.unitPrice,

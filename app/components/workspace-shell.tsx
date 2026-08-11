@@ -212,7 +212,7 @@ const handleNavKeyDown = (event: KeyboardEvent<HTMLAnchorElement | HTMLButtonEle
   if (event.key === ' ') event.preventDefault()
 }
 
-export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps) => {
+export const WorkspaceShell = ({ role, children }: WorkspaceShellProps) => {
   const [expanded, setExpanded] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mobileOpenRouteKey, setMobileOpenRouteKey] = useState<string | null>(null)
@@ -518,8 +518,6 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
         <div className='shrink-0 border-t border-[#242424] px-3 py-4'>
           {isSidebarExpanded ? (
             <div className='space-y-3'>
-              <p className='font-mono text-[11px] uppercase tracking-[1.2px] text-[#898989]'>Sesión</p>
-              <p className='truncate text-sm font-medium text-[#fafafa]'>{username}</p>
               <p className='inline-flex rounded-[6px] border border-[#2e2e2e] bg-[#1c1c1c] px-2 py-1 text-xs font-medium capitalize text-[#3ecf8e]'>
                 {role === 'admin' ? 'Administrador' : 'Cajero'}
               </p>

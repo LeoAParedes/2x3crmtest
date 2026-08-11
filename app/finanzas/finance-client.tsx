@@ -202,8 +202,12 @@ export const FinanceClient = () => {
             {formatMxnCurrency(cashFlow.neto)}
           </p>
         </article>
-        <article className='border border-slate-200 bg-white px-3 py-2.5'>
-          <p className='text-[11px] uppercase tracking-wide text-slate-500'>Ticket prom.</p>
+        <article
+          className='border border-slate-200 bg-white px-3 py-2.5'
+          aria-label='Venta promedio'
+          title='Venta promedio'
+        >
+          <p className='text-[11px] uppercase tracking-wide text-slate-500'>Venta promedio</p>
           <p className='mt-1 text-lg font-semibold tabular-nums text-slate-950'>
             {formatMxnCurrency(cashFlow.averageTicket || 0)}
           </p>

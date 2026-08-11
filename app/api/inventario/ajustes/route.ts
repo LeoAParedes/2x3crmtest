@@ -5,6 +5,7 @@ import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { calculateBillableAmount } from '@/src/lib/inventory/logbook-quantity'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { buildFifoLotsFromMovements, calculateWeightedAveragePrice, consumeFifoLots } from '@/src/lib/inventory/valuation'
+import { suggestedIvaRateForProduct } from '@/src/lib/inventory/iva-exempt-water'
 import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
@@ -167,6 +168,11 @@ export async function POST(request: Request) {
     await applyDueScheduledPrices(prisma)
 
     if (payload.operation === 'add_product') {
+      const suggestedIvaRate = suggestedIvaRateForProduct(
+        payload.productName,
+        payload.category,
+        payload.aisle || null
+      )
       const created = await prisma.$transaction(async transaction => {
         const item = await transaction.inventoryItem.create({
           data: {
@@ -176,7 +182,8 @@ export async function POST(request: Request) {
             stock: payload.stock,
             minStock: payload.minStock ?? 20,
             unitPrice: payload.unitPrice,
-            aisle: payload.aisle || null
+            aisle: payload.aisle || null,
+            ...(suggestedIvaRate === null ? {} : { ivaRate: suggestedIvaRate })
           }
         })
 

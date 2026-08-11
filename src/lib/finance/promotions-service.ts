@@ -138,6 +138,8 @@ const syncPromotionProducts = async (
 export const createPromotion = async (rawInput: unknown, actor: AuthenticatedActor) => {
   const input: CreatePromotionInput = createPromotionSchema.parse(rawInput)
   const prisma = await getPrisma()
+  // DB requires non-null String; empty description always falls back to name.
+  const description = input.description.trim() || input.name
 
   const promotion = await prisma.promotion.create({
     data: {
@@ -145,7 +147,7 @@ export const createPromotion = async (rawInput: unknown, actor: AuthenticatedAct
       type: input.type,
       value: toMoney(input.value),
       minPurchase: toMoney(input.minPurchase),
-      description: input.description,
+      description,
       active: input.active,
       startsAt: input.startsAt ? new Date(input.startsAt) : null,
       expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
@@ -190,6 +192,12 @@ export const updatePromotion = async (id: string, rawInput: unknown, actor: Auth
     throw new Error('PROMOTION_NOT_FOUND')
   }
 
+  const nextName = input.name?.trim() || existing.name
+  const nextDescription =
+    input.description === undefined
+      ? undefined
+      : input.description.trim() || nextName
+
   const promotion = await prisma.promotion.update({
     where: { id },
     data: {
@@ -197,7 +205,7 @@ export const updatePromotion = async (id: string, rawInput: unknown, actor: Auth
       type: input.type,
       value: input.value === undefined ? undefined : toMoney(input.value),
       minPurchase: input.minPurchase === undefined ? undefined : toMoney(input.minPurchase),
-      description: input.description,
+      description: nextDescription,
       active: input.active,
       startsAt:
         input.startsAt === undefined

@@ -2,6 +2,7 @@ import { z } from 'zod'
 
 import { getPrisma } from '@/src/lib/db/prisma'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
+import { suggestedIvaRateForProduct } from '@/src/lib/inventory/iva-exempt-water'
 import { isGramUnit, isKilogramUnit, stockQuantityFromCsvUnit } from '@/src/lib/inventory/weight-units'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
@@ -201,6 +202,7 @@ export async function POST(request: Request) {
 
     for (const row of parsedRows) {
       const existing = await prisma.inventoryItem.findUnique({ where: { sku: row.sku } })
+      const suggestedIvaRate = suggestedIvaRateForProduct(row.productName, row.category, row.aisle)
       if (existing) {
         await prisma.inventoryItem.update({
           where: { sku: row.sku },
@@ -209,7 +211,8 @@ export async function POST(request: Request) {
             category: row.category,
             stock: row.stock,
             unitPrice: row.unitPrice,
-            aisle: row.aisle
+            aisle: row.aisle,
+            ...(suggestedIvaRate === null ? {} : { ivaRate: suggestedIvaRate })
           }
         })
         updated += 1
@@ -221,7 +224,8 @@ export async function POST(request: Request) {
             category: row.category,
             stock: row.stock,
             unitPrice: row.unitPrice,
-            aisle: row.aisle
+            aisle: row.aisle,
+            ...(suggestedIvaRate === null ? {} : { ivaRate: suggestedIvaRate })
           }
         })
         created += 1

@@ -35,6 +35,26 @@ describe('createSaleSchema', () => {
     ).toEqual({ subtotal: 250, tax: 40, total: 290, lines: expect.any(Array) })
   })
 
+  it('applies 0 IVA when product rate is explicitly exempt', () => {
+    expect(
+      calculateSaleTotals(
+        [
+          { quantity: 1, unitPrice: 45, unitMode: 'piece', ivaRate: 0 },
+          { quantity: 1, unitPrice: 100, unitMode: 'piece', ivaRate: null }
+        ],
+        { showIvaOnReceipt: true, defaultIvaRate: 0.16 }
+      )
+    ).toEqual({
+      subtotal: 145,
+      tax: 16,
+      total: 161,
+      lines: [
+        { lineSubtotal: 45, lineTax: 0, lineTotalWithTax: 45 },
+        { lineSubtotal: 100, lineTax: 16, lineTotalWithTax: 116 }
+      ]
+    })
+  })
+
   it('bills weight quantities in kilograms not grams', () => {
     // 2.50 kg stored as 2500 grams at $89/kg → $222.50
     expect(calculateLineTotal(2500, 89, 'weight')).toBe(222.5)

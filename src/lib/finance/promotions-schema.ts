@@ -10,14 +10,19 @@ export const productRefSchema = z.object({
 
 export type PromotionProductRef = z.infer<typeof productRefSchema>
 
+/** Empty / null / missing description is allowed; callers default to the promo name. */
+const optionalDescriptionField = z.preprocess(
+  value => (value == null ? '' : value),
+  z.string().trim().max(240)
+)
+
 export const createPromotionSchema = z
   .object({
     name: z.string().trim().min(2).max(120),
     type: z.enum(PROMO_TYPES),
     value: z.number().nonnegative().max(100_000),
     minPurchase: z.number().nonnegative().max(1_000_000).default(0),
-    // Optional for cashiers; empty values default to the promotion name
-    description: z.string().trim().max(240).optional().default(''),
+    description: optionalDescriptionField.optional().default(''),
     active: z.boolean().default(true),
     startsAt: z.string().datetime({ offset: true }).optional().nullable(),
     expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
@@ -83,7 +88,7 @@ export const updatePromotionSchema = z
     type: z.enum(PROMO_TYPES).optional(),
     value: z.number().nonnegative().max(100_000).optional(),
     minPurchase: z.number().nonnegative().max(1_000_000).optional(),
-    description: z.string().trim().max(240).optional(),
+    description: optionalDescriptionField.optional(),
     active: z.boolean().optional(),
     startsAt: z.string().datetime({ offset: true }).optional().nullable(),
     expiresAt: z.string().datetime({ offset: true }).optional().nullable(),

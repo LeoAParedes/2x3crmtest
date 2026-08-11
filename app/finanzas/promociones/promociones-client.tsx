@@ -262,6 +262,7 @@ export const PromocionesClient = () => {
     return null
   }
 
+  // Description is intentionally NOT part of this gate — it is optional.
   const canAttemptSave = name.trim().length >= 2 && value.trim().length > 0 && !saving
 
   const handleCreatePromotion = async () => {
@@ -271,7 +272,8 @@ export const PromocionesClient = () => {
     setMessage(null)
 
     const trimmedName = name.trim()
-    const trimmedDescription = description.trim()
+    // Optional: blank description defaults to the promotion name (DB requires non-null String).
+    const resolvedDescription = description.trim() || trimmedName
     const parsedValue = Number(value.replace(',', '.'))
     const parsedMinPurchase = Number(minPurchase.replace(',', '.'))
 
@@ -322,7 +324,7 @@ export const PromocionesClient = () => {
           type: promoType,
           value: parsedValue,
           minPurchase: Number.isFinite(parsedMinPurchase) ? parsedMinPurchase : 0,
-          description: trimmedDescription || trimmedName,
+          description: resolvedDescription,
           active,
           startsAt: startsAt ? new Date(`${startsAt}T00:00:00`).toISOString() : null,
           expiresAt: expiresAt ? new Date(`${expiresAt}T23:59:59`).toISOString() : null,
@@ -480,7 +482,8 @@ export const PromocionesClient = () => {
                 value={description}
                 onChange={event => setDescription(event.target.value)}
                 placeholder='Si se omite, se usa el nombre de la promoción'
-                aria-label='Descripción de la promoción'
+                aria-label='Descripción de la promoción (opcional)'
+                aria-required='false'
                 className='h-10 rounded-lg border border-slate-300 px-3 text-sm'
               />
             </label>

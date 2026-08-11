@@ -7,6 +7,7 @@ import {
 } from '@/src/lib/inventory/low-stock'
 import { applyDueScheduledPrices } from '@/src/lib/inventory/scheduled-prices'
 import { buildInventorySearchWhere } from '@/src/lib/inventory/search-filter'
+import { resolveEffectiveIvaRate } from '@/src/lib/inventory/iva-exempt-water'
 import { inferWeightSupport } from '@/src/lib/inventory/weight-units'
 import { ensureCanonicalWeightStocks } from '@/src/lib/inventory/normalize-weight-stock'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
@@ -126,7 +127,12 @@ export async function GET(request: Request) {
         unitPrice: Number(item.unitPrice),
         aisle: item.aisle,
         supportsWeight: inferWeightSupport(item.category, item.aisle, item.productName),
-        ivaRate: item.ivaRate === null ? null : Number(item.ivaRate)
+        ivaRate: resolveEffectiveIvaRate({
+          productName: item.productName,
+          category: item.category,
+          aisle: item.aisle,
+          ivaRate: item.ivaRate === null ? null : Number(item.ivaRate)
+        })
       }))
     })
   } catch (error) {

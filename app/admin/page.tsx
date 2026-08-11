@@ -81,9 +81,6 @@ export default function AdminPage() {
       <section className='flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between'>
         <div>
           <h1 className='text-3xl font-semibold text-slate-950'>Hoy</h1>
-          <p className='mt-1 text-sm text-slate-500'>
-            Hub operativo: alertas, caja del turno, ventas y medios de pago. Sin pantallas duplicadas.
-          </p>
         </div>
         <button
           type='button'
