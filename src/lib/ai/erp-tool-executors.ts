@@ -8,18 +8,20 @@ import {
 import { getPrisma } from '@/src/lib/db/prisma'
 import { FINANCE_TIME_ZONE } from '@/src/lib/finance/period'
 import { stampErpDbProvenance } from '@/src/lib/ai/erp-db-harness'
-import { isErpToolId, type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
+import { isErpToolId, type ErpFactToolId, type ErpToolId } from '@/src/lib/ai/erp-tool-ids'
 import { ERP_TOOL_REGISTRY, resolvePeriod } from '@/src/lib/ai/erp-tool-registry'
 
-export type ErpToolFactResult = {
-  toolId: ErpToolId
-  ok: true
-  facts: Record<string, unknown>
-} | {
-  toolId: string
-  ok: false
-  error: string
-}
+export type ErpToolFactResult =
+  | {
+      toolId: ErpFactToolId
+      ok: true
+      facts: Record<string, unknown>
+    }
+  | {
+      toolId: string
+      ok: false
+      error: string
+    }
 
 const executeSalesTotalToday = async () => {
   const dashboard = await getFinanceDashboard('day')

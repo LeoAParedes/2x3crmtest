@@ -13,6 +13,11 @@ export const ERP_TOOL_IDS = [
 
 export type ErpToolId = (typeof ERP_TOOL_IDS)[number]
 
+/** Harness-only fact ids (deterministic path; not exposed as OpenAI tools unless registered). */
+export const ERP_HARNESS_FACT_IDS = ['sales_total_on_date'] as const
+export type ErpHarnessFactId = (typeof ERP_HARNESS_FACT_IDS)[number]
+export type ErpFactToolId = ErpToolId | ErpHarnessFactId
+
 /** Tools introduced after initial rollout — auto-enabled when missing from stored settings. */
 export const NEW_ERP_TOOL_IDS: ErpToolId[] = ['recent_pos_sales', 'inventory_snapshot']
 

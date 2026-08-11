@@ -349,15 +349,15 @@ export const runDeterministicErpDbReply = async (
   const mentioned = parseBusinessDateMention(message)
   if (mentioned) {
     const facts = await queryCompletedSalesForLocalDate(mentioned.isoDate)
-    const result: ErpToolFactResult = {
-      toolId: 'sales_total_on_date',
-      ok: true,
+    const result = {
+      toolId: 'sales_total_on_date' as const,
+      ok: true as const,
       facts: {
         ...facts,
         label: mentioned.label,
         localDate: mentioned.label
       }
-    }
+    } satisfies ErpToolFactResult
     return {
       reply: formatDeterministicErpReply([result]),
       usedTools: ['sales_total_on_date'],
