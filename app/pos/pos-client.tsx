@@ -10,6 +10,7 @@ import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 import {
   applyDiscountToSaleTotals,
   selectBestPromotion,
+  toPromoQuantity,
   type PromoCandidate
 } from '@/src/lib/pos/promo-engine'
 import {
@@ -254,8 +255,16 @@ const sanitizeCartItem = (item: CartItem): CartItem => {
   const normalizedMode: CartItem['unitMode'] = item.unitMode === 'weight' ? 'weight' : 'piece'
   const supportsWeight = item.supportsWeight ?? normalizedMode === 'weight'
   const enforcedMode: CartItem['unitMode'] = supportsWeight ? 'weight' : 'piece'
+  const unitPrice = Number(item.unitPrice)
+  const rawIva = item.ivaRate === null || item.ivaRate === undefined ? null : Number(item.ivaRate)
+  const ivaRate =
+    rawIva === null || !Number.isFinite(rawIva)
+      ? null
+      : Math.max(0, Math.min(1, rawIva > 1 ? rawIva / 100 : rawIva))
   return {
     ...item,
+    unitPrice: Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0,
+    ivaRate,
     supportsWeight,
     unitMode: enforcedMode,
     quantityInput: normalizeQuantityInput({ ...item, supportsWeight, unitMode: enforcedMode })
@@ -402,14 +411,14 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
 
   const bestPromo = useMemo(() => {
     const promoLines = cart.map((item, index) => {
-      const quantity =
+      const rawQuantity =
         item.unitMode === 'weight'
           ? parseWeightQuantity(item.quantityInput)
           : parsePieceQuantity(item.quantityInput)
       const lineSubtotal = cartLineTotals[index]?.lineSubtotal ?? 0
       return {
         inventoryItemId: item.inventoryItemId,
-        quantity,
+        quantity: toPromoQuantity(rawQuantity, item.unitMode),
         unitPrice: item.unitPrice,
         lineSubtotal
       }
@@ -458,16 +467,23 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
     nextCreditName: string,
     nextCreditPhone: string
   ): PosDraft => ({
-    cart: nextCart.map(item => ({
-      inventoryItemId: item.inventoryItemId,
-      sku: item.sku,
-      productName: item.productName,
-      unitPrice: item.unitPrice,
-      supportsWeight: item.supportsWeight,
-      ivaRate: item.ivaRate ?? null,
-      unitMode: item.unitMode,
-      quantityInput: item.quantityInput
-    })),
+    // Normalize quantities for durable sync only — UI may temporarily hold "" while typing.
+    cart: nextCart.map(item => {
+      const sanitized = sanitizeCartItem(item)
+      return {
+        inventoryItemId: sanitized.inventoryItemId,
+        sku: sanitized.sku,
+        productName: sanitized.productName,
+        unitPrice: Number(sanitized.unitPrice) || 0,
+        supportsWeight: sanitized.supportsWeight,
+        ivaRate:
+          sanitized.ivaRate === null || sanitized.ivaRate === undefined
+            ? null
+            : Math.max(0, Math.min(1, Number(sanitized.ivaRate))),
+        unitMode: sanitized.unitMode,
+        quantityInput: sanitized.quantityInput
+      }
+    }),
     paymentMethod: nextPaymentMethod,
     amountReceived: nextAmountReceived,
     creditCustomerName: nextCreditName.trim() || undefined,
@@ -535,15 +551,25 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
           pageSize: '20'
         })
         const response = await fetch(`/api/pos/inventory?${searchParams.toString()}`)
-        const data = (await response.json()) as InventoryResponse
+        const data = (await response.json()) as InventoryResponse & {
+          message?: string
+          error?: { message?: string }
+        }
         if (!response.ok || !data.success) {
-          throw new Error('No fue posible cargar productos para caja')
+          throw new Error(data.message || data.error?.message || 'No fue posible cargar productos para caja')
         }
         if (cancelled) return
         setProducts(data.items)
         setTotalPages(data.pagination.totalPages)
+        setMessage(current =>
+          current === 'No fue posible cargar productos para caja' ||
+          current?.startsWith('No fue posible cargar')
+            ? null
+            : current
+        )
       } catch (error) {
         if (cancelled) return
+        // Keep any previously loaded products visible; only surface the load error.
         setMessage(error instanceof Error ? error.message : 'Error al cargar productos')
       } finally {
         if (cancelled) return
@@ -710,16 +736,18 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
         try {
           const searchParams = buildPosProductCodeSearchParams(normalized)
           const response = await fetch(`/api/pos/inventory?${searchParams.toString()}`)
-          const data = (await response.json()) as InventoryResponse
+          const data = (await response.json()) as InventoryResponse & { message?: string }
           if (seq !== cobroSuggestSeqRef.current) return
           if (!response.ok || !data.success) {
             setCobroSearchCandidates([])
+            setCobroCodeFeedback(data.message || 'No fue posible cargar inventario para la búsqueda')
             return
           }
           setCobroSearchCandidates(rankProductCodeCandidates(normalized, data.items))
         } catch {
           if (seq !== cobroSuggestSeqRef.current) return
           setCobroSearchCandidates([])
+          setCobroCodeFeedback('No fue posible cargar inventario para la búsqueda')
         }
       })()
     }, 220)

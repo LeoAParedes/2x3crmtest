@@ -1,28 +1,9 @@
-import { z } from 'zod'
+import { ZodError } from 'zod'
 
 import { getPrisma } from '@/src/lib/db/prisma'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
+import { draftPayloadSchema } from '@/src/lib/pos/draft-schema'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
-
-const draftItemSchema = z.object({
-  inventoryItemId: z.string().cuid(),
-  sku: z.string().min(1).max(64),
-  productName: z.string().min(1).max(160),
-  unitPrice: z.number().nonnegative(),
-  supportsWeight: z.boolean().optional(),
-  ivaRate: z.number().min(0).max(1).nullable().optional(),
-  unitMode: z.enum(['piece', 'weight']),
-  quantityInput: z.string().min(1).max(24)
-})
-
-const draftPayloadSchema = z.object({
-  cart: z.array(draftItemSchema).max(200),
-  paymentMethod: z.enum(['cash', 'card', 'credit']),
-  amountReceived: z.number().nonnegative().nullable(),
-  creditCustomerName: z.string().max(120).optional(),
-  creditCustomerPhone: z.string().max(40).optional(),
-  updatedAt: z.string().datetime({ offset: true }).optional()
-})
 
 export async function GET(request: Request) {
   const access = await requireApiAccess(request, { allowedRoles: ['admin', 'cashier'] })
@@ -112,8 +93,15 @@ export async function POST(request: Request) {
 
     return jsonOk({ success: true })
   } catch (error) {
-    return jsonError('No fue posible guardar el borrador de caja', 400, {
-      code: 'POS_DRAFT_INVALID',
+    if (error instanceof ZodError) {
+      return jsonError('Datos de borrador inválidos', 400, {
+        code: 'POS_DRAFT_INVALID',
+        details: error.flatten(),
+        requestId: access.context.requestId
+      })
+    }
+    return jsonError('No fue posible guardar el borrador de caja', 500, {
+      code: 'POS_DRAFT_SAVE_FAILED',
       details: error instanceof Error ? error.message : 'unknown error',
       requestId: access.context.requestId
     })

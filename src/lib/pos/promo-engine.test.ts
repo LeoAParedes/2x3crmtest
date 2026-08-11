@@ -4,6 +4,7 @@ import {
   applyDiscountToSaleTotals,
   computePromotionDiscount,
   selectBestPromotion,
+  toPromoQuantity,
   type PromoCandidate,
   type PromoCartLine
 } from '@/src/lib/pos/promo-engine'
@@ -15,6 +16,37 @@ const lines: PromoCartLine[] = [
 ]
 
 describe('promo-engine', () => {
+  it('converts weight grams to kg units for promo rules', () => {
+    expect(toPromoQuantity(2500, 'weight')).toBe(3)
+    expect(toPromoQuantity(750, 'weight')).toBe(1)
+    expect(toPromoQuantity(3, 'piece')).toBe(3)
+  })
+
+  it('does not treat raw grams as 2x1 units', () => {
+    const promo: PromoCandidate = {
+      id: 'p-weight',
+      name: '2x1 aguacate',
+      type: '2x1',
+      value: 0,
+      minPurchase: 0,
+      productIds: ['avo'],
+      bundleItems: []
+    }
+    const gramsAsQty = computePromotionDiscount(promo, [
+      { inventoryItemId: 'avo', quantity: 2500, unitPrice: 89, lineSubtotal: 222.5 }
+    ])
+    const kgAsQty = computePromotionDiscount(promo, [
+      {
+        inventoryItemId: 'avo',
+        quantity: toPromoQuantity(2500, 'weight'),
+        unitPrice: 89,
+        lineSubtotal: 222.5
+      }
+    ])
+    expect(gramsAsQty?.discountTotal).toBeGreaterThan(10_000)
+    expect(kgAsQty?.discountTotal).toBe(89)
+  })
+
   it('applies 3x2 as one free unit', () => {
     const promo: PromoCandidate = {
       id: 'p1',

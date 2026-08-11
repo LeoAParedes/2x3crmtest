@@ -44,11 +44,15 @@ export async function GET(request: Request) {
   try {
     const prisma = await getPrisma()
     await applyDueScheduledPrices(prisma)
-    await ensureCanonicalWeightStocks(prisma, {
-      userId: access.context.actor.userId,
-      username: access.context.actor.username,
-      role: access.context.actor.role
-    })
+    try {
+      await ensureCanonicalWeightStocks(prisma, {
+        userId: access.context.actor.userId,
+        username: access.context.actor.username,
+        role: access.context.actor.role
+      })
+    } catch {
+      // Normalization is best-effort — never block POS product listing.
+    }
 
     if (alertsOnly) {
       const alertCandidates = await prisma.inventoryItem.findMany({

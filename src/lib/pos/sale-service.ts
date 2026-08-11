@@ -7,7 +7,11 @@ import {
   createSaleSchema,
   type CreateSaleInput
 } from '@/src/lib/pos/sale-schema'
-import { applyDiscountToSaleTotals, selectBestPromotion } from '@/src/lib/pos/promo-engine'
+import {
+  applyDiscountToSaleTotals,
+  selectBestPromotion,
+  toPromoQuantity
+} from '@/src/lib/pos/promo-engine'
 import { listActivePromoCandidates } from '@/src/lib/finance/promotions-service'
 import { getPosSettings } from '@/src/lib/pos/pos-settings'
 import { getPrisma } from '@/src/lib/db/prisma'
@@ -92,11 +96,15 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
     defaultIvaRate: posSettings.defaultIvaRate
   }
   await applyDueScheduledPrices(prisma)
-  await ensureCanonicalWeightStocks(prisma, {
-    userId: actor.userId,
-    username: actor.username,
-    role: actor.role
-  })
+  try {
+    await ensureCanonicalWeightStocks(prisma, {
+      userId: actor.userId,
+      username: actor.username,
+      role: actor.role
+    })
+  } catch {
+    // Best-effort normalization — do not block checkout.
+  }
 
   return prisma.$transaction(async transaction => {
     const uniqueIds = [...new Set(items.map(item => item.inventoryItemId))]
@@ -161,7 +169,7 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
       promoCandidates,
       lines.map(line => ({
         inventoryItemId: line.inventoryItemId,
-        quantity: line.unitMode === 'weight' ? Math.max(1, Math.round(line.quantity / 1000)) : line.quantity,
+        quantity: toPromoQuantity(line.quantity, line.unitMode),
         unitPrice: line.unitPrice,
         lineSubtotal: line.lineTotal
       }))
@@ -304,27 +312,6 @@ export const createSale = async (rawInput: unknown, actor: AuthenticatedActor) =
         }
       }
     })
-
-    // #region agent log
-    fetch('http://127.0.0.1:7470/ingest/f7f242f1-ff2d-40d4-bf0c-d535d5a2bbdb', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '449600' },
-      body: JSON.stringify({
-        sessionId: '449600',
-        runId: 'pos-sale',
-        hypothesisId: 'B',
-        location: 'src/lib/pos/sale-service.ts:createSale',
-        message: 'sale created with completed status',
-        data: {
-          saleId: sale.id,
-          saleNumber: sale.saleNumber,
-          saleStatus: sale.status,
-          metadataStatus: 'completed'
-        },
-        timestamp: Date.now()
-      })
-    }).catch(() => {})
-    // #endregion
 
     return {
       id: sale.id,

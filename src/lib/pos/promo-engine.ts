@@ -5,6 +5,18 @@ export type PromoCartLine = {
   lineSubtotal: number
 }
 
+/**
+ * Promo NxM/bundle rules count sellable units (pz or kg), not raw POS weight stock (grams).
+ * Keep client and server aligned so cash totals match at checkout.
+ */
+export const toPromoQuantity = (quantity: number, unitMode: 'piece' | 'weight') => {
+  if (!Number.isFinite(quantity) || quantity <= 0) return 0
+  if (unitMode === 'weight') {
+    return Math.max(1, Math.round(quantity / 1000))
+  }
+  return Math.round(quantity)
+}
+
 export type PromoCandidate = {
   id: string
   name: string
