@@ -35,7 +35,7 @@ export const MermaCaducidadClient = () => {
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [manualLotId, setManualLotId] = useState('')
-  const [quantity, setQuantity] = useState('1')
+  const [quantityDraft, setQuantityDraft] = useState<{ lotId: string; value: string } | null>(null)
   const [reason, setReason] = useState('Merma por caducidad')
   const [submitting, setSubmitting] = useState(false)
 
@@ -85,16 +85,21 @@ export const MermaCaducidadClient = () => {
   )
   const selected = lots.find(lot => lot.id === selectedLotId) || null
   const unitLabel = selected?.supportsWeight ? 'kg' : 'pz'
-
-  useEffect(() => {
-    const lot = lots.find(item => item.id === selectedLotId) || null
-    setQuantity(defaultQuantityForLot(lot))
-  }, [selectedLotId, lots])
+  const quantity =
+    quantityDraft && quantityDraft.lotId === selectedLotId
+      ? quantityDraft.value
+      : defaultQuantityForLot(selected)
 
   const handleSelectLot = (lotId: string) => {
     setManualLotId(lotId)
+    setQuantityDraft(null)
     setMessage(null)
     setError(null)
+  }
+
+  const handleQuantityChange = (value: string) => {
+    if (!selectedLotId) return
+    setQuantityDraft({ lotId: selectedLotId, value })
   }
 
   const handleRegisterMerma = async () => {
@@ -138,7 +143,7 @@ export const MermaCaducidadClient = () => {
       setMessage(
         `Salida registrada del lote ${selected.sku} · ${formatStockQuantityLabel(storedQty, selected.supportsWeight)} · caduca ${selected.expiresOn}`
       )
-      setQuantity(defaultQuantityForLot(selected))
+      setQuantityDraft(null)
       await loadLots()
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Error al registrar merma')
@@ -234,7 +239,7 @@ export const MermaCaducidadClient = () => {
               type='text'
               inputMode='decimal'
               value={quantity}
-              onChange={event => setQuantity(event.target.value)}
+              onChange={event => handleQuantityChange(event.target.value)}
               aria-label={`Cantidad de merma del lote en ${unitLabel}`}
               disabled={!selected}
               className='h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm tabular-nums disabled:bg-slate-100'

@@ -29,6 +29,39 @@ const subscribeDesktopViewport = (onStoreChange: () => void) => {
 const getDesktopViewportSnapshot = () => window.matchMedia(DESKTOP_VIEWPORT_QUERY).matches
 const getDesktopViewportServerSnapshot = () => false
 
+const cobroModeListeners = new Set<() => void>()
+
+const getCobroModeSnapshot = () => {
+  try {
+    return window.localStorage.getItem(COBRO_MODE_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+const getCobroModeServerSnapshot = () => false
+
+const subscribeCobroMode = (onStoreChange: () => void) => {
+  cobroModeListeners.add(onStoreChange)
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === COBRO_MODE_STORAGE_KEY || event.key === null) onStoreChange()
+  }
+  window.addEventListener('storage', handleStorage)
+  return () => {
+    cobroModeListeners.delete(onStoreChange)
+    window.removeEventListener('storage', handleStorage)
+  }
+}
+
+const setCobroModeStore = (next: boolean) => {
+  try {
+    window.localStorage.setItem(COBRO_MODE_STORAGE_KEY, next ? '1' : '0')
+  } catch {
+    // ignore storage failures
+  }
+  cobroModeListeners.forEach(listener => listener())
+}
+
 type Product = {
   id: string
   sku: string
@@ -248,7 +281,11 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
   const [draftSyncStatus, setDraftSyncStatus] = useState<DraftSyncStatus>('idle')
   const [ivaPolicy, setIvaPolicy] = useState<IvaPolicy>({ showIvaOnReceipt: false, defaultIvaRate: 0.16 })
   const [promoCandidates, setPromoCandidates] = useState<PromoCandidate[]>([])
-  const [isCobroMode, setIsCobroMode] = useState(false)
+  const isCobroMode = useSyncExternalStore(
+    subscribeCobroMode,
+    getCobroModeSnapshot,
+    getCobroModeServerSnapshot
+  )
   const [cobroCodeQuery, setCobroCodeQuery] = useState('')
   const [pendingRemoveIndex, setPendingRemoveIndex] = useState<number | null>(null)
   const [adminAuthSubmitting, setAdminAuthSubmitting] = useState(false)
@@ -266,19 +303,6 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
   const isCartPanelOpen = cartPanelUserOverride ?? isDesktopViewport
 
   useEffect(() => {
-    try {
-      setIsCobroMode(window.localStorage.getItem(COBRO_MODE_STORAGE_KEY) === '1')
-    } catch {
-      setIsCobroMode(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(COBRO_MODE_STORAGE_KEY, isCobroMode ? '1' : '0')
-    } catch {
-      // ignore storage failures
-    }
     document.body.classList.toggle('pos-cobro-mode', isCobroMode)
     return () => {
       document.body.classList.remove('pos-cobro-mode')
@@ -677,7 +701,7 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
   }
 
   const handleToggleCobroMode = () => {
-    setIsCobroMode(current => !current)
+    setCobroModeStore(!isCobroMode)
   }
 
   const handleUpdateCartItem = (index: number, patch: Partial<CartItem>) => {
@@ -1183,7 +1207,7 @@ export const PosClient = ({ cashierUsername, role }: PosClientProps) => {
           }}
           onRemoveLine={handleRequestRemoveCartItem}
           onAdjustQuantity={handleAdjustCartQuantity}
-          onExitCobroMode={() => setIsCobroMode(false)}
+          onExitCobroMode={() => setCobroModeStore(false)}
           draftSyncLabel={draftSyncLabel}
           draftSyncStatus={draftSyncStatus}
         />

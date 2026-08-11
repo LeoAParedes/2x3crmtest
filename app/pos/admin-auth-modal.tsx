@@ -12,26 +12,18 @@ type AdminAuthModalProps = {
   onConfirm: (input: { username: string; password: string }) => void
 }
 
-export const AdminAuthModal = ({
-  open,
+const AdminAuthModalForm = ({
   title,
   description,
   submitting,
   error,
   onCancel,
   onConfirm
-}: AdminAuthModalProps) => {
+}: Omit<AdminAuthModalProps, 'open'>) => {
   const [username, setUsername] = useState('admin')
   const [password, setPassword] = useState('')
 
   useEffect(() => {
-    if (!open) return
-    setUsername('admin')
-    setPassword('')
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
     const handleKeyDown = (event: KeyboardEvent | globalThis.KeyboardEvent) => {
       if (event.key === 'Escape' && !submitting) onCancel()
     }
@@ -39,9 +31,7 @@ export const AdminAuthModal = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [open, submitting, onCancel])
-
-  if (!open) return null
+  }, [submitting, onCancel])
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -120,4 +110,9 @@ export const AdminAuthModal = ({
       </section>
     </>
   )
+}
+
+export const AdminAuthModal = ({ open, ...formProps }: AdminAuthModalProps) => {
+  if (!open) return null
+  return <AdminAuthModalForm key='open' {...formProps} />
 }
