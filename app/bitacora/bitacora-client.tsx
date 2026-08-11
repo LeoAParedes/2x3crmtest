@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { printTicketText } from '@/src/lib/pos/print-ticket'
 import { buildSaleTicketText, type TicketSale } from '@/src/lib/pos/ticket-format'
+import { formatMxnCurrency } from '@/src/lib/mxn-currency'
 
 type LogbookCategory = 'sales' | 'inventory' | 'pos' | 'crm' | 'system'
 
@@ -39,6 +40,16 @@ type LogbookResponse = {
 
 type SortDirection = 'asc' | 'desc'
 type LogbookSortField = 'createdAt' | 'category' | 'actionLabel' | 'details' | 'actor' | 'status'
+type BitacoraTab = 'actividad' | 'ventas'
+
+type RecentSale = {
+  id: string
+  saleNumber: string
+  cashierUsername: string
+  total: number
+  paymentMethod: string
+  createdAt: string
+}
 
 type ToastItem = {
   id: string
@@ -76,6 +87,10 @@ const getSortIndicator = (isActive: boolean, direction: SortDirection) => {
 }
 
 export const BitacoraClient = () => {
+  const [activeTab, setActiveTab] = useState<BitacoraTab>('actividad')
+  const [recentSales, setRecentSales] = useState<RecentSale[]>([])
+  const [loadingSales, setLoadingSales] = useState(false)
+  const [salesError, setSalesError] = useState<string | null>(null)
   const [logbookItems, setLogbookItems] = useState<LogbookItem[]>([])
   const [logbookActionFilter, setLogbookActionFilter] = useState<string>('all')
   const [logbookStatusFilter, setLogbookStatusFilter] = useState<'all' | 'success' | 'failed' | 'pending'>('all')
@@ -136,12 +151,47 @@ export const BitacoraClient = () => {
       }
     }
 
-    void loadLogbook()
+    if (activeTab === 'actividad') {
+      void loadLogbook()
+    }
 
     return () => {
       cancelled = true
     }
-  }, [logbookActionFilter, logbookCategoryFilter, logbookStatusFilter, logbookActorFilter, refreshSeed])
+  }, [logbookActionFilter, logbookCategoryFilter, logbookStatusFilter, logbookActorFilter, refreshSeed, activeTab])
+
+  useEffect(() => {
+    if (activeTab !== 'ventas') return
+    let cancelled = false
+    const loadSales = async () => {
+      setLoadingSales(true)
+      setSalesError(null)
+      try {
+        const response = await fetch('/api/pos/sales')
+        const payload = (await response.json()) as {
+          success?: boolean
+          sales?: RecentSale[]
+          message?: string
+        }
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.message || 'No fue posible cargar ventas recientes')
+        }
+        if (!cancelled) {
+          setRecentSales((payload.sales || []).slice(0, 40))
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setSalesError(error instanceof Error ? error.message : 'Error de carga')
+        }
+      } finally {
+        if (!cancelled) setLoadingSales(false)
+      }
+    }
+    void loadSales()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, refreshSeed])
 
   const sortedLogbookItems = useMemo(() => {
     const indexedItems = logbookItems.map((item, index) => ({ item, index }))
@@ -247,13 +297,103 @@ export const BitacoraClient = () => {
   return (
     <main className='mx-auto max-w-7xl px-4 py-8 md:px-8'>
       <section className='rounded-2xl border border-slate-200 bg-white p-6 shadow-sm'>
-        <h1 className='text-2xl font-semibold text-slate-950'>Bitácora del sistema</h1>
+        <h1 className='text-2xl font-semibold text-slate-950'>Bitácora</h1>
         <p className='mt-2 text-sm text-slate-600'>
-          Registro general de operaciones: ventas, inventario, POS, CRM y sistema.
+          Actividad del sistema y ventas recientes en un solo módulo.
         </p>
+        <div
+          className='mt-4 inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1'
+          role='tablist'
+          aria-label='Vistas de bitácora'
+        >
+          {(
+            [
+              { id: 'actividad' as const, label: 'Actividad' },
+              { id: 'ventas' as const, label: 'Ventas recientes' }
+            ] as const
+          ).map(tab => {
+            const isActive = activeTab === tab.id
+            return (
+              <button
+                key={tab.id}
+                type='button'
+                role='tab'
+                aria-selected={isActive}
+                tabIndex={0}
+                aria-label={tab.label}
+                onClick={() => setActiveTab(tab.id)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  isActive ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {tab.label}
+              </button>
+            )
+          })}
+        </div>
       </section>
 
-      <section className='mt-6 w-full min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm'>
+      {activeTab === 'ventas' ? (
+        <section className='mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm' role='tabpanel'>
+          <div className='mb-3 flex items-center justify-between gap-3'>
+            <h2 className='text-lg font-semibold text-slate-900'>Ventas recientes</h2>
+            <button
+              type='button'
+              onClick={handleRefreshLogbook}
+              aria-label='Actualizar ventas recientes'
+              className='rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700'
+            >
+              Actualizar
+            </button>
+          </div>
+          <div className='overflow-x-auto'>
+            <table className='min-w-full divide-y divide-slate-200'>
+              <thead className='bg-slate-50'>
+                <tr>
+                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    Nro venta
+                  </th>
+                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    Caja
+                  </th>
+                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    Pago
+                  </th>
+                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    Total
+                  </th>
+                  <th className='px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500'>
+                    Fecha
+                  </th>
+                </tr>
+              </thead>
+              <tbody className='divide-y divide-slate-100'>
+                {recentSales.map(sale => (
+                  <tr key={sale.id}>
+                    <td className='px-3 py-2 text-sm text-slate-700'>{sale.saleNumber}</td>
+                    <td className='px-3 py-2 text-sm text-slate-700'>{sale.cashierUsername}</td>
+                    <td className='px-3 py-2 text-sm text-slate-700'>{sale.paymentMethod}</td>
+                    <td className='px-3 py-2 text-sm text-slate-700'>{formatMxnCurrency(sale.total)}</td>
+                    <td className='px-3 py-2 text-sm text-slate-700'>
+                      {new Date(sale.createdAt).toLocaleString('es-MX')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {loadingSales ? <p className='px-3 py-4 text-sm text-slate-500'>Cargando ventas…</p> : null}
+            {!loadingSales && !recentSales.length ? (
+              <p className='px-3 py-4 text-sm text-slate-500'>Sin ventas recientes.</p>
+            ) : null}
+          </div>
+          {salesError ? (
+            <p role='alert' className='mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700'>
+              {salesError}
+            </p>
+          ) : null}
+        </section>
+      ) : (
+      <section className='mt-6 w-full min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm' role='tabpanel'>
         <div className='w-full min-w-0 space-y-4'>
           <div className='grid w-full gap-3 md:grid-cols-4'>
             <label className='sr-only' htmlFor='bitacora-action-filter'>
@@ -478,6 +618,7 @@ export const BitacoraClient = () => {
           </div>
         </div>
       </section>
+      )}
 
       {ticketModalOpen ? (
         <div

@@ -1,5 +1,5 @@
 import { getFinanceDashboard } from '@/src/lib/finance/finance-service'
-import { isFinancePeriod } from '@/src/lib/finance/period'
+import { getCustomBounds, isFinancePeriod } from '@/src/lib/finance/period'
 import { jsonError, jsonOk } from '@/src/lib/http/json-response'
 import { requireApiAccess } from '@/src/lib/security/api-auth'
 
@@ -19,8 +19,22 @@ export async function GET(request: Request) {
     })
   }
 
+  const from = searchParams.get('from')
+  const to = searchParams.get('to')
+  let customRange: { start: Date; end: Date } | undefined
+  if (from && to) {
+    try {
+      customRange = getCustomBounds(from, to)
+    } catch {
+      return jsonError('Rango de fechas inválido', 400, {
+        code: 'FINANCE_CUSTOM_RANGE_INVALID',
+        requestId: access.context.requestId
+      })
+    }
+  }
+
   try {
-    const dashboard = await getFinanceDashboard(periodParam)
+    const dashboard = await getFinanceDashboard(periodParam, customRange)
     return jsonOk({
       success: true,
       ...dashboard

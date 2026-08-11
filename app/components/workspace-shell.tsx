@@ -13,37 +13,109 @@ type WorkspaceShellProps = {
   children: ReactNode
 }
 
-type NavItem = {
+type NavLeaf = {
   href: string
   label: string
-  section: 'pos' | 'operations' | 'inventory' | 'finance' | 'caja'
   iconSrc: string
   adminOnly?: boolean
+  cashierHidden?: boolean
 }
+
+type NavGroup = {
+  id: string
+  label: string
+  href?: string
+  iconSrc: string
+  adminOnly?: boolean
+  cashierHidden?: boolean
+  children?: NavLeaf[]
+}
+
+const navTree: NavGroup[] = [
+  {
+    id: 'pos',
+    label: 'POS',
+    href: '/pos',
+    iconSrc: '/icons/nav/pos.png'
+  },
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    href: '/admin',
+    iconSrc: '/icons/nav/dashboard.png',
+    adminOnly: true
+  },
+  {
+    id: 'bitacora',
+    label: 'Bitácora',
+    href: '/bitacora',
+    iconSrc: '/icons/nav/bitacora.png'
+  },
+  {
+    id: 'inventarios',
+    label: 'Inventarios',
+    href: '/inventario',
+    iconSrc: '/icons/nav/inventory.png',
+    children: [
+      {
+        href: '/inventario/merma-caducidad',
+        label: 'Merma y Caducidad',
+        iconSrc: '/icons/nav/adjust.png'
+      },
+      {
+        href: '/inventario?shortcut=ajuste',
+        label: 'Ajuste rápido',
+        iconSrc: '/icons/nav/adjust.png'
+      }
+    ]
+  },
+  {
+    id: 'finanzas',
+    label: 'Finanzas',
+    href: '/finanzas',
+    iconSrc: '/icons/nav/finance.png',
+    adminOnly: true,
+    children: [
+      { href: '/finanzas/periodos', label: 'Periodos', iconSrc: '/icons/nav/finance.png' },
+      { href: '/finanzas/fondos', label: 'Fondos activo', iconSrc: '/icons/nav/finance.png' },
+      { href: '/finanzas/pasivo', label: 'Pasivo corriente', iconSrc: '/icons/nav/finance.png' },
+      {
+        href: '/finanzas/compras',
+        label: 'Compras y Proveedores',
+        iconSrc: '/icons/nav/finance.png'
+      },
+      {
+        href: '/finanzas/promociones',
+        label: 'Descuentos y promociones',
+        iconSrc: '/icons/nav/finance.png'
+      }
+    ]
+  },
+  {
+    id: 'configuracion',
+    label: 'Configuración',
+    href: '/configuracion',
+    iconSrc: '/icons/nav/operations.png',
+    adminOnly: true,
+    children: [
+      {
+        href: '/configuracion?tab=cajeros',
+        label: 'Cajeros',
+        iconSrc: '/icons/nav/adjust.png',
+        adminOnly: true
+      },
+      {
+        href: '/configuracion?tab=turno',
+        label: 'Turno / Corte',
+        iconSrc: '/icons/nav/pos.png'
+      }
+    ]
+  }
+]
 
 type ParsedNavHref = {
   pathname: string
   searchParams: URLSearchParams
-}
-
-const navItems: NavItem[] = [
-  { href: '/caja', label: 'Turno / Corte', section: 'caja', iconSrc: '/icons/nav/pos.png' },
-  { href: '/pos', label: 'Punto de venta', section: 'pos', iconSrc: '/icons/nav/pos.png' },
-  { href: '/admin', label: 'Dashboard operativo', section: 'operations', iconSrc: '/icons/nav/dashboard.png' },
-  { href: '/admin/cajeros', label: 'Cajeros', section: 'operations', iconSrc: '/icons/nav/adjust.png', adminOnly: true },
-  { href: '/operaciones', label: 'Operaciones', section: 'operations', iconSrc: '/icons/nav/operations.png' },
-  { href: '/inventario', label: 'Inventarios', section: 'inventory', iconSrc: '/icons/nav/inventory.png' },
-  { href: '/inventario?shortcut=ajuste', label: 'Ajuste rápido', section: 'inventory', iconSrc: '/icons/nav/adjust.png' },
-  { href: '/bitacora', label: 'Bitácora', section: 'operations', iconSrc: '/icons/nav/bitacora.png' },
-  { href: '/finanzas', label: 'Finanzas', section: 'finance', iconSrc: '/icons/nav/finance.png' }
-]
-
-const sectionTitle: Record<NavItem['section'], string> = {
-  caja: 'Caja',
-  pos: 'POS',
-  operations: 'Operaciones',
-  inventory: 'Inventarios',
-  finance: 'Finanzas'
 }
 
 const parseNavHref = (href: string): ParsedNavHref => {
@@ -54,25 +126,48 @@ const parseNavHref = (href: string): ParsedNavHref => {
   }
 }
 
-const doesNavItemMatchRoute = (item: NavItem, pathname: string, currentSearchParams: URLSearchParams) => {
-  const parsedItemHref = parseNavHref(item.href)
-  if (parsedItemHref.pathname !== pathname) return false
+const doesHrefMatchRoute = (href: string, pathname: string, currentSearchParams: URLSearchParams) => {
+  const parsed = parseNavHref(href)
+  if (parsed.pathname !== pathname) {
+    if (pathname.startsWith(`${parsed.pathname}/`) && !Array.from(parsed.searchParams.keys()).length) {
+      return false
+    }
+    return false
+  }
 
-  const expectedEntries = Array.from(parsedItemHref.searchParams.entries())
-  if (!expectedEntries.length) return true
+  const expectedEntries = Array.from(parsed.searchParams.entries())
+  if (!expectedEntries.length) {
+    const hasShortcut = currentSearchParams.has('shortcut') || currentSearchParams.has('tab')
+    if (hasShortcut && (pathname === '/inventario' || pathname === '/configuracion')) {
+      return false
+    }
+    return true
+  }
 
   return expectedEntries.every(([key, value]) => currentSearchParams.get(key) === value)
 }
 
-const getActiveNavItemHref = (items: NavItem[], pathname: string, currentSearchParams: URLSearchParams) => {
-  const sortedBySpecificity = [...items].sort((leftItem, rightItem) => {
-    const rightSpecificity = Array.from(parseNavHref(rightItem.href).searchParams.keys()).length
-    const leftSpecificity = Array.from(parseNavHref(leftItem.href).searchParams.keys()).length
-    return rightSpecificity - leftSpecificity
+const flattenNavHrefs = (groups: NavGroup[]) => {
+  const hrefs: string[] = []
+  for (const group of groups) {
+    if (group.href) hrefs.push(group.href)
+    for (const child of group.children || []) {
+      hrefs.push(child.href)
+    }
+  }
+  return hrefs
+}
+
+const getActiveHref = (hrefs: string[], pathname: string, currentSearchParams: URLSearchParams) => {
+  const sorted = [...hrefs].sort((left, right) => {
+    const rightScore =
+      Array.from(parseNavHref(right).searchParams.keys()).length * 10 + parseNavHref(right).pathname.length
+    const leftScore =
+      Array.from(parseNavHref(left).searchParams.keys()).length * 10 + parseNavHref(left).pathname.length
+    return rightScore - leftScore
   })
 
-  const activeItem = sortedBySpecificity.find(item => doesNavItemMatchRoute(item, pathname, currentSearchParams))
-  return activeItem?.href ?? null
+  return sorted.find(href => doesHrefMatchRoute(href, pathname, currentSearchParams)) ?? null
 }
 
 const POS_DRAFT_COOKIE = 'pos_draft'
@@ -110,7 +205,7 @@ const formatCartCount = (value: number) => {
   return String(Math.round(value))
 }
 
-const handleNavKeyDown = (event: KeyboardEvent<HTMLAnchorElement>) => {
+const handleNavKeyDown = (event: KeyboardEvent<HTMLAnchorElement | HTMLButtonElement>) => {
   if (event.key !== 'Enter' && event.key !== ' ') return
   if (event.key === ' ') event.preventDefault()
 }
@@ -119,6 +214,7 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
   const [expanded, setExpanded] = useState(true)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mobileOpenRouteKey, setMobileOpenRouteKey] = useState<string | null>(null)
+  const [manualOpenGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [cashierGate, setCashierGate] = useState<'ready' | 'on_shift' | 'must_logout' | null>(
     role === 'cashier' ? null : 'ready'
   )
@@ -127,23 +223,57 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
   const searchParams = useSearchParams()
   const routeKey = `${pathname}?${searchParams.toString()}`
   const postCutLock = role === 'cashier' && cashierGate === 'must_logout'
-  const visibleItems = navItems.filter(item => {
-    if (postCutLock) return false
-    if (item.adminOnly && role !== 'admin') return false
-    if (role === 'cashier' && (item.section === 'finance' || item.href === '/admin' || item.href === '/admin/cajeros')) {
-      return false
-    }
-    return true
-  })
-  const activeItemHref = useMemo(
-    () => getActiveNavItemHref(visibleItems, pathname, new URLSearchParams(searchParams.toString())),
-    [visibleItems, pathname, searchParams]
+
+  const visibleGroups = useMemo(() => {
+    return navTree
+      .filter(group => {
+        if (postCutLock) return false
+        if (group.adminOnly && role !== 'admin') return false
+        if (group.cashierHidden && role === 'cashier') return false
+        return true
+      })
+      .map(group => ({
+        ...group,
+        children: (group.children || []).filter(child => {
+          if (child.adminOnly && role !== 'admin') return false
+          if (child.cashierHidden && role === 'cashier') return false
+          return true
+        })
+      }))
+  }, [role, postCutLock])
+
+  const allHrefs = useMemo(() => flattenNavHrefs(visibleGroups), [visibleGroups])
+  const activeHref = useMemo(
+    () => getActiveHref(allHrefs, pathname, new URLSearchParams(searchParams.toString())),
+    [allHrefs, pathname, searchParams]
   )
-  const currentModule = visibleItems.find(item => item.href === activeItemHref)?.label || 'Sistema'
+
+  const currentModule = useMemo(() => {
+    for (const group of visibleGroups) {
+      if (group.href === activeHref) return group.label
+      const child = group.children?.find(item => item.href === activeHref)
+      if (child) return child.label
+    }
+    if (pathname.startsWith('/caja')) return 'Turno / Corte'
+    return 'Sistema'
+  }, [visibleGroups, activeHref, pathname])
+
   const canAccessPos = (role === 'admin' || role === 'cashier') && !postCutLock
   const [universalCartCount, setUniversalCartCount] = useState(0)
   const isMobileDrawerOpen = mobileOpen && mobileOpenRouteKey === routeKey
   const isSidebarExpanded = isMobileDrawerOpen || expanded
+
+  const openGroups = useMemo(() => {
+    const computed = { ...manualOpenGroups }
+    for (const group of visibleGroups) {
+      const childActive = group.children?.some(child => child.href === activeHref)
+      const parentActive = group.href === activeHref || pathname.startsWith(`${group.href}/`)
+      if (childActive || parentActive) {
+        computed[group.id] = true
+      }
+    }
+    return computed
+  }, [manualOpenGroups, visibleGroups, activeHref, pathname])
 
   useEffect(() => {
     if (role !== 'cashier') return
@@ -211,53 +341,142 @@ export const WorkspaceShell = ({ username, role, children }: WorkspaceShellProps
     setMobileOpen(false)
   }
 
+  const handleToggleGroup = (groupId: string) => {
+    setOpenGroups(current => ({ ...current, [groupId]: !current[groupId] }))
+  }
+
+  const renderLeafLink = (item: NavLeaf, nested: boolean) => {
+    const active = item.href === activeHref
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        aria-label={item.label}
+        aria-current={active ? 'page' : undefined}
+        tabIndex={0}
+        onClick={handleCloseMobileNav}
+        onKeyDown={handleNavKeyDown}
+        className={`group flex items-center gap-2.5 rounded-[6px] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40 ${
+          nested ? 'ml-2' : ''
+        } ${
+          active
+            ? 'border border-[rgba(62,207,142,0.3)] bg-[rgba(62,207,142,0.12)] text-[#fafafa]'
+            : 'border border-transparent text-[#b4b4b4] hover:border-[#363636] hover:bg-[#1c1c1c] hover:text-[#fafafa]'
+        }`}
+      >
+        <Image
+          src={item.iconSrc}
+          alt=''
+          width={18}
+          height={18}
+          aria-hidden='true'
+          className={`h-[18px] w-[18px] shrink-0 object-contain transition ${
+            active ? 'opacity-100' : 'opacity-75'
+          }`}
+        />
+        {isSidebarExpanded ? <span className='truncate'>{item.label}</span> : null}
+      </Link>
+    )
+  }
+
   const renderNavigation = () => (
-    <nav className='flex-1 space-y-5 overflow-y-auto overscroll-contain px-3 py-4' aria-label='Navegación principal del sistema'>
-      {(Object.keys(sectionTitle) as Array<NavItem['section']>).map(section => {
-        const items = visibleItems.filter(item => item.section === section)
-        if (!items.length) return null
+    <nav className='flex-1 space-y-1 overflow-y-auto overscroll-contain px-3 py-4' aria-label='Navegación principal del sistema'>
+      {visibleGroups.map(group => {
+        const hasChildren = Boolean(group.children?.length)
+        const isOpen = openGroups[group.id] ?? false
+        const groupActive =
+          group.href === activeHref || group.children?.some(child => child.href === activeHref)
+
+        if (!hasChildren && group.href) {
+          return (
+            <div key={group.id} className='space-y-1'>
+              {renderLeafLink(
+                {
+                  href: group.href,
+                  label: group.label,
+                  iconSrc: group.iconSrc,
+                  adminOnly: group.adminOnly
+                },
+                false
+              )}
+            </div>
+          )
+        }
 
         return (
-          <section key={section} className='space-y-1'>
-            {isSidebarExpanded ? (
-              <p className='px-2 font-mono text-[11px] font-normal uppercase tracking-[1.2px] text-[#898989]'>
-                {sectionTitle[section]}
-              </p>
-            ) : null}
-            {items.map(item => {
-              const active = item.href === activeItemHref
-              return (
+          <div key={group.id} className='space-y-1'>
+            <div className='flex items-center gap-1'>
+              {group.href ? (
                 <Link
-                  key={item.href}
-                  href={item.href}
-                  aria-label={item.label}
-                  aria-current={active ? 'page' : undefined}
+                  href={group.href}
+                  aria-label={group.label}
+                  aria-current={group.href === activeHref ? 'page' : undefined}
                   tabIndex={0}
                   onClick={handleCloseMobileNav}
                   onKeyDown={handleNavKeyDown}
-                  className={`group flex items-center gap-2.5 rounded-[6px] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40 ${
-                    active
+                  className={`flex min-w-0 flex-1 items-center gap-2.5 rounded-[6px] px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40 ${
+                    groupActive
                       ? 'border border-[rgba(62,207,142,0.3)] bg-[rgba(62,207,142,0.12)] text-[#fafafa]'
                       : 'border border-transparent text-[#b4b4b4] hover:border-[#363636] hover:bg-[#1c1c1c] hover:text-[#fafafa]'
                   }`}
                 >
                   <Image
-                    src={item.iconSrc}
+                    src={group.iconSrc}
                     alt=''
                     width={18}
                     height={18}
                     aria-hidden='true'
-                    className={`h-[18px] w-[18px] shrink-0 object-contain transition ${
-                      active ? 'opacity-100' : 'opacity-75'
-                    }`}
+                    className='h-[18px] w-[18px] shrink-0 object-contain opacity-90'
                   />
-                  {isSidebarExpanded ? <span className='truncate'>{item.label}</span> : null}
+                  {isSidebarExpanded ? <span className='truncate'>{group.label}</span> : null}
                 </Link>
-              )
-            })}
-          </section>
+              ) : (
+                <span className='flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2 text-sm text-[#b4b4b4]'>
+                  <Image
+                    src={group.iconSrc}
+                    alt=''
+                    width={18}
+                    height={18}
+                    aria-hidden='true'
+                    className='h-[18px] w-[18px] shrink-0 object-contain'
+                  />
+                  {isSidebarExpanded ? <span className='truncate'>{group.label}</span> : null}
+                </span>
+              )}
+              {isSidebarExpanded && hasChildren ? (
+                <button
+                  type='button'
+                  aria-label={isOpen ? `Contraer ${group.label}` : `Expandir ${group.label}`}
+                  aria-expanded={isOpen}
+                  onClick={() => handleToggleGroup(group.id)}
+                  onKeyDown={handleNavKeyDown}
+                  className='rounded-[6px] border border-transparent px-2 py-2 text-xs text-[#898989] hover:border-[#363636] hover:bg-[#1c1c1c] hover:text-[#fafafa] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3ecf8e]/40'
+                >
+                  {isOpen ? '▾' : '▸'}
+                </button>
+              ) : null}
+            </div>
+            {isSidebarExpanded && hasChildren && isOpen ? (
+              <div className='space-y-1 border-l border-[#2e2e2e] pl-2'>
+                {group.children?.map(child => renderLeafLink(child, true))}
+              </div>
+            ) : null}
+          </div>
         )
       })}
+
+      {role === 'cashier' && !postCutLock ? (
+        <div className='pt-3'>
+          {renderLeafLink(
+            {
+              href: '/caja',
+              label: 'Turno / Corte',
+              iconSrc: '/icons/nav/pos.png'
+            },
+            false
+          )}
+        </div>
+      ) : null}
     </nav>
   )
 

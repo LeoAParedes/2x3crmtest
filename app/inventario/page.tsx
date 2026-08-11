@@ -1,3 +1,4 @@
+import { Suspense } from 'react'
 import { redirect } from 'next/navigation'
 
 import { InventoryClient } from '@/app/inventario/inventory-client'
@@ -22,7 +23,9 @@ export default async function InventarioPage({ searchParams }: InventarioPagePro
 
   return (
     <WorkspaceShell username={actor.username} role={actor.role}>
-      <InventoryClient role={actor.role} />
+      <Suspense fallback={<main className='px-4 py-8 text-sm text-slate-600'>Cargando inventario…</main>}>
+        <InventoryClient role={actor.role} />
+      </Suspense>
     </WorkspaceShell>
   )
 }

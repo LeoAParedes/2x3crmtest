@@ -95,6 +95,26 @@ export const getAllPeriodBounds = (now = new Date(), timeZone = FINANCE_TIME_ZON
   month: getPeriodBounds('month', now, timeZone)
 })
 
+export const getCustomBounds = (fromDate: string, toDate: string, timeZone = FINANCE_TIME_ZONE) => {
+  const fromParts = fromDate.split('-').map(Number)
+  const toParts = toDate.split('-').map(Number)
+  if (fromParts.length !== 3 || toParts.length !== 3) {
+    throw new Error('INVALID_CUSTOM_RANGE')
+  }
+  const [fromYear, fromMonth, fromDay] = fromParts
+  const [toYear, toMonth, toDay] = toParts
+  if (![fromYear, fromMonth, fromDay, toYear, toMonth, toDay].every(Number.isFinite)) {
+    throw new Error('INVALID_CUSTOM_RANGE')
+  }
+
+  const start = zonedWallTimeToUtc(fromYear, fromMonth, fromDay, 0, 0, 0, timeZone)
+  const end = zonedWallTimeToUtc(toYear, toMonth, toDay, 23, 59, 59, timeZone)
+  if (start.getTime() > end.getTime()) {
+    throw new Error('INVALID_CUSTOM_RANGE_ORDER')
+  }
+  return { start, end }
+}
+
 export const formatBucketKey = (date: Date, period: FinancePeriod, timeZone = FINANCE_TIME_ZONE) => {
   if (period === 'day') {
     return new Intl.DateTimeFormat('es-MX', {

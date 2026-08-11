@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 
 import { WorkspaceShell } from '@/app/components/workspace-shell'
 import { PosClient } from '@/app/pos/pos-client'
+import { PosOpenShift } from '@/app/pos/pos-open-shift'
 import { getCashierRuntimeState } from '@/src/lib/caja/cash-session-service'
 import { getAuthenticatedActor } from '@/src/lib/security/api-auth'
 
@@ -13,13 +14,14 @@ export default async function PosPage() {
   if (actor.role === 'cashier' && runtime.gate === 'must_logout') {
     redirect('/caja')
   }
-  if (!runtime.openSession) {
-    redirect('/caja')
-  }
 
   return (
     <WorkspaceShell username={actor.username} role={actor.role}>
-      <PosClient cashierUsername={actor.username} />
+      {runtime.openSession ? (
+        <PosClient cashierUsername={actor.username} />
+      ) : (
+        <PosOpenShift username={actor.username} />
+      )}
     </WorkspaceShell>
   )
 }

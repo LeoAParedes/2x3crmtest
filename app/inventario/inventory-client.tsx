@@ -323,7 +323,6 @@ const getSortIndicator = (isActive: boolean, direction: SortDirection) => {
 export const InventoryClient = ({ role }: InventoryClientProps) => {
   const searchParams = useSearchParams()
   const shortcut = searchParams.get('shortcut')
-  const shouldOpenAdjustmentsByShortcut = shortcut === 'ajuste'
   const [items, setItems] = useState<InventoryItem[]>([])
   const [query, setQuery] = useState('')
   const [searchField, setSearchField] = useState<InventorySearchField>('productName')
@@ -339,9 +338,13 @@ export const InventoryClient = ({ role }: InventoryClientProps) => {
   const [isLowStockAlertsOpen, setIsLowStockAlertsOpen] = useState(false)
   const [lowStockAlerts, setLowStockAlerts] = useState<InventoryItem[]>([])
   const [loadingLowStockAlerts, setLoadingLowStockAlerts] = useState(false)
-  const [activePanel, setActivePanel] = useState<'inventory' | 'adjustments'>(
-    shouldOpenAdjustmentsByShortcut ? 'adjustments' : 'inventory'
-  )
+  const [activePanelOverride, setActivePanelOverride] = useState<'inventory' | 'adjustments' | null>(null)
+  const activePanel: 'inventory' | 'adjustments' =
+    activePanelOverride ?? (shortcut === 'ajuste' ? 'adjustments' : 'inventory')
+
+  const setActivePanel = (next: 'inventory' | 'adjustments') => {
+    setActivePanelOverride(next)
+  }
   const [loadingAdjustments, setLoadingAdjustments] = useState(false)
   const [adjustmentsSnapshot, setAdjustmentsSnapshot] = useState<InventoryAdjustmentsResponse | null>(null)
   const [adjustmentResult, setAdjustmentResult] = useState<string | null>(null)

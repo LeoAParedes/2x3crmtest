@@ -219,10 +219,13 @@ const buildTopProducts = async (start: Date, end: Date, limit = 10) => {
     })
 }
 
-export const getFinanceDashboard = async (period: FinancePeriod) => {
+export const getFinanceDashboard = async (
+  period: FinancePeriod,
+  customRange?: { start: Date; end: Date }
+) => {
   const now = new Date()
   const allBounds = getAllPeriodBounds(now)
-  const selected = getPeriodBounds(period, now)
+  const selected = customRange || getPeriodBounds(period, now)
 
   const [daySales, weekSales, monthSales, periodIncome, periodExpenses, salesSeries, cashFlowSeries, topProducts] =
     await Promise.all([
